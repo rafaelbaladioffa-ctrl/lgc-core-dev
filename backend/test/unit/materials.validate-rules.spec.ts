@@ -44,22 +44,18 @@ describe('MaterialsService.validateRules', () => {
     expect(rulesOf({ requiresAuthorization: true, authorizationBy: 'HSE' })).not.toThrow();
   });
 
-  // BUG conhecido (ver relatório): create valida só o DTO, sem os defaults do banco
-  // (exitMethod = FIFO). Material serial criado sem exitMethod é aceito e, depois,
-  // qualquer PATCH falha porque o merged herda FIFO. `it.fails` documenta o esperado e
-  // mantém a suíte verde enquanto o bug existe; ao corrigir, troque por `it`.
-  it.fails('BUG: create de material serial sem exitMethod deveria ser recusado', async () => {
+  // Corrigido: create assume SERIE_ESPECIFICA para item seriado sem exitMethod (default FIFO do banco quebraria o PATCH).
+  it('create de material serial sem exitMethod assume SERIE_ESPECIFICA', async () => {
     const prisma = {
       unitOfMeasure: { findUnique: vi.fn().mockResolvedValue({ id: 'u', active: true }) },
       $transaction: vi.fn(),
     };
     const service = new MaterialsService(prisma as never, { record: vi.fn() } as never);
     const user = { userId: 'x', permissions: [] } as unknown as AuthenticatedUser;
-    await expect(
-      service.create(
+    await service.create(
         { code: 'SER-0001', shortDescription: 'Teste', category: 'Teste', type: 'ATIVO', stockUomId: '00000000-0000-4000-8000-000000000000', serialControlled: true } as never,
         user,
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
+    );
+    expect(prisma.$transaction).toHaveBeenCalled(); // passou pelas regras (não lançou BadRequest)
   });
 });

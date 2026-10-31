@@ -66,7 +66,9 @@ export class MaterialsService {
     return this.prisma.materialVersion.findMany({ where: { materialId: id }, orderBy: { version: 'desc' } });
   }
 
-  async create(dto: CreateMaterialDto, user: AuthenticatedUser) {
+  async create(input: CreateMaterialDto, user: AuthenticatedUser) {
+    // Item seriado sai por série específica; sem isso o default FIFO do banco quebraria qualquer PATCH posterior.
+    const dto = { ...input, exitMethod: input.exitMethod ?? (input.serialControlled ? ('SERIE_ESPECIFICA' as const) : undefined) };
     this.validateRules(dto);
     const uom = await this.prisma.unitOfMeasure.findUnique({ where: { id: dto.stockUomId } });
     if (!uom || !uom.active) throw new BadRequestException('Unidade de estoque inexistente ou inativa.');

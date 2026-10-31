@@ -192,9 +192,11 @@ describe('Sprint 1 — casos de borda', () => {
       expect(m.body).toMatchObject({ lotControlled: false, expiryControlled: false, serialControlled: false, exitMethod: 'FIFO', criticality: 'C', status: 'ATIVO' });
     });
 
-    it.fails('BUG: material serial criado sem exitMethod deveria ser recusado (e não quebrar o PATCH depois)', async () => {
-      const serial = await createMaterial(`EDGE-${suffix}-SER1`, { serialControlled: true }).expect(400);
-      expect(serial.body.message).toMatch(/SERIE_ESPECIFICA/);
+    it('material serial criado sem exitMethod assume SERIE_ESPECIFICA e aceita PATCH depois', async () => {
+      const serial = await createMaterial(`EDGE-${suffix}-SER1`, { serialControlled: true }).expect(201);
+      expect(serial.body.exitMethod).toBe('SERIE_ESPECIFICA');
+      await request(app.getHttpServer()).patch(`/api/v1/materials/${serial.body.id}`).set('Authorization', `Bearer ${tokenFor(['admin'])}`).send({ technicalDescription: 'ok' }).expect(200);
+      await createMaterial(`EDGE-${suffix}-SER2`, { serialControlled: true, exitMethod: 'FIFO' }).expect(400);
     });
   });
 
