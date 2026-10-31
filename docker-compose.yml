@@ -1,0 +1,36 @@
+services:
+  # Banco PRÓPRIO do satélite Logística — nunca compartilhado com o banco do Axis.
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: logistica
+      POSTGRES_PASSWORD: logistica
+      POSTGRES_DB: axis_logistica
+    ports:
+      - "5433:5432"
+    volumes:
+      - logistica_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U logistica -d axis_logistica"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://logistica:logistica@postgres:5432/axis_logistica?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3100:3100"
+    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/main.js"
+
+volumes:
+  logistica_postgres_data:
