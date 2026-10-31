@@ -1,5 +1,5 @@
-import { Type } from 'class-transformer';
-import { ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsInt, IsLatitude, IsLongitude, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ArrayMinSize, IsArray, ValidateIf, IsBoolean, IsDateString, IsEnum, IsInt, IsLatitude, IsLongitude, IsNumber, IsOptional, IsPositive, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { DeliveryOutcome, PickingTaskStatus } from '@prisma/client';
 
 export class ReleasePickingDto {
@@ -21,8 +21,12 @@ export class ScanDto {
   @IsOptional() @IsUUID('all', { message: 'Lote inválido.' }) lotId?: string;
   @IsOptional() @IsUUID('all', { message: 'Número de série inválido.' }) serialId?: string;
 
+  @ValidateIf((o: ScanDto) => !o.notFound)
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 6 }, { message: 'Quantidade inválida.' }) @IsPositive({ message: 'A quantidade deve ser maior que zero.' })
   quantity!: number;
+
+  /** Item não encontrado no endereço: encerra com divergência e nada separado (exige motivo). */
+  @IsOptional() @IsBoolean() notFound?: boolean;
 
   /** Encerra o item com o que foi separado (falta). Exige motivo (9.4.4). */
   @IsOptional() @IsBoolean() closeShort?: boolean;
@@ -69,8 +73,8 @@ export class ConfirmDeliveryDto {
   @IsString({ message: 'Informe o recebedor.' }) @MinLength(2, { message: 'O nome do recebedor deve ter ao menos 2 caracteres.' }) @MaxLength(120) receiverName!: string;
   @IsOptional() @IsString() @MaxLength(60) receiverAxisId?: string;
   @IsOptional() @IsDateString({}, { message: 'Data da entrega inválida (ISO 8601).' }) deliveredAt?: string;
-  @IsOptional() @Type(() => Number) @IsLatitude({ message: 'Latitude inválida.' }) latitude?: number;
-  @IsOptional() @Type(() => Number) @IsLongitude({ message: 'Longitude inválida.' }) longitude?: number;
+  @IsOptional() @Transform(({ obj, key, value }) => (obj[key] === '' || obj[key] === null ? undefined : value)) @Type(() => Number) @IsLatitude({ message: 'Latitude inválida.' }) latitude?: number;
+  @IsOptional() @Transform(({ obj, key, value }) => (obj[key] === '' || obj[key] === null ? undefined : value)) @Type(() => Number) @IsLongitude({ message: 'Longitude inválida.' }) longitude?: number;
   @IsOptional() @IsString() @MaxLength(300) signatureRef?: string;
   @IsOptional() @IsString() @MaxLength(300) photoRef?: string;
   @IsOptional() @IsString() @MaxLength(500) notes?: string;

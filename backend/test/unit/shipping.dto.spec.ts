@@ -118,9 +118,10 @@ describe('ConfirmDeliveryDto — datas e coordenadas', () => {
 
   // Bug: class-transformer converte '' em 0 (Number('') === 0), e 0 é uma latitude válida.
   // Um campo vazio viraria a coordenada (0, 0) e seria gravada como comprovante.
-  it.fails('BUG: latitude vazia não pode virar 0 (Null Island) no comprovante — reproduz: latitude: "" → 0 → aceito', async () => {
+  it('latitude vazia não vira 0 (Null Island): é tratada como ausente', async () => {
     const r = await check(ConfirmDeliveryDto, { ...deliveryBase, latitude: '' });
-    expect(r.failing).toContain('latitude');
+    expect(r.failing).not.toContain('latitude');
+    expect((r.dto as { latitude?: number }).latitude).toBeUndefined();
   });
 });
 

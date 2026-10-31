@@ -114,12 +114,18 @@ export class ShippingService {
 
       if (dto.locationId !== item.locationId) throw new UnprocessableEntityException(problem('Endereço lido diferente do endereço de separação.', 'INVALID_LOCATION'));
 
+      if (dto.notFound) {
+        if (!dto.divergenceReason) throw new BadRequestException('Divergência exige motivo (divergenceReason).');
+        return tx.pickingItem.update({ where: { id: item.id }, data: { status: 'DIVERGENTE', divergenceReason: dto.divergenceReason } });
+      }
       const material = await tx.material.findUniqueOrThrow({ where: { id: item.materialId }, include: { barcodes: true } });
       const readOk = dto.materialId === material.id || (dto.barcode && (dto.barcode === material.code || material.barcodes.some((b) => b.code === dto.barcode)));
       if (!readOk) throw new UnprocessableEntityException('O item lido não corresponde ao material da tarefa.');
       if (item.lotId && dto.lotId !== item.lotId) throw new UnprocessableEntityException('Lote lido diferente do lote reservado.');
 
-      const qty = D(dto.quantity);
+      // Código de barras de embalagem converte pelo fator (ex.: 1 caixa = 12 UN).
+      const packBarcode = !dto.materialId && dto.barcode && dto.barcode !== material.code ? material.barcodes.find((b) => b.code === dto.barcode) : undefined;
+      const qty = D(dto.quantity).times(packBarcode?.factor ?? 1);
       const remaining = item.quantityPlanned.minus(item.quantityPicked);
       if (qty.gt(remaining)) throw new UnprocessableEntityException(`Quantidade acima do planejado (faltam ${remaining.toString()}).`);
       const uom = await tx.unitOfMeasure.findUniqueOrThrow({ where: { id: material.stockUomId } });
@@ -223,6 +229,17 @@ export class ShippingService {
         if (!got.equals(pi.quantityPicked)) throw new UnprocessableEntityException(`Item ${pi.id}: embalado ${got.toString()} de ${pi.quantityPicked.toString()} separado(s).`);
       }
       for (const id of packed.keys()) if (task.items.find((x) => x.id === id)!.quantityPicked.equals(0)) throw new UnprocessableEntityException('Item sem separação não pode ser embalado.');
+
+      for (const [pid, q] of packed) {
+        const pi = task.items.find((x) => x.id === pid)!;
+        const mat = await tx.material.findUniqueOrThrow({ where: { id: pi.materialId }, include: { stockUom: true } });
+        if (q.decimalPlaces() > mat.stockUom.precision) throw new UnprocessableEntityException(problem(`A unidade ${mat.stockUom.code} aceita no máximo ${mat.stockUom.precision} casa(s) decimal(is).`, 'UNIT_CONVERSION_ERROR'));
+      }
+      for (const p of dto.packages) for (const it of p.items) {
+        const pi = task.items.find((x) => x.id === it.pickingItemId)!;
+        const mat = await tx.material.findUniqueOrThrow({ where: { id: pi.materialId }, include: { stockUom: true } });
+        if (D(it.quantity).decimalPlaces() > mat.stockUom.precision) throw new UnprocessableEntityException(problem(`A unidade ${mat.stockUom.code} aceita no máximo ${mat.stockUom.precision} casa(s) decimal(is).`, 'UNIT_CONVERSION_ERROR'));
+      }
 
       const shipment = await tx.shipment.create({ data: { orderId, destination: dto.destination, createdBy: user.userId } });
       for (const p of dto.packages) {

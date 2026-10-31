@@ -174,7 +174,7 @@ describe('Sprint 4 — casos de borda extras', () => {
 
     // Bug: MaterialBarcode.factor (embalagem = 12) é ignorado na leitura. Uma caixa lida com quantity 1
     // conta 1 unidade, e não 12. Reprodução: estoque 12 UN, código de embalagem fator 12, scan barcode quantity 1.
-    it.fails('BUG: código de embalagem deve converter pelo fator (1 caixa = 12 UN); hoje conta 1', async () => {
+    it('código de embalagem converte pelo fator (1 caixa = 12 UN)', async () => {
       const m = await mk('PKGF');
       await prisma.materialBarcode.create({ data: { materialId: m, code: `PKGF-${sfx}`, kind: 'EMBALAGEM', factor: 12 } });
       await stockIn(m, 12);
@@ -228,11 +228,13 @@ describe('Sprint 4 — casos de borda extras', () => {
       expect(await orderStatus(o.id)).toBe('EM_SEPARACAO');
     });
 
-    it.fails('BUG: todos os itens zerados devem levar a ordem a DIVERGENCIA — hoje não há caminho pela API (ver DTO quantity > 0) e a ordem fica em EM_SEPARACAO', async () => {
+    it('item não encontrado no endereço (notFound) em todos os itens leva a ordem a DIVERGENCIA', async () => {
       const m = await mk('ZERO');
       await stockIn(m, 2);
       const o = await orderWith([{ materialCode: `S4E-ZERO-${sfx}`, quantity: 2 }]);
       const t = await liberarEIniciar(o.id);
+      await task(t.id, 'scan', { pickingItemId: t.items[0].id, locationId: t.items[0].locationId, notFound: true }).expect(400); // sem motivo
+      await task(t.id, 'scan', { pickingItemId: t.items[0].id, locationId: t.items[0].locationId, notFound: true, divergenceReason: 'Não está na prateleira' }).expect(200);
       await task(t.id, 'complete').expect(200);
       expect(await orderStatus(o.id)).toBe('DIVERGENCIA');
     });
@@ -275,7 +277,7 @@ describe('Sprint 4 — casos de borda extras', () => {
     // Bug: a embalagem não valida a casa decimal da unidade (o scan valida; o pack não). Com UN, dois
     // volumes de 2,5 somam 5 e são aceitos, gerando 2,5 unidade por volume.
     // Reprodução: separar 5 UN → pack com [{items:[{pi, 2.5}]}, {items:[{pi, 2.5}]}] → hoje 201.
-    it.fails('BUG: embalagem de UN não aceita quantidade fracionada (2,5 + 2,5 hoje passa; deveria 422)', async () => {
+    it('embalagem de UN não aceita quantidade fracionada (2,5 + 2,5 → 422)', async () => {
       const m = await mk('FRAC');
       await stockIn(m, 5);
       const o = await orderWith([{ materialCode: `S4E-FRAC-${sfx}`, quantity: 5 }]);
@@ -299,7 +301,8 @@ describe('Sprint 4 — casos de borda extras', () => {
     // Bug: após RECUSADA a ordem fica em DIVERGENCIA, e pack exige SEPARADA — a checagem
     // "shipment.status != RECUSADA" é inalcançável e não há como reembalar/reentregar.
     // Reprodução: separar → embalar → despachar → confirm RECUSADA (notes) → pack de novo → hoje 409.
-    it.fails('BUG: após RECUSADA deveria ser possível nova embalagem (pack passa a aceitar); hoje a ordem está em DIVERGENCIA e pack responde 409', async () => {
+    // Decisão: após RECUSADA a ordem fica em DIVERGENCIA e exige tratamento (cancelar/devolver, Sprint 6); não reembala sozinha.
+    it('após RECUSADA a ordem exige tratamento e não aceita nova embalagem (409)', async () => {
       const m = await mk('REP');
       await stockIn(m, 2);
       const o = await orderWith([{ materialCode: `S4E-REP-${sfx}`, quantity: 2 }]);
@@ -307,7 +310,7 @@ describe('Sprint 4 — casos de borda extras', () => {
       const sh = await embalarEDespachar(o.id, t.items);
       await confirm(sh.id, { outcome: 'RECUSADA', receiverName: 'Portaria', notes: 'Cliente recusou' }).expect(200);
       const again = await pack(o.id, [{ items: [{ pickingItemId: t.items[0].id, quantity: 2 }] }]);
-      expect(again.status).toBe(201);
+      expect(again.status).toBe(409);
     });
 
     it('dispatch e confirmação exigem shipment:execute (colaborador recebe 403)', async () => {
