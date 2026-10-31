@@ -549,6 +549,108 @@ model StockBalance {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 3 — Ordens de atendimento e reservas (seções 9.1, 10.1, 11)
+// ---------------------------------------------------------------------------
+
+enum FulfillmentStatus {
+  RECEBIDA
+  EM_ANALISE
+  RESERVADA
+  RESERVADA_PARCIAL
+  LIBERADA_SEPARACAO
+  EM_SEPARACAO
+  SEPARADA
+  EM_CONFERENCIA
+  PRONTA_EXPEDICAO
+  EXPEDIDA
+  ENTREGUE
+  ENCERRADA
+  AGUARDANDO_ESTOQUE
+  AGUARDANDO_INFORMACAO
+  BLOQUEADA
+  CANCELAMENTO_SOLICITADO
+  CANCELADA
+  DIVERGENCIA
+}
+
+enum ReservationStatus {
+  ATIVA
+  CONSUMIDA
+  LIBERADA
+  EXPIRADA
+}
+
+model FulfillmentOrder {
+  id                String            @id @default(uuid())
+  seq               Int               @unique @default(autoincrement())
+  axisRequestId     String            @map("axis_request_id")
+  requestVersion    Int               @default(1) @map("request_version")
+  sourceEventId     String?           @map("source_event_id")
+  status            FulfillmentStatus @default(RECEBIDA)
+  statusReason      String?           @map("status_reason")
+  warehouseId       String?           @map("warehouse_id")
+  projectAxisId     String?           @map("project_axis_id")
+  costCenterAxisId  String?           @map("cost_center_axis_id")
+  requesterAxisId   String?           @map("requester_axis_id")
+  recipientAxisId   String?           @map("recipient_axis_id")
+  neededBy          DateTime?         @map("needed_by") @db.Date
+  notes             String?
+  referenceWarnings Json              @default("[]") @map("reference_warnings")
+  createdBy         String            @map("created_by")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  items FulfillmentItem[]
+
+  @@unique([axisRequestId, requestVersion])
+  @@index([status])
+  @@index([requesterAxisId])
+  @@map("fulfillment_orders")
+}
+
+model FulfillmentItem {
+  id                  String   @id @default(uuid())
+  orderId             String   @map("order_id")
+  materialId          String   @map("material_id")
+  requestedMaterialId String   @map("requested_material_id") // preserva o SKU solicitado em substituições (11.11)
+  quantity            Decimal  @db.Decimal(18, 6)
+  uomId               String   @map("uom_id")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  order        FulfillmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([orderId])
+  @@index([materialId])
+  @@map("fulfillment_items")
+}
+
+/// Compromisso de estoque: soma em stock_balances.reserved_qty enquanto ATIVA.
+model Reservation {
+  id            String            @id @default(uuid())
+  itemId        String            @map("item_id")
+  materialId    String            @map("material_id")
+  balanceId     String            @map("balance_id")
+  locationId    String            @map("location_id")
+  lotId         String?           @map("lot_id")
+  quantity      Decimal           @db.Decimal(18, 6)
+  status        ReservationStatus @default(ATIVA)
+  version       Int               @default(1) // versão da requisição Axis que originou (11.8)
+  expiresAt     DateTime          @map("expires_at")
+  releasedAt    DateTime?         @map("released_at")
+  releaseReason String?           @map("release_reason")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  item FulfillmentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([status, expiresAt])
+  @@index([balanceId])
+  @@map("reservations")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 

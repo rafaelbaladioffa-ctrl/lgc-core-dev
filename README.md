@@ -24,3 +24,9 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - Ledger imutável `stock_movements` (trigger bloqueia UPDATE/DELETE/TRUNCATE) + `stock_balances` com CHECK(quantidade >= 0). `POST /stock/movements` exige `Idempotency-Key`; correção via `POST /stock/movements/:id/reverse`. Ajustes/perdas/descartes exigem `stock:adjust` + `axisApprovalRef`.
 - `lots` (quarentena/bloqueio, validade, FEFO/vida útil mínima) e `serial_numbers` (único por material, nunca em dois locais).
 - `POST /webhooks/axis`: HMAC-SHA256 do corpo bruto (`X-Axis-Signature: sha256=…`, segredo `AXIS_WEBHOOK_SECRET`), janela anti-replay (`WEBHOOK_MAX_AGE_HOURS`), idempotência por `event_id`, cache `axis_master_cache` com controle de ordem. Eventos de saída ficam em `integration_messages` (outbox, PENDING).
+
+## Sprint 3 — disponibilidade, atendimento e reservas
+- `GET /materials/:id/availability`, `POST /materials/availability:batch`, `GET /material-categories`, `GET /warehouses/:id/stock` (físico, reservado, bloqueado, disponível, projetado).
+- `POST /fulfillment-orders` (idempotente por requisição+versão), `GET`, `/:id/reserve`, `/:id/cancel-request`, `POST /reservations/expire`. Reserva FEFO/FIFO atômica (`reserved_qty` ≤ `quantity` por CHECK), versão nova substitui a anterior se não houve separação.
+- Adaptador `ticket.status_changed` (categorias de requisição de material, status `aberto`/`cancelado`) e `material_request.*` nativo → `src/integration/material-request.adapter.ts`. **O contrato do payload do ticket é uma suposição a confirmar com o Axis core** (documentado no arquivo).
+- Erros de negócio carregam `code` (`AXIS_REFERENCE_INVALID`, `REQUEST_VERSION_CONFLICT`, `UNIT_CONVERSION_ERROR`…).

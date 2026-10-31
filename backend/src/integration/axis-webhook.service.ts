@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { FulfillmentService } from '../fulfillment/fulfillment.service.js';
+import { adaptMaterialRequestEvent } from './material-request.adapter.js';
 
 interface Envelope {
   event_id: string;
@@ -32,6 +34,7 @@ export class AxisWebhookService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly fulfillment: FulfillmentService,
   ) {}
 
   verifySignature(rawBody: Buffer | undefined, header: string | undefined) {
@@ -123,8 +126,15 @@ export class AxisWebhookService {
         if (!str('project_id')) throw new BadRequestException('project_id ausente.');
         master = { kind: 'PROJECT', axisId: str('project_id')!, code: str('code'), name: str('name'), active: str('status') ? !INACTIVE_PROJECT_STATUS.includes(str('status')!) : undefined, data: p };
         break;
-      default:
-        return 'ignored'; // ping e eventos que Logística ainda não consome
+      default: {
+        // Adaptador 0.4: ticket.status_changed (legado) / material_request.* → evento de domínio.
+        const domain = adaptMaterialRequestEvent(env.event_type, p);
+        if (!domain) return 'ignored'; // ping e eventos que Logística ainda não consome
+        const actor = { userId: 'axis-integration' };
+        if (domain.kind === 'approved') await this.fulfillment.createFromRequest(tx, domain.order, actor, env.event_id);
+        else await this.fulfillment.cancelByAxisRequest(tx, domain.axisRequestId, domain.reason);
+        return 'processed';
+      }
     }
     return (await this.upsertMaster(tx, master, occurredAt)) ? 'processed' : 'out_of_order';
   }

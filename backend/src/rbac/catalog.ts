@@ -16,6 +16,10 @@ export const PERMISSIONS: Record<string, string> = {
   'lot:write': 'Cadastrar lotes',
   'lot:block': 'Bloquear, colocar em quarentena e liberar lotes',
   'serial:write': 'Cadastrar números de série e patrimônio',
+  'fulfillment:read': 'Acompanhar as próprias ordens de atendimento',
+  'fulfillment:read_all': 'Ver todas as ordens de atendimento',
+  'fulfillment:create': 'Criar ordens de atendimento (integração Axis)',
+  'fulfillment:manage': 'Reservar, reanalisar e cancelar ordens de atendimento',
   'receipt:execute': 'Receber e armazenar materiais',
   'picking:execute': 'Separar, conferir e entregar',
   'shipment:execute': 'Criar volumes, romaneios e expedições',
@@ -33,18 +37,18 @@ export const PERMISSIONS: Record<string, string> = {
 const BASE_READ = ['material:read', 'warehouse:read', 'uom:read', 'stock:read'];
 
 export const ROLES: Array<{ code: string; name: string; description: string; permissions: string[] }> = [
-  { code: 'SOLICITANTE', name: 'Solicitante Axis', description: 'Consulta catálogo/disponibilidade permitida', permissions: ['material:read', 'uom:read', 'stock:read'] },
-  { code: 'ALMOXARIFE', name: 'Almoxarife', description: 'Recebe, armazena, separa, confere, entrega e registra devolução', permissions: [...BASE_READ, 'receipt:execute', 'picking:execute', 'adjustment:request', 'stock:post', 'lot:write', 'serial:write'] },
+  { code: 'SOLICITANTE', name: 'Solicitante Axis', description: 'Consulta catálogo/disponibilidade permitida', permissions: ['material:read', 'uom:read', 'stock:read', 'fulfillment:read'] },
+  { code: 'ALMOXARIFE', name: 'Almoxarife', description: 'Recebe, armazena, separa, confere, entrega e registra devolução', permissions: [...BASE_READ, 'receipt:execute', 'picking:execute', 'adjustment:request', 'stock:post', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage'] },
   { code: 'CONFERENTE', name: 'Conferente', description: 'Valida entrada/saída de forma independente', permissions: [...BASE_READ, 'picking:execute'] },
-  { code: 'GESTOR_ALMOXARIFADO', name: 'Gestor de almoxarifado', description: 'Distribui tarefas, desbloqueia exceções e supervisiona inventários', permissions: [...BASE_READ, 'warehouse:write', 'warehouse:access_all', 'material:read_cost', 'receipt:execute', 'picking:execute', 'stockcount:manage', 'adjustment:request', 'audit:read', 'stock:post', 'stock:adjust', 'stock:reverse', 'lot:write', 'serial:write'] },
-  { code: 'LOGISTICA_EXPEDICAO', name: 'Logística/Expedição', description: 'Volumes, romaneios, cargas, rotas e comprovantes', permissions: [...BASE_READ, 'shipment:execute'] },
+  { code: 'GESTOR_ALMOXARIFADO', name: 'Gestor de almoxarifado', description: 'Distribui tarefas, desbloqueia exceções e supervisiona inventários', permissions: [...BASE_READ, 'warehouse:write', 'warehouse:access_all', 'material:read_cost', 'receipt:execute', 'picking:execute', 'stockcount:manage', 'adjustment:request', 'audit:read', 'stock:post', 'stock:adjust', 'stock:reverse', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'fulfillment:create'] },
+  { code: 'LOGISTICA_EXPEDICAO', name: 'Logística/Expedição', description: 'Volumes, romaneios, cargas, rotas e comprovantes', permissions: [...BASE_READ, 'shipment:execute', 'fulfillment:read', 'fulfillment:read_all'] },
   { code: 'CONTROLE_PATRIMONIO', name: 'Controle de patrimônio', description: 'Etiqueta, transfere, custodia e baixa ativos', permissions: [...BASE_READ, 'custody:execute', 'adjustment:request', 'serial:write'] },
   { code: 'HSE_QUALIDADE', name: 'HSE/Qualidade', description: 'Inspeciona, bloqueia/libera lotes e consulta certificados', permissions: [...BASE_READ, 'inspection:execute', 'lot:block'] },
-  { code: 'COMPRAS', name: 'Compras', description: 'Consulta consumo, falta, reposição e recebimento', permissions: [...BASE_READ, 'purchasing:read', 'material:read_cost'] },
-  { code: 'AUDITOR', name: 'Auditor', description: 'Leitura de documentos, movimentos e trilha, sem alteração', permissions: [...BASE_READ, 'material:read_cost', 'audit:read', 'rbac:read', 'warehouse:access_all'] },
+  { code: 'COMPRAS', name: 'Compras', description: 'Consulta consumo, falta, reposição e recebimento', permissions: [...BASE_READ, 'purchasing:read', 'material:read_cost', 'fulfillment:read', 'fulfillment:read_all'] },
+  { code: 'AUDITOR', name: 'Auditor', description: 'Leitura de documentos, movimentos e trilha, sem alteração', permissions: [...BASE_READ, 'material:read_cost', 'audit:read', 'rbac:read', 'warehouse:access_all', 'fulfillment:read', 'fulfillment:read_all'] },
   { code: 'ADMIN_CATALOGO', name: 'Administrador de catálogo', description: 'Mantém materiais e parâmetros', permissions: [...BASE_READ, 'material:write', 'material:read_cost', 'uom:write'] },
   // Administrador técnico: integrações e RBAC, sem acesso automático a operações restritas (seção 6).
-  { code: 'ADMIN_TECNICO', name: 'Administrador técnico', description: 'Configura integrações e acessos', permissions: ['uom:read', 'rbac:read', 'rbac:write', 'integration:configure', 'audit:read'] },
+  { code: 'ADMIN_TECNICO', name: 'Administrador técnico', description: 'Configura integrações e acessos', permissions: ['uom:read', 'rbac:read', 'rbac:write', 'integration:configure', 'audit:read', 'fulfillment:create'] },
 ];
 
 /** Mapeamento inicial das roles do Axis (seed do core) → perfis de Logística; editável depois no banco. */
