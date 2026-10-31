@@ -14,7 +14,7 @@ const ADJUST_TYPES = ['AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO', 'BAIXA_PERDA', 'DESC
 /** Saídas que consomem estoque utilizável: lote vencido/bloqueado não pode sair (11.6). */
 const USABLE_EXIT_TYPES = ['SAIDA_ENTREGA', 'TRANSFERENCIA'];
 
-type MovementInput = Omit<PostMovementDto, 'quantity'> & { quantity: Prisma.Decimal; reversesMovementId?: string };
+export type MovementInput = Omit<PostMovementDto, 'quantity'> & { quantity: Prisma.Decimal; reversesMovementId?: string };
 
 export const movementCode = (seq: number) => `MOV-${String(seq).padStart(8, '0')}`;
 
@@ -43,6 +43,11 @@ export class StockService {
     this.validateShape(dto);
 
     return this.run(() => this.prisma.$transaction((tx) => this.apply(tx, { ...dto, quantity: new Prisma.Decimal(dto.quantity) }, idempotencyKey, user, false)), idempotencyKey);
+  }
+
+  /** Lançamento interno (ex.: entrega confirmada): já autorizado pelo fluxo de origem; mantém escopo por almoxarifado. */
+  applyInternal(tx: Prisma.TransactionClient, input: MovementInput, idempotencyKey: string, user: AuthenticatedUser) {
+    return this.apply(tx, input, idempotencyKey, user, false);
   }
 
   /** Correção por movimento reverso vinculado (11.1): troca origem/destino e nunca altera o original. */

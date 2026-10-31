@@ -30,3 +30,8 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - `POST /fulfillment-orders` (idempotente por requisição+versão), `GET`, `/:id/reserve`, `/:id/cancel-request`, `POST /reservations/expire`. Reserva FEFO/FIFO atômica (`reserved_qty` ≤ `quantity` por CHECK), versão nova substitui a anterior se não houve separação.
 - Adaptador `ticket.status_changed` (categorias de requisição de material, status `aberto`/`cancelado`) e `material_request.*` nativo → `src/integration/material-request.adapter.ts`. **O contrato do payload do ticket é uma suposição a confirmar com o Axis core** (documentado no arquivo).
 - Erros de negócio carregam `code` (`AXIS_REFERENCE_INVALID`, `REQUEST_VERSION_CONFLICT`, `UNIT_CONVERSION_ERROR`…).
+
+## Sprint 4 — separação, embalagem, expedição e entrega
+- Fluxo: `release-picking` (parcial exige `acceptPartial`) → `picking-tasks/:id/start|scan|complete|check` → `fulfillment-orders/:id/pack` → `shipments/:id/dispatch` → `confirm-delivery` (ENTREGUE/PARCIAL/RECUSADA).
+- Leitura valida endereço, material/SKU/código de barras, lote e série; falta exige motivo; conferência independente (quem separou não confere) para itens seriados, criticidade A, que exigem autorização ou com `requireCheck`.
+- **A baixa do ledger (SAIDA_ENTREGA) acontece somente na confirmação de entrega** (9.5); até lá a reserva protege o saldo. Custódia (EPI/ferramenta/ativo/seriado) exige `receiverAxisId`; destinatário desligado bloqueia expedição/entrega (regra 14). Reservas de ordens em separação não expiram.

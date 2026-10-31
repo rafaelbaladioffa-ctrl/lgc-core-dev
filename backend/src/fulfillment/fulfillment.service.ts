@@ -181,7 +181,7 @@ export class FulfillmentService {
   /** Devolve às balanças o que as reservas ATIVAS da ordem comprometiam. */
   async releaseOrderReservations(tx: Tx, orderId: string, reason: string, finalStatus: 'LIBERADA' | 'EXPIRADA') {
     const reservations = await tx.reservation.findMany({ where: { item: { orderId }, status: 'ATIVA' } });
-    for (const r of reservations) await this.release(tx, r.id, r.balanceId, r.quantity, reason, finalStatus);
+    for (const r of reservations) await this.release(tx, r.id, r.balanceId, r.quantity.minus(r.consumedQty), reason, finalStatus);
     return reservations.length;
   }
 
@@ -193,11 +193,11 @@ export class FulfillmentService {
 
   /** Reservas vencidas voltam ao disponível (9.1: reserva expira conforme data necessária). Chamado por rota/cron. */
   async expireReservations(now = new Date()) {
-    const due = await this.prisma.reservation.findMany({ where: { status: 'ATIVA', expiresAt: { lt: now } }, include: { item: { select: { orderId: true } } } });
+    const due = await this.prisma.reservation.findMany({ where: { status: 'ATIVA', expiresAt: { lt: now }, item: { order: { status: { in: PRE_PICKING } } } }, include: { item: { select: { orderId: true } } } });
     let expired = 0;
     for (const r of due) {
       await this.prisma.$transaction(async (tx) => {
-        await this.release(tx, r.id, r.balanceId, r.quantity, 'Reserva expirada', 'EXPIRADA');
+        await this.release(tx, r.id, r.balanceId, r.quantity.minus(r.consumedQty), 'Reserva expirada', 'EXPIRADA');
         const left = await tx.reservation.count({ where: { item: { orderId: r.item.orderId }, status: 'ATIVA' } });
         if (left === 0) {
           const order = await tx.fulfillmentOrder.findUnique({ where: { id: r.item.orderId } });

@@ -639,6 +639,7 @@ model Reservation {
   version       Int               @default(1) // versão da requisição Axis que originou (11.8)
   expiresAt     DateTime          @map("expires_at")
   releasedAt    DateTime?         @map("released_at")
+  consumedQty   Decimal           @default(0) @map("consumed_qty") @db.Decimal(18, 6) // já baixado do saldo por entregas
   releaseReason String?           @map("release_reason")
   createdAt     DateTime          @default(now()) @map("created_at")
 
@@ -648,6 +649,167 @@ model Reservation {
   @@index([status, expiresAt])
   @@index([balanceId])
   @@map("reservations")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4 — Separação, embalagem, expedição e entrega (seções 9.4, 9.5)
+// ---------------------------------------------------------------------------
+
+enum PickingTaskStatus {
+  ABERTA
+  EM_SEPARACAO
+  SEPARADA
+  EM_CONFERENCIA
+  CONFERIDA
+  CANCELADA
+}
+
+enum PickingItemStatus {
+  PENDENTE
+  SEPARADO
+  DIVERGENTE
+}
+
+enum ShipmentStatus {
+  PRONTO
+  EXPEDIDA
+  PARCIAL
+  ENTREGUE
+  RECUSADA
+}
+
+enum PackageStatus {
+  ABERTO
+  EXPEDIDO
+  ENTREGUE
+  RECUSADO
+}
+
+enum DeliveryOutcome {
+  ENTREGUE
+  PARCIAL
+  RECUSADA
+}
+
+model PickingTask {
+  id            String            @id @default(uuid())
+  seq           Int               @unique @default(autoincrement())
+  orderId       String            @map("order_id")
+  warehouseId   String            @map("warehouse_id")
+  status        PickingTaskStatus @default(ABERTA)
+  priority      Int               @default(0)
+  requiresCheck Boolean           @default(false) @map("requires_check") // conferência independente (9.4.5)
+  pickedBy      String?           @map("picked_by")
+  checkedBy     String?           @map("checked_by")
+  createdBy     String            @map("created_by")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  completedAt   DateTime?         @map("completed_at")
+  checkedAt     DateTime?         @map("checked_at")
+
+  items PickingItem[]
+
+  @@index([orderId])
+  @@index([warehouseId, status])
+  @@map("picking_tasks")
+}
+
+model PickingItem {
+  id                String            @id @default(uuid())
+  taskId            String            @map("task_id")
+  reservationId     String            @unique @map("reservation_id")
+  fulfillmentItemId String            @map("fulfillment_item_id")
+  materialId        String            @map("material_id")
+  locationId        String            @map("location_id")
+  lotId             String?           @map("lot_id")
+  serialIds         String[]          @default([]) @map("serial_ids") // séries separadas (item seriado)
+  quantityPlanned   Decimal           @map("quantity_planned") @db.Decimal(18, 6)
+  quantityPicked    Decimal           @default(0) @map("quantity_picked") @db.Decimal(18, 6)
+  status            PickingItemStatus @default(PENDENTE)
+  divergenceReason  String?           @map("divergence_reason")
+
+  task         PickingTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  packageItems PackageItem[]
+
+  @@index([taskId])
+  @@map("picking_items")
+}
+
+model Shipment {
+  id           String         @id @default(uuid())
+  seq          Int            @unique @default(autoincrement())
+  orderId      String         @map("order_id")
+  status       ShipmentStatus @default(PRONTO)
+  destination  String?
+  carrier      String?
+  route        String?
+  vehicle      String?
+  manifestCode String?        @unique @map("manifest_code") // romaneio
+  dispatchedAt DateTime?      @map("dispatched_at")
+  dispatchedBy String?        @map("dispatched_by")
+  createdBy    String         @map("created_by")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  packages Package[]
+  proofs   DeliveryProof[]
+
+  @@index([orderId])
+  @@map("shipments")
+}
+
+model Package {
+  id         String        @id @default(uuid())
+  seq        Int           @unique @default(autoincrement())
+  shipmentId String        @map("shipment_id")
+  orderId    String        @map("order_id")
+  status     PackageStatus @default(ABERTO)
+  weightKg   Decimal?      @map("weight_kg") @db.Decimal(12, 4)
+  lengthCm   Decimal?      @map("length_cm") @db.Decimal(10, 2)
+  widthCm    Decimal?      @map("width_cm") @db.Decimal(10, 2)
+  heightCm   Decimal?      @map("height_cm") @db.Decimal(10, 2)
+  seal       String? // lacre
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  shipment Shipment      @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  items    PackageItem[]
+
+  @@index([shipmentId])
+  @@map("packages")
+}
+
+model PackageItem {
+  id            String  @id @default(uuid())
+  packageId     String  @map("package_id")
+  pickingItemId String  @map("picking_item_id")
+  quantity      Decimal @db.Decimal(18, 6)
+
+  package     Package     @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  pickingItem PickingItem @relation(fields: [pickingItemId], references: [id])
+
+  @@index([packageId])
+  @@index([pickingItemId])
+  @@map("package_items")
+}
+
+model DeliveryProof {
+  id             String          @id @default(uuid())
+  shipmentId     String          @map("shipment_id")
+  outcome        DeliveryOutcome
+  receiverName   String          @map("receiver_name")
+  receiverAxisId String?         @map("receiver_axis_id")
+  deliveredAt    DateTime        @map("delivered_at")
+  latitude       Decimal?        @db.Decimal(9, 6)
+  longitude      Decimal?        @db.Decimal(9, 6)
+  signatureRef   String?         @map("signature_ref")
+  photoRef       String?         @map("photo_ref")
+  notes          String?
+  packageIds     String[]        @default([]) @map("package_ids")
+  registeredBy   String          @map("registered_by")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId])
+  @@map("delivery_proofs")
 }
 
 // ---------------------------------------------------------------------------
