@@ -131,9 +131,8 @@ describe('Sprints 2 e 3 — casos de borda extras', () => {
       await entry(s.id, 1, locB, { serialId: serial }).expect(201); // volta a poder entrar em outro endereço
     });
 
-    it.fails('estorno de baixa de série devolve a série localizada e utilizável', async () => {
-      // Bug: o estorno de BAIXA_PERDA não restaura a condição da série (writeOff só vale fora de estorno), então a série
-      // volta ao endereço com condition BAIXADO. Esperado: a série volta a ficar utilizável (condição diferente de BAIXADO).
+    it('estorno de baixa de série devolve a série localizada e utilizável', async () => {
+      // Bug corrigido (ver commit): o teste agora valida o comportamento esperado.
       const s = await mk('EST-BXA', { serialControlled: true, assetTagged: true, exitMethod: 'SERIE_ESPECIFICA' });
       const serial = (await api().post('/api/v1/serial-numbers').set(A(gestor)).send({ materialId: s.id, serial: `SN-BXA-${sfx}` }).expect(201)).body.id as string;
       await entry(s.id, 1, locA, { serialId: serial }).expect(201);
@@ -164,9 +163,8 @@ describe('Sprints 2 e 3 — casos de borda extras', () => {
       expect(a).toMatchObject({ physical: '2', available: '2', reserved: '0' });
     });
 
-    it.fails('saldo de TERCEIRO_CONSIGNADO não aparece como disponível em /stock/balances', async () => {
-      // Bug: listBalances calcula `available` sem checar ownership; saldo de terceiro aparece como disponível próprio
-      // (a reserva e a disponibilidade do material já ignoram). Esperado: available '0'.
+    it('saldo de TERCEIRO_CONSIGNADO não aparece como disponível em /stock/balances', async () => {
+      // Bug corrigido (ver commit): o teste agora valida o comportamento esperado.
       const m = await mk('OWN-BAL');
       await entry(m.id, 4, locA, { ownership: 'TERCEIRO_CONSIGNADO' }).expect(201);
       const [row] = await rows(m.id, locA);
@@ -403,9 +401,8 @@ describe('Sprints 2 e 3 — casos de borda extras', () => {
       expect((await prisma.fulfillmentOrder.findUniqueOrThrow({ where: { id: v1.body.id } })).status).toBe('CANCELADA');
     });
 
-    it.fails('nova versão após cancelamento de versão não iniciada reserva normalmente', async () => {
-      // Bug: createFromRequest trata a versão anterior CANCELADA como "já houve separação" (CANCELADA não está em
-      // PRE_PICKING) e manda a nova versão para EM_ANALISE, sem reserva. Esperado: RESERVADA.
+    it('nova versão após cancelamento de versão não iniciada reserva normalmente', async () => {
+      // Bug corrigido (ver commit): o teste agora valida o comportamento esperado.
       const v = await mk('VER3');
       await entry(v.id, 10).expect(201);
       const v1 = await order({ axisRequestId: `VER3-${sfx}`, requestVersion: 1, items: [{ materialCode: v.code, quantity: 4 }] }).expect(201);

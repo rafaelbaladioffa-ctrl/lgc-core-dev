@@ -20,6 +20,8 @@ export const PERMISSIONS: Record<string, string> = {
   'fulfillment:read_all': 'Ver todas as ordens de atendimento',
   'fulfillment:create': 'Criar ordens de atendimento (integração Axis)',
   'fulfillment:manage': 'Reservar, reanalisar e cancelar ordens de atendimento',
+  'transfer:request': 'Solicitar e executar transferências',
+  'transfer:approve': 'Aprovar transferências e usar o fluxo urgente',
   'receipt:execute': 'Receber e armazenar materiais',
   'picking:execute': 'Separar, conferir e entregar',
   'shipment:execute': 'Criar volumes, romaneios e expedições',
@@ -38,9 +40,9 @@ const BASE_READ = ['material:read', 'warehouse:read', 'uom:read', 'stock:read'];
 
 export const ROLES: Array<{ code: string; name: string; description: string; permissions: string[] }> = [
   { code: 'SOLICITANTE', name: 'Solicitante Axis', description: 'Consulta catálogo/disponibilidade permitida', permissions: ['material:read', 'uom:read', 'stock:read', 'fulfillment:read'] },
-  { code: 'ALMOXARIFE', name: 'Almoxarife', description: 'Recebe, armazena, separa, confere, entrega e registra devolução', permissions: [...BASE_READ, 'receipt:execute', 'picking:execute', 'adjustment:request', 'stock:post', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'shipment:execute'] },
+  { code: 'ALMOXARIFE', name: 'Almoxarife', description: 'Recebe, armazena, separa, confere, entrega e registra devolução', permissions: [...BASE_READ, 'receipt:execute', 'picking:execute', 'adjustment:request', 'stock:post', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'shipment:execute', 'transfer:request'] },
   { code: 'CONFERENTE', name: 'Conferente', description: 'Valida entrada/saída de forma independente', permissions: [...BASE_READ, 'picking:execute'] },
-  { code: 'GESTOR_ALMOXARIFADO', name: 'Gestor de almoxarifado', description: 'Distribui tarefas, desbloqueia exceções e supervisiona inventários', permissions: [...BASE_READ, 'warehouse:write', 'warehouse:access_all', 'material:read_cost', 'receipt:execute', 'picking:execute', 'stockcount:manage', 'adjustment:request', 'audit:read', 'stock:post', 'stock:adjust', 'stock:reverse', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'fulfillment:create', 'shipment:execute'] },
+  { code: 'GESTOR_ALMOXARIFADO', name: 'Gestor de almoxarifado', description: 'Distribui tarefas, desbloqueia exceções e supervisiona inventários', permissions: [...BASE_READ, 'warehouse:write', 'warehouse:access_all', 'material:read_cost', 'receipt:execute', 'picking:execute', 'stockcount:manage', 'adjustment:request', 'audit:read', 'stock:post', 'stock:adjust', 'stock:reverse', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'fulfillment:create', 'shipment:execute', 'transfer:request', 'transfer:approve'] },
   { code: 'LOGISTICA_EXPEDICAO', name: 'Logística/Expedição', description: 'Volumes, romaneios, cargas, rotas e comprovantes', permissions: [...BASE_READ, 'shipment:execute', 'fulfillment:read', 'fulfillment:read_all'] },
   { code: 'CONTROLE_PATRIMONIO', name: 'Controle de patrimônio', description: 'Etiqueta, transfere, custodia e baixa ativos', permissions: [...BASE_READ, 'custody:execute', 'adjustment:request', 'serial:write'] },
   { code: 'HSE_QUALIDADE', name: 'HSE/Qualidade', description: 'Inspeciona, bloqueia/libera lotes e consulta certificados', permissions: [...BASE_READ, 'inspection:execute', 'lot:block'] },

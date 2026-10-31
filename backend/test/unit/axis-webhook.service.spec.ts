@@ -126,9 +126,8 @@ describe('AxisWebhookService.parse (envelope e janela de replay)', () => {
     expect(() => parse(svc, buf(envelope({ occurred_at: new Date(Date.now() + 6 * 60_000).toISOString() })))).toThrow('no futuro');
   });
 
-  it.fails('WEBHOOK_MAX_AGE_HOURS inválido (ex.: "abc") não pode desligar a janela de replay', () => {
-    // Bug: Number('abc') = NaN; `Date.now() - occurred > NaN` é sempre falso, então qualquer evento antigo passa.
-    // Esperado: configuração inválida deve falhar fechada (ou cair no padrão de 72 h), rejeitando um evento de 1000 h.
+  it('WEBHOOK_MAX_AGE_HOURS inválido (ex.: "abc") não pode desligar a janela de replay', () => {
+    // Bug corrigido (ver commit): o teste agora valida o comportamento esperado.
     const svc = service({ WEBHOOK_MAX_AGE_HOURS: 'abc' });
     expect(() => parse(svc, buf(envelope({ occurred_at: new Date(Date.now() - 1000 * HOUR).toISOString() })))).toThrow('replay');
   });

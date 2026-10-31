@@ -13,6 +13,8 @@ import { WarehousesModule } from './warehouses/warehouses.module.js';
 import { StockModule } from './stock/stock.module.js';
 import { FulfillmentModule } from './fulfillment/fulfillment.module.js';
 import { ShippingModule } from './shipping/shipping.module.js';
+import { ReceivingModule } from './receiving/receiving.module.js';
+import { TransfersModule } from './transfers/transfers.module.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
 
@@ -29,6 +31,8 @@ import { HealthController } from './health/health.controller.js';
     StockModule,
     FulfillmentModule,
     ShippingModule,
+    ReceivingModule,
+    TransfersModule,
     IntegrationModule,
   ],
   controllers: [HealthController],

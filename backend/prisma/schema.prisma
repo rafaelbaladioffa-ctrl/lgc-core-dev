@@ -813,6 +813,189 @@ model DeliveryProof {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 5 — Recebimento, inspeção, armazenagem e transferências (9.2, 9.3, 9.7)
+// ---------------------------------------------------------------------------
+
+enum ReceiptStatus {
+  AGENDADO
+  EM_CONFERENCIA
+  RECEBIDO_PENDENTE_INSPECAO
+  LIBERADO
+  ARMAZENADO
+  DIVERGENTE
+  QUARENTENA
+  REJEITADO
+  DEVOLVIDO_FORNECEDOR
+}
+
+enum ReceiptItemStatus {
+  CONFERIDO
+  EM_INSPECAO
+  LIBERADO
+  REJEITADO
+  ARMAZENADO
+}
+
+enum InspectionDecision {
+  APROVADO
+  REPROVADO
+}
+
+enum PutawayStatus {
+  ABERTA
+  CONCLUIDA
+}
+
+enum TransferStatus {
+  SOLICITADA
+  APROVADA
+  SEPARANDO
+  EXPEDIDA
+  EM_TRANSITO
+  RECEBIDA
+  ENCERRADA
+  CANCELADA
+}
+
+model Receipt {
+  id                   String        @id @default(uuid())
+  seq                  Int           @unique @default(autoincrement())
+  warehouseId          String        @map("warehouse_id")
+  receivingLocationId  String        @map("receiving_location_id")
+  status               ReceiptStatus @default(AGENDADO)
+  axisPurchaseOrderId  String?       @map("axis_purchase_order_id")
+  supplierAxisId       String?       @map("supplier_axis_id")
+  invoiceNumber        String?       @map("invoice_number")
+  vehicle              String?
+  volumes              Int?
+  exceptionApprovalRef String?       @map("exception_approval_ref") // recebimento sem pedido exige exceção aprovada
+  expectedItems        Json          @default("[]") @map("expected_items") // [{materialId, quantity}] do pedido Axis
+  hasDivergence        Boolean       @default(false) @map("has_divergence")
+  divergenceNotes      Json          @default("[]") @map("divergence_notes")
+  createdBy            String        @map("created_by")
+  completedBy          String?       @map("completed_by")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  completedAt          DateTime?     @map("completed_at")
+
+  items ReceiptItem[]
+
+  @@index([warehouseId, status])
+  @@map("receipts")
+}
+
+model ReceiptItem {
+  id                 String            @id @default(uuid())
+  receiptId          String            @map("receipt_id")
+  materialId         String            @map("material_id")
+  quantity           Decimal           @db.Decimal(18, 6)
+  lotNumber          String?           @map("lot_number")
+  manufacturedAt     DateTime?         @map("manufactured_at") @db.Date
+  expiresAt          DateTime?         @map("expires_at") @db.Date
+  serials            String[]          @default([])
+  damaged            Boolean           @default(false)
+  inspectionRequired Boolean           @default(false) @map("inspection_required")
+  inspectionReason   String?           @map("inspection_reason")
+  unitCost           Decimal?          @map("unit_cost") @db.Decimal(18, 4)
+  photoRefs          String[]          @default([]) @map("photo_refs")
+  certificateRef     String?           @map("certificate_ref")
+  notes              String?
+  status             ReceiptItemStatus @default(CONFERIDO)
+  lotId              String?           @map("lot_id")
+  serialIds          String[]          @default([]) @map("serial_ids")
+  createdAt          DateTime          @default(now()) @map("created_at")
+
+  receipt     Receipt            @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  inspections InspectionResult[]
+  putaways    PutawayTask[]
+
+  @@index([receiptId])
+  @@map("receipt_items")
+}
+
+model InspectionResult {
+  id             String             @id @default(uuid())
+  receiptItemId  String             @map("receipt_item_id")
+  decision       InspectionDecision
+  checklist      Json               @default("{}")
+  certificateRef String?            @map("certificate_ref")
+  notes          String?
+  inspectedBy    String             @map("inspected_by")
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  item ReceiptItem @relation(fields: [receiptItemId], references: [id], onDelete: Cascade)
+
+  @@index([receiptItemId])
+  @@map("inspection_results")
+}
+
+model PutawayTask {
+  id                  String         @id @default(uuid())
+  seq                 Int            @unique @default(autoincrement())
+  receiptItemId       String         @map("receipt_item_id")
+  warehouseId         String         @map("warehouse_id")
+  materialId          String         @map("material_id")
+  lotId               String?        @map("lot_id")
+  serialIds           String[]       @default([]) @map("serial_ids")
+  quantity            Decimal        @db.Decimal(18, 6)
+  fromLocationId      String         @map("from_location_id")
+  suggestedLocationId String?        @map("suggested_location_id")
+  confirmedLocationId String?        @map("confirmed_location_id")
+  condition           StockCondition @default(DISPONIVEL)
+  status              PutawayStatus  @default(ABERTA)
+  confirmedBy         String?        @map("confirmed_by")
+  confirmedAt         DateTime?      @map("confirmed_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  item ReceiptItem @relation(fields: [receiptItemId], references: [id], onDelete: Cascade)
+
+  @@index([warehouseId, status])
+  @@map("putaway_tasks")
+}
+
+model Transfer {
+  id              String         @id @default(uuid())
+  seq             Int            @unique @default(autoincrement())
+  fromWarehouseId String         @map("from_warehouse_id")
+  toWarehouseId   String         @map("to_warehouse_id")
+  status          TransferStatus @default(SOLICITADA)
+  urgent          Boolean        @default(false)
+  reason          String
+  hasDivergence   Boolean        @default(false) @map("has_divergence")
+  requestedBy     String         @map("requested_by")
+  approvedBy      String?        @map("approved_by")
+  separatedBy     String?        @map("separated_by")
+  dispatchedBy    String?        @map("dispatched_by")
+  receivedBy      String?        @map("received_by")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  dispatchedAt    DateTime?      @map("dispatched_at")
+  receivedAt      DateTime?      @map("received_at")
+
+  items TransferItem[]
+
+  @@index([status])
+  @@map("transfers")
+}
+
+model TransferItem {
+  id             String  @id @default(uuid())
+  transferId     String  @map("transfer_id")
+  materialId     String  @map("material_id")
+  fromLocationId String  @map("from_location_id")
+  toLocationId   String? @map("to_location_id")
+  lotId          String? @map("lot_id")
+  serialId       String? @map("serial_id")
+  quantity       Decimal @db.Decimal(18, 6)
+  balanceId      String? @map("balance_id") // saldo de origem com a reserva (9.7)
+  reservedQty    Decimal @default(0) @map("reserved_qty") @db.Decimal(18, 6)
+  receivedQty    Decimal @default(0) @map("received_qty") @db.Decimal(18, 6)
+
+  transfer Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@index([transferId])
+  @@map("transfer_items")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 

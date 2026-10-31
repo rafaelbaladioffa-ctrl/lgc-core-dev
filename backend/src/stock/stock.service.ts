@@ -142,7 +142,7 @@ export class StockService {
     for (const id of locIds) {
       const l = loc(id);
       if (!l) throw new BadRequestException('Endereço não encontrado.');
-      await this.rbac.assertWarehouseAccess(user, l.warehouseId);
+      if (!l.isVirtual) await this.rbac.assertWarehouseAccess(user, l.warehouseId); // trânsito/quarentena virtual é compartilhado
       if (!isReversal && !ADJUST_TYPES.includes(input.type) && (l.status !== 'ATIVO' || l.warehouse.status !== 'ATIVO')) {
         throw new UnprocessableEntityException(`O endereço ${l.code} está bloqueado ou inativo.`);
       }
@@ -169,7 +169,7 @@ export class StockService {
       if (ENTRY_TYPES.includes(input.type)) {
         if (material.expiryControlled) {
           if (!lot.expiresAt) throw new BadRequestException(`O lote ${lot.lotNumber} não tem validade cadastrada.`);
-          if (input.type === 'ENTRADA_RECEBIMENTO' && material.minShelfLifeDays != null) {
+          if (input.type === 'ENTRADA_RECEBIMENTO' && toCond === 'DISPONIVEL' && material.minShelfLifeDays != null) { // em quarentena/bloqueado a inspeção decide
             const days = Math.floor((lot.expiresAt.getTime() - startOfToday().getTime()) / 86_400_000);
             if (days < material.minShelfLifeDays) throw new UnprocessableEntityException(`Vida útil restante (${days} dias) menor que o mínimo de ${material.minShelfLifeDays} dias.`);
           }
@@ -194,9 +194,10 @@ export class StockService {
       }
       const nextLocation = input.toLocationId ?? null;
       const writeOff = ['BAIXA_PERDA', 'DESCARTE'].includes(input.type) && !isReversal;
+      const restore = ['BAIXA_PERDA', 'DESCARTE'].includes(input.type) && isReversal; // estorno de baixa: série volta a ser utilizável
       const upd = await tx.serialNumber.updateMany({
         where: { id: serial.id, currentLocationId: serial.currentLocationId },
-        data: { currentLocationId: nextLocation, ...(writeOff && { condition: 'BAIXADO' as const }) },
+        data: { currentLocationId: nextLocation, ...(writeOff && { condition: 'BAIXADO' as const }), ...(restore && { condition: 'BOM' as const }) },
       });
       if (upd.count !== 1) throw new ConflictException('A série foi movimentada por outra operação; tente novamente.');
     } else if (input.serialId) {
@@ -290,7 +291,7 @@ export class StockService {
     return {
       total, page, pageSize,
       items: rows.map((b) => {
-        const usable = b.condition === 'DISPONIVEL' && (!b.lot || (b.lot.status === 'LIBERADO' && !(b.lot.expiresAt && b.lot.expiresAt < today)));
+        const usable = b.condition === 'DISPONIVEL' && b.ownership === 'PROPRIO' && (!b.lot || (b.lot.status === 'LIBERADO' && !(b.lot.expiresAt && b.lot.expiresAt < today)));
         return {
           materialId: b.materialId, locationId: b.locationId, locationCode: b.location.code, warehouseId: b.location.warehouseId,
           lotId: b.lotId, lotNumber: b.lot?.lotNumber ?? null, condition: b.condition, ownership: b.ownership,

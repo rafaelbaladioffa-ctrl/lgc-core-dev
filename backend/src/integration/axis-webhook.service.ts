@@ -61,7 +61,8 @@ export class AxisWebhookService {
 
     const occurred = Date.parse(e.occurred_at);
     // Retentativas do Axis podem chegar horas depois (backoff até ~2h); além da janela é replay.
-    const maxAgeMs = Number(this.config.get('WEBHOOK_MAX_AGE_HOURS') ?? 72) * 3_600_000;
+    const configured = Number(this.config.get('WEBHOOK_MAX_AGE_HOURS') ?? 72);
+    const maxAgeMs = (Number.isFinite(configured) && configured > 0 ? configured : 72) * 3_600_000; // configuração inválida nunca desliga a janela
     if (Date.now() - occurred > maxAgeMs) throw new BadRequestException('Evento fora da janela de validade (possível replay).');
     if (occurred - Date.now() > CLOCK_SKEW_MS) throw new BadRequestException('occurred_at no futuro.');
     return e as Envelope;

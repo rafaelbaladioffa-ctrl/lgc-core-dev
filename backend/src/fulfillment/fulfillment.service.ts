@@ -80,7 +80,7 @@ export class FulfillmentService {
 
     // Versão anterior: substitui se ainda não houve separação; caso contrário exige análise (9.1).
     let needsAnalysis = false;
-    if (latest) {
+    if (latest && latest.status !== 'CANCELADA') {
       if (PRE_PICKING.includes(latest.status)) {
         await this.releaseOrderReservations(tx, latest.id, `Substituída pela versão ${version}`, 'LIBERADA');
         await tx.fulfillmentOrder.update({ where: { id: latest.id }, data: { status: 'CANCELADA', statusReason: `Substituída pela versão ${version} da requisição` } });

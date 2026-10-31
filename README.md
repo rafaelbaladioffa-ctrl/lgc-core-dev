@@ -35,3 +35,8 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - Fluxo: `release-picking` (parcial exige `acceptPartial`) → `picking-tasks/:id/start|scan|complete|check` → `fulfillment-orders/:id/pack` → `shipments/:id/dispatch` → `confirm-delivery` (ENTREGUE/PARCIAL/RECUSADA).
 - Leitura valida endereço, material/SKU/código de barras, lote e série; falta exige motivo; conferência independente (quem separou não confere) para itens seriados, criticidade A, que exigem autorização ou com `requireCheck`.
 - **A baixa do ledger (SAIDA_ENTREGA) acontece somente na confirmação de entrega** (9.5); até lá a reserva protege o saldo. Custódia (EPI/ferramenta/ativo/seriado) exige `receiverAxisId`; destinatário desligado bloqueia expedição/entrega (regra 14). Reservas de ordens em separação não expiram.
+
+## Sprint 5 — recebimento, inspeção, armazenagem e transferências
+- `POST /receipts` (sem pedido Axis exige `exceptionApprovalRef`), `items:scan`, `complete` (entrada no ledger; divergências → `DIVERGENTE` + evento `receipt.divergent`), `items/:itemId/inspect` (permissão `inspection:execute`; certificado e validade mínima validados antes da liberação), `putaway-tasks` (sugestão por categoria/risco/capacidade/consolidação; mistura incompatível recusada).
+- Item que exige certificado/CA/calibração/risco/químico, ou com validade abaixo do mínimo, entra em QUARENTENA; lote vencido entra BLOQUEADO.
+- `POST /transfers` → `approve` (reserva na origem; quem solicitou não aprova) → `start-picking` → `dispatch` (baixa da origem e entrada em trânsito, endereço virtual `TRANSITO` em condição BLOQUEADO) → `receive` (diferença = divergência, nunca ajuste automático) → `close`. `urgent` expede direto após aprovar, com auditoria.
