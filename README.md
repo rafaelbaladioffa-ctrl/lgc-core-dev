@@ -19,3 +19,8 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - `roles` do token → tabela `axis_role_to_logistics_role` → perfis de Logística → permissões (`logistics_permissions`). Editável via `PUT /rbac/axis-role-mapping/:axisRole` (permissão `rbac:write`).
 - Escopo por almoxarifado: `warehouse:access_all` ou linhas em `user_warehouse_access`.
 - Endpoints: `GET /health` (público), `GET /me`, `/materials`, `/units-of-measure`, `/warehouses` (+`/locations`), `/rbac/*`.
+
+## Sprint 2 — estoque e integração
+- Ledger imutável `stock_movements` (trigger bloqueia UPDATE/DELETE/TRUNCATE) + `stock_balances` com CHECK(quantidade >= 0). `POST /stock/movements` exige `Idempotency-Key`; correção via `POST /stock/movements/:id/reverse`. Ajustes/perdas/descartes exigem `stock:adjust` + `axisApprovalRef`.
+- `lots` (quarentena/bloqueio, validade, FEFO/vida útil mínima) e `serial_numbers` (único por material, nunca em dois locais).
+- `POST /webhooks/axis`: HMAC-SHA256 do corpo bruto (`X-Axis-Signature: sha256=…`, segredo `AXIS_WEBHOOK_SECRET`), janela anti-replay (`WEBHOOK_MAX_AGE_HOURS`), idempotência por `event_id`, cache `axis_master_cache` com controle de ordem. Eventos de saída ficam em `integration_messages` (outbox, PENDING).

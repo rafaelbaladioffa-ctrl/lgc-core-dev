@@ -203,6 +203,10 @@ model Material {
   versions    MaterialVersion[]
   barcodes    MaterialBarcode[]
   conversions UnitConversion[]
+  lots        Lot[]
+  serials     SerialNumber[]
+  balances    StockBalance[]
+  movements   StockMovement[]
 
   @@index([category, subcategory])
   @@index([type])
@@ -288,9 +292,13 @@ model Location {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  warehouse Warehouse  @relation(fields: [warehouseId], references: [id])
-  parent    Location?  @relation("LocationTree", fields: [parentId], references: [id])
-  children  Location[] @relation("LocationTree")
+  warehouse     Warehouse       @relation(fields: [warehouseId], references: [id])
+  parent        Location?       @relation("LocationTree", fields: [parentId], references: [id])
+  children      Location[]      @relation("LocationTree")
+  serials       SerialNumber[]
+  balances      StockBalance[]
+  movementsFrom StockMovement[] @relation("MovementFrom")
+  movementsTo   StockMovement[] @relation("MovementTo")
 
   @@unique([warehouseId, code])
   @@index([warehouseId, parentId])
@@ -377,4 +385,221 @@ model AuditEvent {
   @@index([aggregateType, aggregateId])
   @@index([actorAxisId, createdAt])
   @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 2 — Estoque: lotes, séries, ledger e saldos (seções 4, 11, 14, 14.1)
+// ---------------------------------------------------------------------------
+
+enum LotStatus {
+  LIBERADO
+  QUARENTENA
+  BLOQUEADO
+}
+
+enum SerialCondition {
+  NOVO
+  BOM
+  EM_MANUTENCAO
+  AVARIADO
+  BAIXADO
+}
+
+/// Condição do estoque (4): só DISPONIVEL compõe o saldo disponível.
+enum StockCondition {
+  DISPONIVEL
+  QUARENTENA
+  BLOQUEADO
+  AVARIADO
+}
+
+/// Propriedade separada (11.15): nunca se mistura contabilmente.
+enum Ownership {
+  PROPRIO
+  CLIENTE
+  TERCEIRO_CONSIGNADO
+  LGC_EM_TERCEIRO
+}
+
+enum MovementType {
+  ENTRADA_RECEBIMENTO
+  ENTRADA_DEVOLUCAO
+  SAIDA_ENTREGA
+  TRANSFERENCIA
+  AJUSTE_POSITIVO
+  AJUSTE_NEGATIVO
+  BAIXA_PERDA
+  DESCARTE
+}
+
+model Lot {
+  id             String    @id @default(uuid())
+  materialId     String    @map("material_id")
+  lotNumber      String    @map("lot_number")
+  manufacturedAt DateTime? @map("manufactured_at") @db.Date
+  expiresAt      DateTime? @map("expires_at") @db.Date
+  status         LotStatus @default(LIBERADO)
+  statusReason   String?   @map("status_reason")
+  supplierAxisId String?   @map("supplier_axis_id")
+  createdBy      String    @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  material  Material        @relation(fields: [materialId], references: [id])
+  balances  StockBalance[]
+  movements StockMovement[]
+  serials   SerialNumber[]
+
+  @@unique([materialId, lotNumber])
+  @@index([materialId, expiresAt])
+  @@map("lots")
+}
+
+model SerialNumber {
+  id                String          @id @default(uuid())
+  materialId        String          @map("material_id")
+  serial            String
+  assetTag          String?         @unique @map("asset_tag") // patrimônio
+  condition         SerialCondition @default(NOVO)
+  lotId             String?         @map("lot_id")
+  currentLocationId String?         @map("current_location_id") // nulo = fora do estoque (7: não existe em dois locais)
+  custodianAxisId   String?         @map("custodian_axis_id")
+  createdBy         String          @map("created_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  material  Material        @relation(fields: [materialId], references: [id])
+  lot       Lot?            @relation(fields: [lotId], references: [id])
+  location  Location?       @relation(fields: [currentLocationId], references: [id])
+  movements StockMovement[]
+
+  @@unique([materialId, serial])
+  @@index([currentLocationId])
+  @@map("serial_numbers")
+}
+
+/// Ledger imutável (11.1): sem UPDATE/DELETE (trigger no banco); correção = movimento reverso vinculado.
+model StockMovement {
+  id                   String         @id @default(uuid())
+  seq                  Int            @unique @default(autoincrement())
+  type                 MovementType
+  materialId           String         @map("material_id")
+  quantity             Decimal        @db.Decimal(18, 6)
+  uomId                String         @map("uom_id")
+  lotId                String?        @map("lot_id")
+  serialId             String?        @map("serial_id")
+  fromLocationId       String?        @map("from_location_id")
+  toLocationId         String?        @map("to_location_id")
+  fromCondition        StockCondition @default(DISPONIVEL) @map("from_condition")
+  toCondition          StockCondition @default(DISPONIVEL) @map("to_condition")
+  ownership            Ownership      @default(PROPRIO)
+  reason               String
+  axisDocumentRef      String?        @map("axis_document_ref")
+  axisApprovalRef      String?        @map("axis_approval_ref")
+  logisticsDocumentRef String?        @map("logistics_document_ref")
+  projectAxisId        String?        @map("project_axis_id")
+  costCenterAxisId     String?        @map("cost_center_axis_id")
+  clientAxisId         String?        @map("client_axis_id")
+  custodianAxisId      String?        @map("custodian_axis_id")
+  unitCost             Decimal?       @map("unit_cost") @db.Decimal(18, 4)
+  effectiveAt          DateTime       @map("effective_at")
+  registeredAt         DateTime       @default(now()) @map("registered_at")
+  actorAxisId          String         @map("actor_axis_id")
+  deviceId             String?        @map("device_id")
+  reversesMovementId   String?        @unique @map("reverses_movement_id")
+  correlationId        String         @map("correlation_id")
+  idempotencyKey       String         @unique @map("idempotency_key")
+
+  material     Material       @relation(fields: [materialId], references: [id])
+  lot          Lot?           @relation(fields: [lotId], references: [id])
+  serialNo     SerialNumber?  @relation(fields: [serialId], references: [id])
+  fromLocation Location?      @relation("MovementFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location?      @relation("MovementTo", fields: [toLocationId], references: [id])
+  reverses     StockMovement? @relation("MovementReversal", fields: [reversesMovementId], references: [id])
+  reversedBy   StockMovement? @relation("MovementReversal")
+
+  @@index([materialId, effectiveAt])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+  @@index([correlationId])
+  @@map("stock_movements")
+}
+
+/// Saldo derivado do ledger; só é alterado pelo serviço de movimentação, na mesma transação do movimento.
+/// `lotKey` = id do lote ou '' (permite unicidade com lote opcional). CHECK(quantity >= 0) no banco: sem estoque negativo (11.2).
+model StockBalance {
+  id          String         @id @default(uuid())
+  materialId  String         @map("material_id")
+  locationId  String         @map("location_id")
+  lotId       String?        @map("lot_id")
+  lotKey      String         @default("") @map("lot_key")
+  condition   StockCondition @default(DISPONIVEL)
+  ownership   Ownership      @default(PROPRIO)
+  quantity    Decimal        @default(0) @db.Decimal(18, 6)
+  reservedQty Decimal        @default(0) @map("reserved_qty") @db.Decimal(18, 6) // preenchido a partir do Sprint 3
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+  lot      Lot?     @relation(fields: [lotId], references: [id])
+
+  @@unique([materialId, locationId, lotKey, condition, ownership])
+  @@index([locationId])
+  @@map("stock_balances")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 2 — Integração com o Axis (seção 12)
+// ---------------------------------------------------------------------------
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+  PENDING
+  DELIVERED
+}
+
+/// Inbox (idempotência por event_id) e outbox transacional (Logística → Axis).
+model IntegrationMessage {
+  id            String           @id @default(uuid())
+  direction     MessageDirection
+  eventId       String           @map("event_id")
+  eventType     String           @map("event_type")
+  occurredAt    DateTime         @map("occurred_at")
+  payload       Json
+  status        MessageStatus
+  attempts      Int              @default(0)
+  lastError     String?          @map("last_error")
+  correlationId String?          @map("correlation_id")
+  nextAttemptAt DateTime?        @map("next_attempt_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  processedAt   DateTime?        @map("processed_at")
+
+  @@unique([direction, eventId])
+  @@index([direction, status, nextAttemptAt])
+  @@map("integration_messages")
+}
+
+/// Cache dos mestres do Axis (empresa, unidade, usuário, colaborador, cliente, projeto, centro de custo):
+/// guarda só identificador externo + dados mínimos; nunca é editável aqui (3.3).
+model AxisMasterCache {
+  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER | COMPANY | UNIT
+  axisId           String   @map("axis_id")
+  code             String?
+  name             String?
+  active           Boolean  @default(true)
+  data             Json     @default("{}")
+  sourceOccurredAt DateTime @map("source_occurred_at") // controle de versão/ordem de eventos (12.4)
+  syncedAt         DateTime @default(now()) @map("synced_at")
+
+  @@id([kind, axisId])
+  @@index([kind, active])
+  @@map("axis_master_cache")
 }
