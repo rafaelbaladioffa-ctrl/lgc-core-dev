@@ -116,6 +116,8 @@ export class InventoryService {
 
   async submit(id: string, dto: SubmitCountDto, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
+      // Relógio do banco (o mesmo de created_at e registered_at): evita deriva entre a máquina da API e a do Postgres.
+      const [{ now }] = await tx.$queryRaw<Array<{ now: Date }>>`SELECT clock_timestamp() AS now`;
       const c = await this.load(tx, id, user);
       if (!['EM_CONTAGEM', 'EM_RECONTAGEM'].includes(c.status)) throw new ConflictException('O inventário não está em contagem.');
       const line = await tx.stockCountLine.findFirst({ where: { id: dto.lineId, countId: id } });
@@ -128,13 +130,13 @@ export class InventoryService {
       if (c.status === 'EM_CONTAGEM') {
         if (line.status !== 'PENDENTE') throw new ConflictException('Esta linha já teve a primeira contagem.');
         // Condição no UPDATE: duas contagens simultâneas da mesma linha — só uma grava.
-        const n = await tx.stockCountLine.updateMany({ where: { id: line.id, status: 'PENDENTE' }, data: { count1Qty: qty, count1By: user.userId, count1At: new Date(), status: 'CONTADO', notes: dto.notes } });
+        const n = await tx.stockCountLine.updateMany({ where: { id: line.id, status: 'PENDENTE' }, data: { count1Qty: qty, count1By: user.userId, count1At: now, status: 'CONTADO', notes: dto.notes } });
         if (n.count !== 1) throw new ConflictException('Esta linha já teve a primeira contagem.');
       } else {
         if (line.status !== 'RECONTAR') throw new ConflictException('Esta linha não está marcada para recontagem.');
         if (line.count1By === user.userId) throw new ForbiddenException('Segregação: a recontagem deve ser feita por operador diferente do da primeira contagem.');
         if (line.count2Qty != null) throw new ConflictException('Esta linha já foi recontada.');
-        const n = await tx.stockCountLine.updateMany({ where: { id: line.id, status: 'RECONTAR', count2Qty: null }, data: { count2Qty: qty, count2By: user.userId, count2At: new Date(), notes: dto.notes ?? line.notes } });
+        const n = await tx.stockCountLine.updateMany({ where: { id: line.id, status: 'RECONTAR', count2Qty: null }, data: { count2Qty: qty, count2By: user.userId, count2At: now, notes: dto.notes ?? line.notes } });
         if (n.count !== 1) throw new ConflictException('Esta linha já foi recontada.');
       }
       return { lineId: line.id, recorded: true }; // sem devolver o saldo do sistema (cega)

@@ -1,14 +1,20 @@
 import type { BootLocation, BootMaterial } from './codes';
-import { defaultAuthUrl, msUntilExpiry, refreshWithAxis } from './auth';
+import { defaultAuthUrl, msUntilExpiry, refreshWithAxis, takeLauncherToken } from './auth';
 import type { OpResult, QueueOp } from './queue';
 
 /** Autenticação: SSO do Axis. O token chega por #token=… (hand-off) ou é colado uma vez; nunca há login próprio. */
 const SETTINGS_KEY = 'logistica.settings';
+/** Token curto do launcher do Axis, ainda não trocado (nunca é gravado). */
+let launcherToken: string | null = null;
+export const hasPendingLauncherToken = () => launcherToken !== null;
+export const takePendingLauncherToken = () => { const t = launcherToken; launcherToken = null; return t; };
+
 export interface Settings { apiUrl: string; authUrl: string; token: string; refreshToken?: string; userEmail?: string; warehouseId?: string; deviceId: string }
 
 const randomDevice = () => `PWA-${(globalThis.crypto?.randomUUID?.() ?? String(Math.random()).slice(2)).slice(0, 8).toUpperCase()}`;
 
 export function loadSettings(): Settings {
+  launcherToken = takeLauncherToken(location, history) ?? launcherToken; // remove ?axisToken= da URL imediatamente
   const hash = new URLSearchParams(location.hash.replace(/^#/, ''));
   const fromHash = hash.get('token');
   let saved: Partial<Settings> = {};

@@ -351,7 +351,8 @@ describe('Seção 23 — cenários de teste obrigatórios', () => {
     await prisma.stockBalance.update({ where: { id: bal.id }, data: { quantity: 4 } });
     const run = (await api().post('/api/v1/reconciliation/run').set(A(gestor)).expect(200)).body;
     expect(run.created).toBeGreaterThanOrEqual(2);
-    const issues = (await api().get('/api/v1/reconciliation/issues').set(A(gestor)).expect(200)).body as Array<{ id: string; kind: string; refId: string; details: Record<string, string> }>;
+    const getIssues = async (refId: string) => (await api().get('/api/v1/reconciliation/issues').query({ refId }).set(A(gestor)).expect(200)).body.items as Array<{ id: string; kind: string; refId: string; details: Record<string, string> }>;
+    const issues = [...(await getIssues(bal.id)), ...(await getIssues(ev.id))];
     const drift = issues.find((i) => i.kind === 'BALANCE_VS_LEDGER' && i.refId === bal.id)!;
     expect(drift.details).toMatchObject({ balance: '4', ledger: '3' });
     expect(issues.some((i) => i.kind === 'OUTBOX_DEAD_LETTER' && i.refId === ev.id)).toBe(true);

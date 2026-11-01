@@ -29,6 +29,7 @@ const line = (over: Record<string, unknown> = {}) => ({
 function build(opts: { count?: Record<string, unknown> | null; lines?: Array<Record<string, unknown>>; findFirst?: Record<string, unknown> | null; permissions?: string[] } = {}) {
   const c = opts.count === undefined ? count() : opts.count;
   const tx = {
+    $queryRaw: vi.fn(async () => [{ now: new Date('2026-11-01T12:00:00Z') }]), // relógio do banco usado no carimbo das contagens
     warehouse: { findUnique: vi.fn().mockResolvedValue({ id: WH, status: 'ATIVO', type: 'CENTRAL', projectAxisId: null }) },
     stockBalance: { findMany: vi.fn().mockResolvedValue([]) },
     stockCountLine: {

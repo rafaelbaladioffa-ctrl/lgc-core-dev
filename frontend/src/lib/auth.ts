@@ -73,3 +73,33 @@ export async function refreshWithAxis(authUrl: string, refreshToken: string, fet
     return null;
   }
 }
+
+/**
+ * Entrada pelo botão "Abrir" do Axis: lê `axisToken` da querystring e a remove da URL NA HORA (nunca fica na barra de
+ * endereços nem no histórico). Devolve o token curto (~90 s) ou null. Só leitura de URL — nenhuma rede aqui.
+ */
+export function takeLauncherToken(loc: Pick<Location, 'search' | 'pathname' | 'hash'>, hist: Pick<History, 'replaceState'>): string | null {
+  const params = new URLSearchParams(loc.search);
+  const token = params.get('axisToken');
+  if (params.has('axisToken')) {
+    params.delete('axisToken');
+    const rest = params.toString();
+    hist.replaceState(null, '', loc.pathname + (rest ? `?${rest}` : '') + loc.hash);
+  }
+  return token && token.length >= 20 ? token : null;
+}
+
+/** Troca o token curto do launcher pela sessão da Logística (o backend valida com o segredo compartilhado do Axis). */
+export async function exchangeLauncherToken(apiUrl: string, token: string, fetchFn: typeof fetch = fetch): Promise<{ accessToken: string; email: string }> {
+  let res: Response;
+  try {
+    res = await fetchFn(`${apiUrl.replace(/\/$/, '')}/auth/exchange`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+  } catch {
+    throw new LoginError('rede', 'Não foi possível abrir pelo Axis. Entre com seu e-mail e senha.');
+  }
+  const body = (await res.json().catch(() => ({}))) as { accessToken?: string; email?: string; message?: string };
+  if (!res.ok || !body.accessToken) {
+    throw new LoginError(res.status, res.status === 403 ? 'É necessário trocar a senha no Axis antes de acessar a Logística.' : 'O acesso pelo Axis expirou. Entre com seu e-mail e senha.');
+  }
+  return { accessToken: body.accessToken, email: body.email ?? decodeJwt(body.accessToken)?.email ?? '' };
+}

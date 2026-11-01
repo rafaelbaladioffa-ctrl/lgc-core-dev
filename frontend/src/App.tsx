@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, api, bindSession, loadSettings, saveSettings, type Bootstrap, type Settings, type Warehouse } from './lib/api';
-import { LoginError, loginWithAxis, validateLogin } from './lib/auth';
+import { ApiError, api, bindSession, hasPendingLauncherToken, loadSettings, saveSettings, takePendingLauncherToken, type Bootstrap, type Settings, type Warehouse } from './lib/api';
+import { LoginError, exchangeLauncherToken, loginWithAxis, validateLogin } from './lib/auth';
 import { resolveCode, type Scanned } from './lib/codes';
 import { idbStore, kv } from './lib/db';
 import { fmtDateTime, fmtQty, parseQty } from './lib/format';
@@ -62,6 +62,20 @@ export function App() {
   const [syncing, setSyncing] = useState(false);
   const [whFilter, setWhFilter] = useState('');
   const [expired, setExpired] = useState(false);
+  const [launching, setLaunching] = useState(() => hasPendingLauncherToken());
+  const [launchError, setLaunchError] = useState('');
+  const exchanging = useRef(false);
+
+  // Entrada pelo "Abrir" do Axis: troca o token curto (90 s) por uma sessão da Logística antes de qualquer outra chamada.
+  useEffect(() => {
+    const t = takePendingLauncherToken();
+    if (!t) { if (!exchanging.current) setLaunching(false); return; } // 2ª execução do StrictMode: a troca já está em andamento
+    exchanging.current = true;
+    exchangeLauncherToken(settings.apiUrl, t)
+      .then((r) => { const s = { ...settings, token: r.accessToken, refreshToken: undefined, userEmail: r.email }; saveSettings(s); setSettings(s); setExpired(false); })
+      .catch((e: Error) => setLaunchError(e.message))
+      .finally(() => { exchanging.current = false; setLaunching(false); });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // O token pode ser renovado dentro do api; o App recebe o novo par e a fila segue usando a sessão corrente.
   useEffect(() => { bindSession(settings, setSettings); }, [settings]);
@@ -119,8 +133,9 @@ export function App() {
     saveSettings(s); setSettings(s); setBoot(null);
   };
 
+  if (launching) return <main className="page"><p className="hint" role="status">Abrindo pelo Axis…</p></main>;
   if (!settings.token || expired) {
-    return <Login settings={settings} expired={expired} onLogin={(s) => { saveSettings(s); setSettings(s); setExpired(false); }} />;
+    return <Login settings={settings} expired={expired} notice={launchError} onLogin={(s) => { saveSettings(s); setSettings(s); setExpired(false); }} />;
   }
   if (!settings.warehouseId) {
     return (
@@ -158,7 +173,7 @@ export function App() {
 }
 
 /** Login com o e-mail e a senha do Axis: o JWT recebido é o mesmo SSO do planejamento (0.3); não há cadastro de senha aqui. */
-function Login({ settings, expired, onLogin }: { settings: Settings; expired: boolean; onLogin: (s: Settings) => void }) {
+function Login({ settings, expired, notice, onLogin }: { settings: Settings; expired: boolean; notice?: string; onLogin: (s: Settings) => void }) {
   const [email, setEmail] = useState(settings.userEmail ?? '');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -195,6 +210,7 @@ function Login({ settings, expired, onLogin }: { settings: Settings; expired: bo
     <main className="page">
       <h1>Axis Logística</h1>
       <p className="hint">Entre com o mesmo e-mail e senha do Axis.</p>
+      {notice && <p className="notice" role="alert">{notice}</p>}
       {expired && <p className="notice" role="status">Sua sessão expirou. Entre de novo — as leituras pendentes continuam salvas neste aparelho.</p>}
       <form onSubmit={submit} noValidate className="card">
         <label className="lbl" htmlFor="email">E-mail <span aria-hidden="true">*</span></label>

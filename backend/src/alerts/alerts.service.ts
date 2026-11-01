@@ -101,20 +101,20 @@ export class AlertsService {
     // 4) Requisições sem movimento dentro do SLA (espera por aprovação do Axis não conta).
     const analysisH = this.num('ALERT_ORDER_ANALYSIS_HOURS', 2);
     const pickingH = this.num('ALERT_ORDER_PICKING_HOURS', 24);
-    const orders = await this.prisma.fulfillmentOrder.findMany({ where: { OR: [{ status: { in: ['RECEBIDA', 'EM_ANALISE'] }, updatedAt: { lt: new Date(now - analysisH * HOUR) } }, { status: { in: ['RESERVADA', 'RESERVADA_PARCIAL'] }, updatedAt: { lt: new Date(now - pickingH * HOUR) } }] }, take: 5000 });
+    const orders = await this.prisma.fulfillmentOrder.findMany({ where: { OR: [{ status: { in: ['RECEBIDA', 'EM_ANALISE'] }, updatedAt: { lt: new Date(now - analysisH * HOUR) } }, { status: { in: ['RESERVADA', 'RESERVADA_PARCIAL'] }, updatedAt: { lt: new Date(now - pickingH * HOUR) } }] }, orderBy: { seq: 'desc' }, take: 5000 });
     for (const o of orders) out.push({ dedupeKey: `order:${o.id}`, kind: 'REQUISICAO_SEM_MOVIMENTO', severity: 'ATENCAO', warehouseId: o.warehouseId, refType: 'fulfillment_order', refId: o.id, message: `Ordem ATD-${String(o.seq).padStart(8, '0')} parada em ${o.status} além do SLA.`, responsibleRole: 'ALMOXARIFE' });
 
     // 5) Trânsito não recebido no prazo.
     const transitH = this.num('ALERT_TRANSIT_HOURS', 48);
-    const transfers = await this.prisma.transfer.findMany({ where: { status: 'EM_TRANSITO', dispatchedAt: { lt: new Date(now - transitH * HOUR) } }, take: 500 });
+    const transfers = await this.prisma.transfer.findMany({ where: { status: 'EM_TRANSITO', dispatchedAt: { lt: new Date(now - transitH * HOUR) } }, orderBy: { seq: 'desc' }, take: 5000 });
     for (const t of transfers) out.push({ dedupeKey: `trf:${t.id}`, kind: 'TRANSITO_NAO_RECEBIDO', severity: 'ATENCAO', warehouseId: t.toWarehouseId, refType: 'transfer', refId: t.id, message: `Transferência TRF-${String(t.seq).padStart(8, '0')} em trânsito há mais de ${transitH} h.`, responsibleRole: 'GESTOR_ALMOXARIFADO' });
 
     // 6) Custódia vencida.
-    const custody = await this.prisma.custodyTerm.findMany({ where: { status: 'ATIVO', expectedReturnAt: { lt: today } }, take: 500 });
+    const custody = await this.prisma.custodyTerm.findMany({ where: { status: 'ATIVO', expectedReturnAt: { lt: today } }, orderBy: { seq: 'desc' }, take: 5000 });
     for (const c of custody) out.push({ dedupeKey: `cus:${c.id}`, kind: 'CUSTODIA_VENCIDA', severity: 'ATENCAO', refType: 'custody_term', refId: c.id, message: `Custódia CUS-${String(c.seq).padStart(8, '0')} com devolução prevista vencida.`, responsibleRole: 'CONTROLE_PATRIMONIO' });
 
     // 7) Inventário apurado com divergência aguardando tratamento.
-    const counts = await this.prisma.stockCount.findMany({ where: { status: 'APURADA' }, take: 200 });
+    const counts = await this.prisma.stockCount.findMany({ where: { status: 'APURADA' }, orderBy: { seq: 'desc' }, take: 5000 });
     for (const c of counts) out.push({ dedupeKey: `inv:${c.id}`, kind: 'DIVERGENCIA_INVENTARIO', severity: 'ATENCAO', warehouseId: c.warehouseId, refType: 'stock_count', refId: c.id, message: `Inventário INV-${String(c.seq).padStart(8, '0')} apurado com divergências aguardando aprovação.`, responsibleRole: 'GESTOR_ALMOXARIFADO' });
 
     // 8) Integração: eventos de entrada com falha e fila de saída parada.

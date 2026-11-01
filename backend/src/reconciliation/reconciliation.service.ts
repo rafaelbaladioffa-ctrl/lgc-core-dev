@@ -1,5 +1,6 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsIn, IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -11,6 +12,9 @@ export class ResolveIssueDto {
 export class ListIssuesQuery {
   @IsOptional() @IsIn(['ABERTA', 'RESOLVIDA']) status?: 'ABERTA' | 'RESOLVIDA';
   @IsOptional() @IsString() @MaxLength(60) kind?: string;
+  @IsOptional() @IsString() @MaxLength(80) refId?: string;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) page?: number;
+  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(500) pageSize?: number;
 }
 
 export interface Detection { found: Found[]; truncated: Set<string> }
@@ -95,8 +99,15 @@ export class ReconciliationService {
     return out;
   }
 
-  list(q: ListIssuesQuery) {
-    return this.prisma.reconciliationIssue.findMany({ where: { status: q.status ?? 'ABERTA', ...(q.kind && { kind: q.kind }) }, orderBy: [{ severity: 'asc' }, { detectedAt: 'desc' }], take: 300 });
+  async list(q: ListIssuesQuery) {
+    const page = q.page ?? 1;
+    const pageSize = q.pageSize ?? 100;
+    const where = { status: q.status ?? ('ABERTA' as const), ...(q.kind && { kind: q.kind }), ...(q.refId && { refId: q.refId }) };
+    const [total, items] = await this.prisma.$transaction([
+      this.prisma.reconciliationIssue.count({ where }),
+      this.prisma.reconciliationIssue.findMany({ where, orderBy: [{ severity: 'asc' }, { detectedAt: 'desc' }, { id: 'asc' }], skip: (page - 1) * pageSize, take: pageSize }),
+    ]);
+    return { total, page, pageSize, items };
   }
 
   async resolve(id: string, resolution: string, actor: string) {

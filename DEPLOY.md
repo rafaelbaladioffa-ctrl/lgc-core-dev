@@ -21,7 +21,7 @@ na mesma rede/host). Nomes de serviço têm prefixo `logistica-` para não colid
 | Variável | Obrigatória | Observação |
 |---|---|---|
 | `DATABASE_URL` | sim | O compose sobrescreve com o host `logistica-postgres` |
-| `JWT_SECRET` | sim | **Idêntico** ao `JWT_ACCESS_SECRET` do Axis (SSO, HS256). Trocar no Axis exige trocar aqui |
+| `JWT_SECRET` | sim | **Idêntico ao `JWT_ACCESS_SECRET` do Axis** (nunca o `JWT_REFRESH_SECRET`): a Logística só revalida o access token a cada requisição (HS256). Se diferirem, o login no Axis funciona mas toda chamada na Logística volta 401 e o app mostra "sessão expirou". Trocar no Axis exige trocar aqui. Também assina a sessão de 8 h emitida pela troca do botão "Abrir" do Axis |
 | `AXIS_WEBHOOK_SECRET` | sim | Segredo HMAC do satélite cadastrado no Axis (`X-Axis-Signature`) |
 | `WEBHOOK_MAX_AGE_HOURS` | não (72) | Janela anti-replay do webhook |
 | `AXIS_EVENTS_URL` | sim em produção | Endpoint do Axis que recebe os eventos Logística → Axis. Vazio = nada é enviado (ficam `PENDING`) |
@@ -34,6 +34,10 @@ na mesma rede/host). Nomes de serviço têm prefixo `logistica-` para não colid
 | `PORT` | não (3100) | |
 
 Segredos: gerar com `openssl rand -hex 32`; guardar no cofre da VPS; nunca em log ou no repositório.
+
+### Entradas no PWA
+1. **E-mail e senha do Axis** (`POST {AXIS_PUBLIC_URL}/auth/login`, CORS liberado no Axis para o domínio da Logística).
+2. **Botão "Abrir" do Axis**: o Axis abre `https://<logistica>/?axisToken=<JWT de ~90 s>`; o app remove o parâmetro da URL na hora e chama `POST /api/v1/auth/exchange`, que valida o JWT com o segredo compartilhado e devolve uma sessão de 8 h (recusa token expirado, `mustChangePassword` e usuário desativado no Axis). Falhou ou demorou > 90 s: cai no login normal.
 
 ## 3. Primeira implantação
 
