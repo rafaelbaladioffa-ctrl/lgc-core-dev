@@ -45,6 +45,30 @@ async function main() {
       }
     }
   }
+
+  if (process.env.SEED_DEV_DATA === 'true' && process.env.NODE_ENV !== 'production') await seedDevData();
+}
+
+/**
+ * Dados de desenvolvimento (SEED_DEV_DATA=true, nunca em produção): um almoxarifado com endereços para o fluxo manual funcionar
+ * logo após o login, e acesso por almoxarifado para os usuários listados em SEED_DEV_GRANT_SUBS. Não altera o mapeamento de perfis.
+ */
+async function seedDevData() {
+  const wh = await prisma.warehouse.upsert({
+    where: { code: 'ALM-CENTRAL' },
+    update: {},
+    create: { code: 'ALM-CENTRAL', name: 'Almoxarifado Central (desenvolvimento)', type: 'CENTRAL', createdBy: 'seed' },
+  });
+  for (const [code, name] of [['DOCA', 'Doca de recebimento'], ['A-01', 'Corredor A, posição 1'], ['A-02', 'Corredor A, posição 2'], ['B-01', 'Corredor B, posição 1']]) {
+    await prisma.location.upsert({ where: { warehouseId_code: { warehouseId: wh.id, code } }, update: {}, create: { warehouseId: wh.id, code, name, level: 'AREA' } });
+  }
+  // Acesso por almoxarifado é por usuário (user_warehouse_access): SEED_DEV_GRANT_SUBS = ids do Axis (claim `sub`) separados por vírgula.
+  const subs = (process.env.SEED_DEV_GRANT_SUBS ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+  const all = await prisma.warehouse.findMany({ where: { type: { not: 'VIRTUAL' } }, select: { id: true }, take: 500 });
+  for (const sub of subs) {
+    for (const w of all) await prisma.userWarehouseAccess.upsert({ where: { axisUserId_warehouseId: { axisUserId: sub, warehouseId: w.id } }, update: {}, create: { axisUserId: sub, warehouseId: w.id, grantedBy: 'seed' } });
+  }
+  console.log(`Dados de desenvolvimento: almoxarifado ALM-CENTRAL; acesso liberado a ${subs.length} usuário(s) em SEED_DEV_GRANT_SUBS.`);
 }
 
 main().finally(() => prisma.$disconnect());

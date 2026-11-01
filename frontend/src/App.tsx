@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, api, bindSession, hasPendingLauncherToken, loadSettings, saveSettings, takePendingLauncherToken, type Bootstrap, type Settings, type Warehouse } from './lib/api';
-import { LoginError, exchangeLauncherToken, loginWithAxis, validateLogin } from './lib/auth';
+import { LoginError, decodeJwt, exchangeLauncherToken, loginWithAxis, validateLogin } from './lib/auth';
 import { resolveCode, type Scanned } from './lib/codes';
 import { idbStore, kv } from './lib/db';
 import { fmtDateTime, fmtQty, parseQty } from './lib/format';
@@ -55,6 +55,9 @@ export function App() {
   const [settings, setSettings] = useState<Settings>(() => loadSettings());
   const online = useOnline();
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  /** Lista de almoxarifados: carregando, pronta (inclusive vazia) ou com erro — vazia é um estado final, não "carregando". */
+  const [whState, setWhState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [whReload, setWhReload] = useState(0);
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [ops, setOps] = useState<QueueOp[]>([]);
   const [tab, setTab] = useState<Tab>('sep');
@@ -111,8 +114,12 @@ export function App() {
 
   useEffect(() => { void refreshOps(); }, [refreshOps]);
   useEffect(() => {
-    if (settings.token && !expired) api.warehouses().then(setWarehouses).catch((e) => { if (e instanceof ApiError && e.status === 401) setExpired(true); });
-  }, [settings.token, expired]);
+    if (!settings.token || expired) return;
+    setWhState('loading');
+    api.warehouses()
+      .then((list) => { setWarehouses(list); setWhState('ready'); })
+      .catch((e) => { if (e instanceof ApiError && e.status === 401) setExpired(true); else setWhState('error'); });
+  }, [settings.token, expired, whReload]);
   useEffect(() => { void loadBoot(settings); }, [settings.warehouseId, settings.token]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (online) void sync(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setInterval(() => { if (navigator.onLine) void sync(); }, 30_000); return () => clearInterval(t); }, [sync]);
@@ -141,7 +148,22 @@ export function App() {
     return (
       <main className="page">
         <h1>Selecione o almoxarifado</h1>
-        {warehouses.length === 0 && <p className="hint">Carregando… (precisa de conexão na primeira vez)</p>}
+        {whState === 'loading' && <p className="hint" role="status">Carregando almoxarifados…</p>}
+        {whState === 'error' && (
+          <div className="card" role="alert">
+            <p className="err">Não foi possível carregar os almoxarifados. Verifique a conexão (é necessária na primeira vez).</p>
+            <button className="btn" onClick={() => setWhReload((n) => n + 1)}>Tentar de novo</button>
+          </div>
+        )}
+        {whState === 'ready' && warehouses.length === 0 && (
+          <div className="card" role="status">
+            <strong>Nenhum almoxarifado disponível para o seu usuário.</strong>
+            <p className="hint">Peça ao administrador da Logística para liberar o seu acesso a um almoxarifado (Gestão de acessos) ou para cadastrar um.</p>
+            <p className="hint">Informe este identificador ao administrador: <code>{decodeJwt(settings.token)?.sub ?? '—'}</code></p>
+            <button className="btn ghost" onClick={() => setWhReload((n) => n + 1)}>Atualizar</button>
+          </div>
+        )}
+        {whState === 'ready' && warehouses.length > 0 && whFilter && warehouses.every((w) => !`${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())) && <p className="hint">Nenhum almoxarifado encontrado para essa busca.</p>}
         <input className="inp" aria-label="Buscar almoxarifado" placeholder="Buscar por código ou nome" value={whFilter} onChange={(e) => setWhFilter(e.target.value)} />
         {warehouses.filter((w) => `${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())).slice(0, 50).map((w) => <button key={w.id} className="btn block" onClick={() => { const s = { ...settings, warehouseId: w.id }; saveSettings(s); setSettings(s); }}>{w.code} — {w.name}</button>)}
         <button className="btn ghost" onClick={logout}>Sair</button>
