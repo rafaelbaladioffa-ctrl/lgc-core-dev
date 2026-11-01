@@ -117,3 +117,51 @@ export function Policies({ warehouseId, canWrite }: { warehouseId?: string; canW
     </>
   );
 }
+
+interface EditLoc { id: string; code: string; name: string | null; status: string; blockedReason: string | null; isVirtual: boolean; capacityKind: string | null; capacityValue: string | null }
+const LOC_STATUS: Record<string, string> = { ATIVO: 'Ativo', BLOQUEADO: 'Bloqueado', INATIVO: 'Inativo' };
+const CAP: Record<string, string> = { PESO: 'Peso', VOLUME: 'Volume', QUANTIDADE: 'Quantidade' };
+
+/** Monta o corpo do PATCH de endereço ou devolve o erro de validação. */
+export function buildLocationPatch(f: { name: string; status: string; reason: string; capKind: string; capValue: string }): { error: string } | { body: Record<string, unknown> } {
+  if (f.status === 'BLOQUEADO' && f.reason.trim().length < 3) return { error: 'Informe o motivo do bloqueio.' };
+  const body: Record<string, unknown> = { name: f.name.trim(), status: f.status };
+  if (f.status === 'BLOQUEADO') body.blockedReason = f.reason.trim();
+  const v = parseNum(f.capValue);
+  if (f.capKind || f.capValue.trim()) {
+    if (!f.capKind || v === null) return { error: 'Informe o tipo e o valor da capacidade juntos.' };
+    if (v < 0) return { error: 'A capacidade não pode ser negativa.' };
+    body.capacityKind = f.capKind; body.capacityValue = v;
+  }
+  return { body };
+}
+
+export function EditLocation({ warehouseId, loc, onDone, onCancel }: { warehouseId: string; loc: EditLoc; onDone: () => void; onCancel: () => void }) {
+  const [f, setF] = useState({ name: loc.name ?? '', status: loc.status, reason: loc.blockedReason ?? '', capKind: loc.capacityKind ?? '', capValue: loc.capacityValue ? String(Number(loc.capacityValue)) : '' });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return;
+    const r = buildLocationPatch(f);
+    if ('error' in r) return setError(r.error);
+    setBusy(true); setError('');
+    try { await call(`/warehouses/${warehouseId}/locations/${loc.id}`, { method: 'PATCH', body: JSON.stringify(r.body) }); onDone(); } catch (err) { setError((err as Error).message); } finally { setBusy(false); }
+  };
+  return (
+    <form className="card" onSubmit={submit} noValidate>
+      <h3>Editar endereço {loc.code}</h3>
+      <label className="lbl" htmlFor="en">Nome</label>
+      <input id="en" className="inp" value={f.name} maxLength={120} onChange={(e) => setF({ ...f, name: e.target.value })} />
+      <label className="lbl" htmlFor="es">Situação</label>
+      <select id="es" className="inp" value={f.status} disabled={loc.isVirtual} onChange={(e) => setF({ ...f, status: e.target.value })}>{Object.entries(LOC_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+      {f.status === 'BLOQUEADO' && <><label className="lbl" htmlFor="er">Motivo do bloqueio <span aria-hidden="true">*</span></label><input id="er" className="inp" value={f.reason} maxLength={300} onChange={(e) => setF({ ...f, reason: e.target.value })} /></>}
+      <label className="lbl" htmlFor="ek">Tipo de capacidade</label>
+      <select id="ek" className="inp" value={f.capKind} onChange={(e) => setF({ ...f, capKind: e.target.value })}><option value="">Sem limite</option>{Object.entries(CAP).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+      <label className="lbl" htmlFor="ev">Capacidade</label>
+      <input id="ev" className="inp" inputMode="decimal" value={f.capValue} onChange={(e) => setF({ ...f, capValue: e.target.value })} />
+      {error && <p className="err" role="alert">{error}</p>}
+      <div className="row"><button className="btn" type="submit" disabled={busy}>{busy ? 'Salvando…' : 'Salvar'}</button><button type="button" className="btn ghost" onClick={onCancel}>Cancelar</button></div>
+    </form>
+  );
+}

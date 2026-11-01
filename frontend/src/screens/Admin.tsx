@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { call } from '../lib/api';
 import { fmtDateTime, fmtQty } from '../lib/format';
-import { NewLocation, Policies } from './AdminForms';
+import { EditLocation, NewLocation, Policies } from './AdminForms';
 import { DataTable, useLoad, type Column } from '../ui';
 
 interface Loc { id: string; code: string; name: string | null; level: string; status: string; blockedReason: string | null; isVirtual: boolean; capacityKind: string | null; capacityValue: string | null; restrictedAccess: boolean }
@@ -33,6 +33,7 @@ function Locations({ warehouseId, canWrite }: { warehouseId?: string; canWrite: 
   const [res, reload] = useLoad(() => (warehouseId ? call<Loc[]>(`/warehouses/${warehouseId}/locations`) : Promise.resolve([] as Loc[])), [warehouseId]);
   const term = q.trim().toLowerCase();
   const rows = (res.state === 'ready' ? res.data : []).filter((l) => (!status || l.status === status) && (!term || `${l.code} ${l.name ?? ''}`.toLowerCase().includes(term)));
+  const [editing, setEditing] = useState<Loc | null>(null);
   const cols: Column<Loc>[] = [
     { key: 'c', header: 'Código', render: (l) => <strong>{l.code}</strong> },
     { key: 'n', header: 'Nome', render: (l) => l.name ?? '—' },
@@ -40,10 +41,12 @@ function Locations({ warehouseId, canWrite }: { warehouseId?: string; canWrite: 
     { key: 's', header: 'Situação', render: (l) => <span className={`pill ${l.status === 'ATIVO' ? 'ok' : 'warn'}`}>{LOC_STATUS[l.status] ?? l.status}</span> },
     { key: 'cap', header: 'Capacidade', render: (l) => (l.capacityKind ? `${l.capacityValue === null ? '—' : fmtQty(l.capacityValue)} (${l.capacityKind.toLowerCase()})` : '—') },
     { key: 'f', header: 'Observações', render: (l) => [l.isVirtual && 'Virtual', l.restrictedAccess && 'Acesso restrito', l.blockedReason].filter(Boolean).join(' · ') || '—' },
+    { key: 'ed', header: '', render: (l) => (canWrite ? <button className="btn ghost" onClick={() => setEditing(l)}>Editar</button> : null) },
   ];
   return (
     <>
-      {canWrite && warehouseId && <NewLocation warehouseId={warehouseId} locations={res.state === 'ready' ? res.data : []} onDone={reload} />}
+      {editing && warehouseId && <EditLocation warehouseId={warehouseId} loc={editing} onCancel={() => setEditing(null)} onDone={() => { setEditing(null); reload(); }} />}
+      {canWrite && warehouseId && !editing && <NewLocation warehouseId={warehouseId} locations={res.state === 'ready' ? res.data : []} onDone={reload} />}
       <form className="toolbar" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Código ou nome" value={q} onChange={(e) => setQ(e.target.value)} /></label>
         <label className="field">Situação<select className="inp" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Todas</option>{Object.entries(LOC_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>

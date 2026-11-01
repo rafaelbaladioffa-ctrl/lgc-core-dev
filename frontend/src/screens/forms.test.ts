@@ -28,3 +28,14 @@ describe('buildReceiveBody', () => {
     expect(buildReceiveBody(items, { i1: { qty: '8', loc: 'L1' } })).toEqual({ body: { items: [{ itemId: 'i1', receivedQty: 8, toLocationId: 'L1' }] } });
   });
 });
+
+import { buildLocationPatch } from './AdminForms';
+describe('buildLocationPatch', () => {
+  const base = { name: ' Zona ', status: 'ATIVO', reason: '', capKind: '', capValue: '' };
+  it('bloqueio exige motivo', () => expect('error' in buildLocationPatch({ ...base, status: 'BLOQUEADO' })).toBe(true));
+  it('capacidade exige tipo e valor juntos', () => {
+    expect('error' in buildLocationPatch({ ...base, capKind: 'PESO' })).toBe(true);
+    expect('error' in buildLocationPatch({ ...base, capValue: '5' })).toBe(true);
+    expect(buildLocationPatch({ ...base, capKind: 'PESO', capValue: '1.500,5' })).toEqual({ body: { name: 'Zona', status: 'ATIVO', capacityKind: 'PESO', capacityValue: 1500.5 } });
+  });
+});

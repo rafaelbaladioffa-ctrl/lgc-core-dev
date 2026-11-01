@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -6,7 +6,7 @@ import { RbacService } from '../rbac/rbac.service.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
-import { CreateLocationDto, CreateWarehouseDto } from './warehouses.dto.js';
+import { CreateLocationDto, CreateWarehouseDto, UpdateLocationDto } from './warehouses.dto.js';
 
 /** Hierarquia 5.1: cada nível só pode ficar sob o imediatamente superior (AREA é raiz). */
 const LEVEL_ORDER = ['AREA', 'CORREDOR', 'ESTANTE', 'NIVEL', 'POSICAO'] as const;
@@ -70,5 +70,30 @@ export class WarehousesController {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException(`Já existe um endereço com o código ${dto.code} neste almoxarifado.`);
       throw e;
     }
+  }
+
+  @Patch(':id/locations/:locationId')
+  @RequirePermissions('warehouse:write')
+  async updateLocation(@Param('id', ParseUUIDPipe) id: string, @Param('locationId', ParseUUIDPipe) locationId: string, @Body() dto: UpdateLocationDto, @CurrentUser() user: AuthenticatedUser) {
+    await this.rbac.assertWarehouseAccess(user, id);
+    const loc = await this.prisma.location.findFirst({ where: { id: locationId, warehouseId: id } });
+    if (!loc) throw new NotFoundException('Endereço não encontrado neste almoxarifado.');
+    if (loc.isVirtual && dto.status && dto.status !== 'ATIVO') throw new BadRequestException('Endereço virtual (quarentena, trânsito, perda) não pode ser bloqueado nem inativado.');
+    const status = dto.status ?? loc.status;
+    const reason = dto.blockedReason?.trim() ?? loc.blockedReason;
+    if (status === 'BLOQUEADO' && !reason) throw new BadRequestException('Informe o motivo do bloqueio.');
+    if ((dto.capacityKind !== undefined || dto.capacityValue !== undefined) && !((dto.capacityKind ?? loc.capacityKind) && (dto.capacityValue ?? loc.capacityValue) !== null)) {
+      throw new BadRequestException('Informe o tipo e o valor da capacidade juntos.');
+    }
+    if (status === 'INATIVO' && loc.status !== 'INATIVO') {
+      const stock = await this.prisma.stockBalance.count({ where: { locationId, quantity: { gt: 0 } } });
+      if (stock > 0) throw new ConflictException('O endereço ainda tem saldo; transfira o estoque antes de inativá-lo.');
+      const children = await this.prisma.location.count({ where: { parentId: locationId, status: { not: 'INATIVO' } } });
+      if (children > 0) throw new ConflictException('O endereço tem endereços inferiores ativos; inative-os primeiro.');
+    }
+    const data = { ...dto, name: dto.name?.trim() || dto.name, status, blockedReason: status === 'BLOQUEADO' ? reason : null };
+    const updated = await this.prisma.location.update({ where: { id: locationId }, data });
+    await this.audit.record(user.userId, 'location.updated', 'location', locationId, { warehouseId: id, before: { status: loc.status, name: loc.name }, after: { status: updated.status, name: updated.name } });
+    return updated;
   }
 }
