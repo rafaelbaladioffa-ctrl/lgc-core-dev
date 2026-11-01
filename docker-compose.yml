@@ -43,6 +43,8 @@ services:
   logistica-frontend:
     build:
       context: ./frontend
+      args:
+        VITE_AXIS_URL: ${AXIS_PUBLIC_URL:-http://localhost:3000/api/v1} # login do Axis chamado pelo navegador (CORS liberado no Axis para o domínio da Logística)
     restart: unless-stopped
     depends_on:
       - logistica-backend

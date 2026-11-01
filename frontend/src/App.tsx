@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, api, loadSettings, saveSettings, type Bootstrap, type Settings, type Warehouse } from './lib/api';
+import { ApiError, api, bindSession, loadSettings, saveSettings, type Bootstrap, type Settings, type Warehouse } from './lib/api';
+import { LoginError, loginWithAxis, validateLogin } from './lib/auth';
 import { resolveCode, type Scanned } from './lib/codes';
 import { idbStore, kv } from './lib/db';
 import { fmtDateTime, fmtQty, parseQty } from './lib/format';
@@ -60,15 +61,24 @@ export function App() {
   const [msg, setMsg] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [whFilter, setWhFilter] = useState('');
+  const [expired, setExpired] = useState(false);
 
-  const queue = useMemo(() => new OfflineQueue(idbStore, (o) => api.batch(settings, o)), [settings]);
+  // O token pode ser renovado dentro do api; o App recebe o novo par e a fila segue usando a sessão corrente.
+  useEffect(() => { bindSession(settings, setSettings); }, [settings]);
+  const queue = useMemo(
+    () => new OfflineQueue(idbStore, async (o) => {
+      try { return await api.batch(o); } catch (e) { if (e instanceof ApiError && e.status === 401) setExpired(true); throw e; }
+    }),
+    [],
+  );
   const refreshOps = useCallback(async () => setOps(await queue.list()), [queue]);
 
   const loadBoot = useCallback(async (s: Settings) => {
     if (!s.warehouseId) return;
     const key = `boot:${s.warehouseId}`;
-    try { const b = await api.bootstrap(s, s.warehouseId); setBoot(b); await kv.set(key, b); setMsg(''); }
+    try { const b = await api.bootstrap(s.warehouseId); setBoot(b); await kv.set(key, b); setMsg(''); }
     catch (e) {
+      if (e instanceof ApiError && e.status === 401) setExpired(true);
       const cached = await kv.get<Bootstrap>(key).catch(() => undefined);
       if (cached) { setBoot(cached); setMsg(`Sem conexão: usando dados de ${fmtDateTime(cached.generatedAt)}.`); }
       else setMsg(e instanceof ApiError ? e.message : 'Sem conexão e sem dados salvos neste aparelho.');
@@ -86,7 +96,9 @@ export function App() {
   }, [syncing, settings, queue, loadBoot, refreshOps]);
 
   useEffect(() => { void refreshOps(); }, [refreshOps]);
-  useEffect(() => { if (settings.token) api.warehouses(settings).then(setWarehouses).catch(() => undefined); }, [settings]);
+  useEffect(() => {
+    if (settings.token && !expired) api.warehouses().then(setWarehouses).catch((e) => { if (e instanceof ApiError && e.status === 401) setExpired(true); });
+  }, [settings.token, expired]);
   useEffect(() => { void loadBoot(settings); }, [settings.warehouseId, settings.token]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (online) void sync(); }, [online]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { const t = setInterval(() => { if (navigator.onLine) void sync(); }, 30_000); return () => clearInterval(t); }, [sync]);
@@ -101,8 +113,14 @@ export function App() {
   const pending = ops.filter((o) => o.state === 'PENDENTE').length;
   const problems = ops.filter((o) => o.state !== 'PENDENTE').length;
 
-  if (!settings.token) {
-    return <Login onSave={(s) => { saveSettings(s); setSettings(s); }} settings={settings} />;
+  /** Sair não apaga a fila: o que foi lido offline continua salvo e é enviado quando a mesma pessoa entrar de novo. */
+  const logout = () => {
+    const s = { ...settings, token: '', refreshToken: undefined };
+    saveSettings(s); setSettings(s); setBoot(null);
+  };
+
+  if (!settings.token || expired) {
+    return <Login settings={settings} expired={expired} onLogin={(s) => { saveSettings(s); setSettings(s); setExpired(false); }} />;
   }
   if (!settings.warehouseId) {
     return (
@@ -111,7 +129,7 @@ export function App() {
         {warehouses.length === 0 && <p className="hint">Carregando… (precisa de conexão na primeira vez)</p>}
         <input className="inp" aria-label="Buscar almoxarifado" placeholder="Buscar por código ou nome" value={whFilter} onChange={(e) => setWhFilter(e.target.value)} />
         {warehouses.filter((w) => `${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())).slice(0, 50).map((w) => <button key={w.id} className="btn block" onClick={() => { const s = { ...settings, warehouseId: w.id }; saveSettings(s); setSettings(s); }}>{w.code} — {w.name}</button>)}
-        <button className="btn ghost" onClick={() => { const s = { ...settings, token: '' }; saveSettings(s); setSettings(s); }}>Sair</button>
+        <button className="btn ghost" onClick={logout}>Sair</button>
       </main>
     );
   }
@@ -129,7 +147,7 @@ export function App() {
       {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
       {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
       {boot && tab === 'inv' && <Counting boot={boot} ops={ops} enqueue={enqueue} />}
-      {tab === 'sync' && <SyncPanel ops={ops} syncing={syncing} onSync={sync} queue={queue} refresh={refreshOps} onChangeWarehouse={() => { const s = { ...settings, warehouseId: undefined }; saveSettings(s); setSettings(s); setBoot(null); }} />}
+      {tab === 'sync' && <SyncPanel ops={ops} syncing={syncing} onSync={sync} queue={queue} refresh={refreshOps} onChangeWarehouse={() => { const s = { ...settings, warehouseId: undefined }; saveSettings(s); setSettings(s); setBoot(null); }} onLogout={logout} email={settings.userEmail} />}
       <nav className="tabs">
         {([['sep', 'Separação'], ['arm', 'Armazenagem'], ['inv', 'Inventário'], ['sync', 'Pendências']] as const).map(([k, t]) => (
           <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)}>{t}</button>
@@ -139,18 +157,59 @@ export function App() {
   );
 }
 
-function Login({ settings, onSave }: { settings: Settings; onSave: (s: Settings) => void }) {
-  const [token, setToken] = useState('');
-  const [apiUrl, setApiUrl] = useState(settings.apiUrl);
+/** Login com o e-mail e a senha do Axis: o JWT recebido é o mesmo SSO do planejamento (0.3); não há cadastro de senha aqui. */
+function Login({ settings, expired, onLogin }: { settings: Settings; expired: boolean; onLogin: (s: Settings) => void }) {
+  const [email, setEmail] = useState(settings.userEmail ?? '');
+  const [password, setPassword] = useState('');
+  const [show, setShow] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (busy) return; // proteção contra envio duplicado
+    const v = validateLogin(email, password);
+    setErrors(v);
+    if (v.email || v.password) return;
+    setBusy(true);
+    setError('');
+    try {
+      // Pendências de outra pessoa neste aparelho não podem ser enviadas sob outro login.
+      const pending = await idbStore.all().catch(() => []);
+      if (pending.length > 0 && settings.userEmail && settings.userEmail.toLowerCase() !== email.trim().toLowerCase()) {
+        setError(`Há ${pending.length} pendência(s) de ${settings.userEmail} neste aparelho. Entre com essa conta para sincronizá-las antes.`);
+        return;
+      }
+      const t = await loginWithAxis(settings.authUrl, email, password);
+      onLogin({ ...settings, token: t.accessToken, refreshToken: t.refreshToken, userEmail: t.email });
+    } catch (err) {
+      setError(err instanceof LoginError ? err.message : 'Não foi possível entrar agora. Tente novamente em instantes.');
+      setPassword('');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <main className="page">
       <h1>Axis Logística</h1>
-      <p className="hint">O acesso usa o login do Axis. Abra este aplicativo pelo Axis ou cole abaixo o token da sessão.</p>
-      <label className="lbl" htmlFor="api">Endereço da API</label>
-      <input id="api" className="inp" value={apiUrl} onChange={(e) => setApiUrl(e.target.value)} />
-      <label className="lbl" htmlFor="tok">Token do Axis</label>
-      <textarea id="tok" className="inp" rows={4} value={token} onChange={(e) => setToken(e.target.value.trim())} />
-      <button className="btn block" disabled={token.length < 20} onClick={() => onSave({ ...settings, apiUrl: apiUrl.trim() || '/api/v1', token })}>Entrar</button>
+      <p className="hint">Entre com o mesmo e-mail e senha do Axis.</p>
+      {expired && <p className="notice" role="status">Sua sessão expirou. Entre de novo — as leituras pendentes continuam salvas neste aparelho.</p>}
+      <form onSubmit={submit} noValidate className="card">
+        <label className="lbl" htmlFor="email">E-mail <span aria-hidden="true">*</span></label>
+        <input id="email" className="inp" type="email" autoComplete="username" inputMode="email" autoCapitalize="none" required aria-required="true" aria-invalid={!!errors.email} aria-describedby={errors.email ? 'email-err' : undefined} value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
+        {errors.email && <p id="email-err" className="err" role="alert">{errors.email}</p>}
+        <label className="lbl" htmlFor="senha">Senha <span aria-hidden="true">*</span></label>
+        <div className="row">
+          <input id="senha" className="inp" type={show ? 'text' : 'password'} autoComplete="current-password" required aria-required="true" aria-invalid={!!errors.password} aria-describedby={errors.password ? 'senha-err' : undefined} value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button type="button" className="btn ghost" onClick={() => setShow((v) => !v)} aria-pressed={show}>{show ? 'Ocultar' : 'Mostrar'}</button>
+        </div>
+        {errors.password && <p id="senha-err" className="err" role="alert">{errors.password}</p>}
+        {error && <p className="err" role="alert">{error}</p>}
+        <button className="btn block" type="submit" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</button>
+      </form>
+      <p className="hint">Esqueceu a senha? Use a recuperação no Axis.</p>
     </main>
   );
 }
@@ -299,7 +358,7 @@ function Counting({ boot, ops, enqueue }: ScreenProps) {
   );
 }
 
-function SyncPanel({ ops, syncing, onSync, queue, refresh, onChangeWarehouse }: { ops: QueueOp[]; syncing: boolean; onSync: () => void; queue: OfflineQueue; refresh: () => Promise<void>; onChangeWarehouse: () => void }) {
+function SyncPanel({ ops, syncing, onSync, queue, refresh, onChangeWarehouse, onLogout, email }: { ops: QueueOp[]; syncing: boolean; onSync: () => void; queue: OfflineQueue; refresh: () => Promise<void>; onChangeWarehouse: () => void; onLogout: () => void; email?: string }) {
   return (
     <section>
       <h2>Pendências de sincronização</h2>
@@ -319,6 +378,7 @@ function SyncPanel({ ops, syncing, onSync, queue, refresh, onChangeWarehouse }: 
         </div>
       ))}
       <button className="btn ghost" onClick={onChangeWarehouse}>Trocar de almoxarifado</button>
+      <button className="btn ghost" onClick={onLogout}>Sair{email ? ` (${email})` : ''}</button>
     </section>
   );
 }

@@ -3,6 +3,8 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 COPY . .
+ARG VITE_AXIS_URL
+ENV VITE_AXIS_URL=$VITE_AXIS_URL
 RUN npm run build
 
 FROM nginx:alpine AS runtime

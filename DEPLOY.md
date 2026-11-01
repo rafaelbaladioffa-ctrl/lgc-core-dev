@@ -29,6 +29,7 @@ na mesma rede/host). Nomes de serviço têm prefixo `logistica-` para não colid
 | `SCHEDULER_ENABLED` | — | `true` em **uma** instância (compose já define) |
 | `DEFAULT_WAREHOUSE_CODE` | não | Almoxarifado de atendimento quando a requisição do Axis não informa |
 | `ALERT_ORDER_ANALYSIS_HOURS` / `ALERT_ORDER_PICKING_HOURS` / `ALERT_TRANSIT_HOURS` | não (2 / 24 / 48) | SLAs dos alertas |
+| `AXIS_PUBLIC_URL` | sim em produção | URL pública da API do Axis (ex.: `https://axis.exemplo.com.br/api/v1`), embutida no PWA no build (`VITE_AXIS_URL`): é para onde o login do e-mail/senha vai. **O Axis precisa liberar CORS para o domínio da Logística** |
 | `LOGISTICA_DB_PASSWORD` | sim | Senha do Postgres (variável do compose; o default `logistica` é só para dev) |
 | `PORT` | não (3100) | |
 
