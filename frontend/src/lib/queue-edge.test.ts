@@ -13,7 +13,7 @@ describe('OfflineQueue — lotes e falhas parciais', () => {
     const s = await q.flush();
     expect(send.mock.calls.map((c) => c[0].length)).toEqual([200, 200, 50]);
     expect(s).toMatchObject({ sent: 450, applied: 450 });
-    expect((send.mock.calls[1][0][0] as { payload: { lineId: string } }).payload.lineId).toBe('l200');
+    expect((send.mock.calls[1][0][0] as unknown as { payload: { lineId: string } }).payload.lineId).toBe('l200');
   });
 
   it('falha no meio de vários lotes: o que já foi aplicado sai da fila, o resto segue pendente e reenvia com os mesmos opIds', async () => {

@@ -1325,6 +1325,35 @@ model OfflineOperation {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 10 — Reconciliação (12.4): divergência vira fila, nunca correção silenciosa
+// ---------------------------------------------------------------------------
+
+enum IssueStatus {
+  ABERTA
+  RESOLVIDA
+}
+
+model ReconciliationIssue {
+  id         String      @id @default(uuid())
+  kind       String // BALANCE_VS_LEDGER | RESERVED_DRIFT | ORPHAN_RESERVATION | OUTBOX_DEAD_LETTER | ...
+  severity   String      @default("ATENCAO")
+  refType    String      @map("ref_type")
+  refId      String      @map("ref_id")
+  dedupeKey  String      @map("dedupe_key")
+  details    Json        @default("{}")
+  status     IssueStatus @default(ABERTA)
+  detectedAt DateTime    @default(now()) @map("detected_at")
+  lastSeenAt DateTime    @default(now()) @map("last_seen_at")
+  resolvedAt DateTime?   @map("resolved_at")
+  resolvedBy String?     @map("resolved_by")
+  resolution String?
+
+  @@index([status, kind])
+  @@index([dedupeKey, status])
+  @@map("reconciliation_issues")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 

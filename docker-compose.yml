@@ -1,14 +1,15 @@
+# Axis Logística — serviço satélite do Axis. Banco PRÓPRIO (nunca o do Axis); mesma VPS, containers adicionais.
+# Na VPS compartilhada, estes serviços entram no compose do Axis (ou numa stack irmã) — ver DEPLOY.md.
 services:
-  # Banco PRÓPRIO do satélite Logística — nunca compartilhado com o banco do Axis.
-  postgres:
+  logistica-postgres:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: logistica
-      POSTGRES_PASSWORD: logistica
+      POSTGRES_PASSWORD: ${LOGISTICA_DB_PASSWORD:-logistica}
       POSTGRES_DB: axis_logistica
     ports:
-      - "5433:5432"
+      - "5433:5432" # só para desenvolvimento; em produção remova e deixe apenas a rede interna
     volumes:
       - logistica_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -17,20 +18,57 @@ services:
       timeout: 5s
       retries: 10
 
-  backend:
+  logistica-backend:
     build:
       context: ./backend
     restart: unless-stopped
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql://logistica:logistica@postgres:5432/axis_logistica?schema=public
+      DATABASE_URL: postgresql://logistica:${LOGISTICA_DB_PASSWORD:-logistica}@logistica-postgres:5432/axis_logistica?schema=public
+      SCHEDULER_ENABLED: "true" # exatamente UMA instância do backend com o agendador ligado
     depends_on:
-      postgres:
+      logistica-postgres:
         condition: service_healthy
     ports:
       - "3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/api/v1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # Migrações compatíveis com a versão anterior (rollback = voltar a imagem; ver DEPLOY.md), depois o seed idempotente.
     command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/main.js"
+
+  logistica-frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - logistica-backend
+    ports:
+      - "5174:80" # atrás do proxy reverso/TLS da VPS; a câmera do PWA exige HTTPS
+
+  logistica-backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      logistica-postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: logistica-postgres
+      PGUSER: logistica
+      PGPASSWORD: ${LOGISTICA_DB_PASSWORD:-logistica}
+      PGDATABASE: axis_logistica
+      RETENTION_DAYS: "30"
+    volumes:
+      - logistica_backups:/backups
+      - ./backend/scripts:/scripts:ro
+    entrypoint: ["sh", "-c"]
+    command: >
+      "sh /scripts/backup-postgres.sh;
+       while true; do sleep 86400; sh /scripts/backup-postgres.sh; done"
 
 volumes:
   logistica_postgres_data:
+  logistica_backups:

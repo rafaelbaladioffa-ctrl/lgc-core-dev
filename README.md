@@ -63,3 +63,11 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - **Backend:** `GET /sync/bootstrap?warehouseId=` (tarefas de separação/armazenagem, folhas de contagem cega, endereços e códigos de barras — sem saldo nem custo) e `POST /sync/batch` (até 200 operações com `opId` UUID gerado no aparelho; cada uma é idempotente por `deviceId+opId`; resultado `APLICADA | DUPLICADA | CONFLITO | REJEITADA | ERRO`; a permissão é checada por tipo de operação; `ERRO` = falha temporária e não é gravada).
 - **Frontend (React + Vite, mobile-first, alto contraste, alvos grandes):** `cd frontend && npm install && npm run dev` (porta 5174, proxy `/api` → 3100). O acesso é o do Axis: abra `http://localhost:5174/#token=<JWT do Axis>` (o token é removido da barra de endereços) ou cole-o uma vez. Telas: Separação (endereço → material → quantidade), Armazenagem, Inventário (contagem cega) e Pendências. Leitura por câmera (`BarcodeDetector`) ou coletor/teclado; sem rede, as ações ficam na fila local (IndexedDB) e sincronizam sozinhas ao voltar a conexão; conflitos e rejeições aparecem com a mensagem e podem ser dispensados ou refeitos. Service worker guarda a casca do app.
 - Limites conhecidos: item seriado exige leitura da série online; vídeo/câmera depende de HTTPS (ou `localhost`) e de navegador com `BarcodeDetector`.
+
+## Sprint 10 — hardening
+- **Cenários obrigatórios (seção 23):** `backend/test/sprint10-scenarios.e2e-spec.ts` (20 cenários ponta a ponta).
+- **Outbox → Axis:** `OutboxDispatcherService` (HMAC `X-Logistica-Signature`, `Idempotency-Key`, backoff 1 min/5 min/30 min/2 h, dead-letter); `GET /integration/outbox/status`, `POST /integration/outbox/dispatch`, `POST /integration/outbox/:id/retry`.
+- **Agendador** (`SCHEDULER_ENABLED=true`, uma instância): outbox 30 s, alertas e reservas 5 min, reconciliação 1 h.
+- **Reconciliação (12.4):** `POST /reconciliation/run`, `GET /reconciliation/issues`, `POST /reconciliation/issues/:id/resolve` — detecta e abre item; nunca corrige em silêncio.
+- **Auditoria:** toda mutação, leitura sensível e negação de acesso; `GET /audit/events`; `X-Correlation-Id` em todas as respostas.
+- **Deploy e status:** `DEPLOY.md` (compose com Postgres próprio, backend, frontend/nginx e backup) e `STATUS_FINAL.md` (o que ficou fora do MVP, contratos a confirmar e decisões da seção 28).
