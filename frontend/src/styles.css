@@ -90,3 +90,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
 .tiles .card { margin: 0; } .tile-v { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 16px; margin: 6px 0; }
+.chk { display: flex; align-items: center; gap: 8px; font-size: 15px; } .chk input { width: 20px; height: 20px; }

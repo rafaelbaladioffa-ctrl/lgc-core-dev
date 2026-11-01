@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { call } from '../lib/api';
 import { fmtDateTime, fmtQty } from '../lib/format';
 import { materialsQuery } from '../lib/listing';
+import { MaterialForm, emptyMaterial, valuesFromMaterial } from './MaterialForm';
 import { DataTable, Pager, useDebounced, useLoad, yesNo, type Column } from '../ui';
 
 interface Material {
@@ -21,7 +22,8 @@ const STATUS_LABEL: Record<string, string> = { ATIVO: 'Ativo', INATIVO: 'Inativo
 
 const flags = (m: Material) => [m.lotControlled && 'Lote', m.expiryControlled && 'Validade', m.serialControlled && 'Série', m.assetTagged && 'Patrimônio', m.requiresCa && 'CA', m.requiresCalibration && 'Calibração', m.hasSizeGrid && 'Grade', m.returnable && 'Retornável'].filter(Boolean) as string[];
 
-export function Catalog({ warehouseId }: { warehouseId?: string }) {
+export function Catalog({ warehouseId, canWrite = false }: { warehouseId?: string; canWrite?: boolean }) {
+  const [creating, setCreating] = useState(false);
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
   const [category, setCategory] = useState('');
@@ -34,7 +36,8 @@ export function Catalog({ warehouseId }: { warehouseId?: string }) {
     return call<Page<Material>>(`/materials?${materialsQuery({ page, pageSize: 20, status, q: dq, type, category })}`);
   }, [dq, type, category, status, page]);
 
-  if (sel) return <MaterialDetail m={sel} warehouseId={warehouseId} onBack={() => setSel(null)} />;
+  if (creating) return <section><button className="btn ghost" onClick={() => setCreating(false)}>← Catálogo</button><MaterialForm mode="create" initial={emptyMaterial()} onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); reload(); }} /></section>;
+  if (sel) return <MaterialDetail m={sel} warehouseId={warehouseId} canWrite={canWrite} onBack={() => { setSel(null); reload(); }} />;
   const cols: Column<Material>[] = [
     { key: 'code', header: 'Código', render: (m) => <strong>{m.code}</strong> },
     { key: 'desc', header: 'Descrição', render: (m) => m.shortDescription },
@@ -49,6 +52,7 @@ export function Catalog({ warehouseId }: { warehouseId?: string }) {
   return (
     <section>
       <h2>Catálogo de materiais</h2>
+      {canWrite && <div className="toolbar"><button className="btn" onClick={() => setCreating(true)}>Novo material</button></div>}
       <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Código, descrição ou código de barras" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></label>
         <label className="field">Tipo<select className="inp" value={type} onChange={(e) => { setType(e.target.value); setPage(1); }}><option value="">Todos</option>{TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}</select></label>
@@ -62,13 +66,18 @@ export function Catalog({ warehouseId }: { warehouseId?: string }) {
   );
 }
 
-function MaterialDetail({ m, warehouseId, onBack }: { m: Material; warehouseId?: string; onBack: () => void }) {
+function MaterialDetail({ m: initial, warehouseId, canWrite, onBack }: { m: Material; warehouseId?: string; canWrite: boolean; onBack: () => void }) {
+  const [m, setM] = useState(initial);
+  const [editing, setEditing] = useState(false);
+  const [vTick, setVTick] = useState(0);
   const [av] = useLoad(() => call<Availability>(`/materials/${m.id}/availability${warehouseId ? `?warehouse_id=${warehouseId}` : ''}`), [m.id, warehouseId]);
-  const [vers] = useLoad(() => call<Version[]>(`/materials/${m.id}/versions`), [m.id]);
+  const [vers] = useLoad(() => call<Version[]>(`/materials/${m.id}/versions`), [m.id, vTick]);
   const kv = (k: string, v: React.ReactNode) => <div><dt>{k}</dt><dd>{v || '—'}</dd></div>;
   return (
     <section>
       <button className="btn ghost" onClick={onBack}>← Catálogo</button>
+      {canWrite && !editing && m.status === 'ATIVO' && <button className="btn" onClick={() => setEditing(true)}>Editar material</button>}
+      {editing && <MaterialForm mode="edit" materialId={m.id} initial={valuesFromMaterial(m as never)} onCancel={() => setEditing(false)} onSaved={(saved) => { setM({ ...m, ...(saved as object) } as Material); setEditing(false); setVTick((n) => n + 1); }} />}
       <h2>{m.code} — {m.shortDescription}</h2>
       {m.technicalDescription && <p className="hint">{m.technicalDescription}</p>}
       <div className="card">
