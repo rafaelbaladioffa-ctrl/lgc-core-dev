@@ -8,6 +8,14 @@ import { OfflineQueue, type OpType, type QueueOp } from './lib/queue';
 import { cameraSupported, startCamera } from './lib/scanner';
 
 type Tab = 'sep' | 'arm' | 'inv' | 'sync';
+/** Itens do menu lateral, com a permissão local que libera cada tela (mesmo padrão do shell do Axis). */
+const NAV_ITEMS: Array<{ key: Tab; label: string; icon: string; permission?: string }> = [
+  { key: 'sep', label: 'Separação', icon: '⚑', permission: 'picking:execute' },
+  { key: 'arm', label: 'Armazenagem', icon: '▣', permission: 'receipt:execute' },
+  { key: 'inv', label: 'Inventário', icon: '☆', permission: 'stockcount:count' },
+  { key: 'sync', label: 'Pendências', icon: '⇄' },
+];
+const initials = (email?: string) => (email ? email.split('@')[0].slice(0, 2).toUpperCase() : '?');
 const TYPE_LABEL: Record<OpType, string> = { 'picking.start': 'Iniciar separação', 'picking.scan': 'Leitura de separação', 'picking.complete': 'Concluir separação', 'putaway.confirm': 'Armazenagem', 'count.submit': 'Contagem' };
 
 function useOnline() {
@@ -68,6 +76,10 @@ export function App() {
   const [launching, setLaunching] = useState(() => hasPendingLauncherToken());
   const [launchError, setLaunchError] = useState('');
   const exchanging = useRef(false);
+  const [perms, setPerms] = useState<string[] | null>(null);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => { try { return localStorage.getItem('axis_theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } });
+  useEffect(() => { document.documentElement.setAttribute('data-theme', theme); try { localStorage.setItem('axis_theme', theme); } catch { /* sem armazenamento */ } }, [theme]);
+  useEffect(() => { if (settings.token && settings.warehouseId) api.me().then((m) => setPerms(m.permissions)).catch(() => setPerms(null)); }, [settings.token, settings.warehouseId]);
 
   // Entrada pelo "Abrir" do Axis: troca o token curto (90 s) por uma sessão da Logística antes de qualquer outra chamada.
   useEffect(() => {
@@ -172,25 +184,45 @@ export function App() {
   }
 
   return (
-    <main className="page">
-      <header className="top">
-        <img src="/axis_logo_white.svg" alt="Axis" height={22} />
-        <span className="badge-app">Logística</span>
-        <span className={`dot ${online ? 'on' : 'off'}`} title={online ? 'Online' : 'Offline'} />
-        <button className="chip" onClick={() => setTab('sync')}>{pending > 0 ? `${pending} pendente(s)` : 'Em dia'}{problems > 0 ? ` · ${problems} com problema` : ''}</button>
+    <div className="shell">
+      <header className="topbar">
+        <div className="topbar-brand">
+          <img src="/axis_logo_white.svg" alt="Axis" height={22} />
+          <span className="badge-app">Logística</span>
+        </div>
+        <div className="topbar-search"><input aria-label="Buscar" placeholder="Buscar..." /></div>
+        <div className="topbar-right">
+          <span className={`dot ${online ? 'on' : 'off'}`} title={online ? 'Online' : 'Offline'} />
+          <button className="chip" onClick={() => setTab('sync')} title="Notificações e pendências">🔔 {pending > 0 ? pending : ''}{problems > 0 ? ` · ${problems}!` : ''}</button>
+          <button className="chip" onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))} title="Alternar tema" aria-label="Alternar tema">{theme === 'light' ? '☾' : '☀'}</button>
+          <span className="avatar" title={settings.userEmail}>{initials(settings.userEmail)}</span>
+        </div>
       </header>
-      {msg && <p className="notice" role="status">{msg}</p>}
-      {!boot && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
-      {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
-      {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
-      {boot && tab === 'inv' && <Counting boot={boot} ops={ops} enqueue={enqueue} />}
-      {tab === 'sync' && <SyncPanel ops={ops} syncing={syncing} onSync={sync} queue={queue} refresh={refreshOps} onChangeWarehouse={() => { const s = { ...settings, warehouseId: undefined }; saveSettings(s); setSettings(s); setBoot(null); }} onLogout={logout} email={settings.userEmail} />}
+      <div className="shell-body">
+        <aside className="sidebar">
+          <nav aria-label="Menu">
+            {NAV_ITEMS.filter((i) => !i.permission || perms === null || perms.includes(i.permission)).map((i) => (
+              <button key={i.key} className={tab === i.key ? 'nav-item active' : 'nav-item'} onClick={() => setTab(i.key)}>
+                <span aria-hidden className="nav-ico">{i.icon}</span>{i.label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+        <main className="page">
+          {msg && <p className="notice" role="status">{msg}</p>}
+          {!boot && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
+          {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
+          {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
+          {boot && tab === 'inv' && <Counting boot={boot} ops={ops} enqueue={enqueue} />}
+          {tab === 'sync' && <SyncPanel ops={ops} syncing={syncing} onSync={sync} queue={queue} refresh={refreshOps} onChangeWarehouse={() => { const s = { ...settings, warehouseId: undefined }; saveSettings(s); setSettings(s); setBoot(null); }} onLogout={logout} email={settings.userEmail} />}
+        </main>
+      </div>
       <nav className="tabs">
-        {([['sep', 'Separação'], ['arm', 'Armazenagem'], ['inv', 'Inventário'], ['sync', 'Pendências']] as const).map(([k, t]) => (
-          <button key={k} className={tab === k ? 'tab active' : 'tab'} onClick={() => setTab(k)}>{t}</button>
+        {NAV_ITEMS.map((i) => (
+          <button key={i.key} className={tab === i.key ? 'tab active' : 'tab'} onClick={() => setTab(i.key)}>{i.label}</button>
         ))}
       </nav>
-    </main>
+    </div>
   );
 }
 

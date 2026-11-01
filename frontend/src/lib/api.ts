@@ -78,6 +78,7 @@ export interface Bootstrap {
 }
 
 export const api = {
+  me: () => call<{ userId: string; email: string; permissions: string[]; logisticsRoles: Array<{ code: string; name: string }> }>('/me'),
   warehouses: () => call<Warehouse[]>('/warehouses'),
   bootstrap: (warehouseId: string) => call<Bootstrap>(`/sync/bootstrap?warehouseId=${warehouseId}`),
   batch: async (ops: Array<Pick<QueueOp, 'opId' | 'type' | 'payload' | 'clientAt'>>) =>
