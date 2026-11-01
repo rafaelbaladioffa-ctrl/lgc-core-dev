@@ -5,6 +5,7 @@ import { resolveCode, type Scanned } from './lib/codes';
 import { idbStore, kv } from './lib/db';
 import { fmtDateTime, fmtQty, parseQty } from './lib/format';
 import { OfflineQueue, type OpType, type QueueOp } from './lib/queue';
+import { ErrorBoundary } from './ErrorBoundary';
 import { Catalog } from './screens/Catalog';
 import { Stock } from './screens/Stock';
 import { Receiving } from './screens/Receiving';
@@ -227,6 +228,7 @@ export function App() {
           </nav>
         </aside>
         <main className="page">
+          <ErrorBoundary resetKey={tab}>
           {msg && <p className="notice" role="status">{msg}</p>}
           {tab === 'cat' && <Catalog warehouseId={settings.warehouseId} />}
           {tab === 'est' && settings.warehouseId && <Stock warehouseId={settings.warehouseId} />}
@@ -242,6 +244,7 @@ export function App() {
           {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
           {boot && tab === 'inv' && <Counting boot={boot} ops={ops} enqueue={enqueue} />}
           {tab === 'sync' && <SyncPanel ops={ops} syncing={syncing} onSync={sync} queue={queue} refresh={refreshOps} onChangeWarehouse={() => { const s = { ...settings, warehouseId: undefined }; saveSettings(s); setSettings(s); setBoot(null); }} onLogout={logout} email={settings.userEmail} />}
+          </ErrorBoundary>
         </main>
       </div>
       <nav className="tabs">
