@@ -1,0 +1,1425 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum MaterialType {
+  CONSUMO
+  FERRAMENTA
+  EQUIPAMENTO
+  ATIVO
+  EMBALAGEM
+  QUIMICO
+  EPI
+  EPC
+  SOBRESSALENTE
+}
+
+enum MaterialStatus {
+  ATIVO
+  INATIVO
+  SUBSTITUIDO
+}
+
+enum ExitMethod {
+  FIFO
+  FEFO
+  SERIE_ESPECIFICA
+}
+
+enum Criticality {
+  A
+  B
+  C
+}
+
+enum DemandClass {
+  X
+  Y
+  Z
+}
+
+enum UomDimension {
+  UNIDADE
+  MASSA
+  VOLUME
+  COMPRIMENTO
+  AREA
+  EMBALAGEM
+}
+
+enum WarehouseType {
+  CENTRAL
+  UNIDADE
+  PROJETO
+  TEMPORARIO
+  VEICULO
+  CONSIGNACAO
+  VIRTUAL
+}
+
+enum WarehouseStatus {
+  ATIVO
+  INATIVO
+}
+
+/// Hierarquia 5.1: Área/Zona → Corredor → Estante → Nível → Posição
+enum LocationLevel {
+  AREA
+  CORREDOR
+  ESTANTE
+  NIVEL
+  POSICAO
+}
+
+enum LocationStatus {
+  ATIVO
+  BLOQUEADO
+  INATIVO
+}
+
+enum CapacityKind {
+  PESO
+  VOLUME
+  QUANTIDADE
+  CLASSE
+}
+
+// ---------------------------------------------------------------------------
+// Unidades de medida
+// ---------------------------------------------------------------------------
+
+model UnitOfMeasure {
+  id        String       @id @default(uuid())
+  code      String       @unique // UN, CX, KG, L, M, M2 ...
+  name      String
+  dimension UomDimension
+  precision Int          @default(0) // casas decimais permitidas na quantidade
+  active    Boolean      @default(true)
+  createdAt DateTime     @default(now()) @map("created_at")
+  updatedAt DateTime     @updatedAt @map("updated_at")
+
+  materials       Material[]
+  conversionsFrom UnitConversion[] @relation("ConversionFrom")
+  conversionsTo   UnitConversion[] @relation("ConversionTo")
+
+  @@map("units_of_measure")
+}
+
+/// Fator de conversão versionado por vigência. materialId nulo = conversão genérica (ex.: M → CM).
+model UnitConversion {
+  id         String    @id @default(uuid())
+  materialId String?   @map("material_id")
+  fromUomId  String    @map("from_uom_id")
+  toUomId    String    @map("to_uom_id")
+  factor     Decimal   @db.Decimal(18, 6) // 1 fromUom = factor toUom
+  validFrom  DateTime  @default(now()) @map("valid_from")
+  validTo    DateTime? @map("valid_to")
+  createdBy  String?   @map("created_by")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  material Material?     @relation(fields: [materialId], references: [id])
+  fromUom  UnitOfMeasure @relation("ConversionFrom", fields: [fromUomId], references: [id])
+  toUom    UnitOfMeasure @relation("ConversionTo", fields: [toUomId], references: [id])
+
+  @@index([materialId, fromUomId, toUomId])
+  @@map("unit_conversions")
+}
+
+// ---------------------------------------------------------------------------
+// Materiais (seção 7)
+// ---------------------------------------------------------------------------
+
+model Material {
+  id                   String         @id @default(uuid())
+  code                 String         @unique // ex.: EPI-CAP-0001
+  shortDescription     String         @map("short_description")
+  technicalDescription String?        @map("technical_description")
+  category             String
+  subcategory          String?
+  type                 MaterialType
+  status               MaterialStatus @default(ATIVO)
+  stockUomId           String         @map("stock_uom_id")
+  replacedById         String?        @map("replaced_by_id")
+
+  manufacturer     String?
+  brand            String?
+  model            String?
+  manufacturerCode String? @map("manufacturer_code")
+  ncm              String? // validado/mantido pelo Axis quando necessário
+  cest             String?
+  fiscalOrigin     String? @map("fiscal_origin")
+
+  // Controles logísticos (7.2)
+  lotControlled         Boolean      @default(false) @map("lot_controlled")
+  expiryControlled      Boolean      @default(false) @map("expiry_controlled")
+  minShelfLifeDays      Int?         @map("min_shelf_life_days")
+  serialControlled      Boolean      @default(false) @map("serial_controlled")
+  assetTagged           Boolean      @default(false) @map("asset_tagged")
+  requiresCertificate   Boolean      @default(false) @map("requires_certificate")
+  requiresCalibration   Boolean      @default(false) @map("requires_calibration")
+  requiresCa            Boolean      @default(false) @map("requires_ca")
+  hasSizeGrid           Boolean      @default(false) @map("has_size_grid")
+  weightKg              Decimal?     @map("weight_kg") @db.Decimal(12, 4)
+  lengthCm              Decimal?     @map("length_cm") @db.Decimal(10, 2)
+  widthCm               Decimal?     @map("width_cm") @db.Decimal(10, 2)
+  heightCm              Decimal?     @map("height_cm") @db.Decimal(10, 2)
+  storageCondition      String?      @map("storage_condition")
+  riskClass             String?      @map("risk_class")
+  exitMethod            ExitMethod   @default(FIFO) @map("exit_method")
+  purchaseMultiple      Decimal?     @map("purchase_multiple") @db.Decimal(18, 6)
+  leadTimeDays          Int?         @map("lead_time_days")
+  criticality           Criticality  @default(C)
+  demandClass           DemandClass? @map("demand_class")
+  requiresAuthorization Boolean      @default(false) @map("requires_authorization")
+  authorizationBy       String?      @map("authorization_by") // HSE, QUALIDADE, TI, GESTOR
+  returnable            Boolean      @default(false)
+  repairable            Boolean      @default(false)
+  calibratable          Boolean      @default(false)
+  leased                Boolean      @default(false)
+  disposable            Boolean      @default(false)
+
+  // Custo recebido do Axis (visibilidade conforme permissão)
+  averageCost Decimal? @map("average_cost") @db.Decimal(18, 4)
+  lastCost    Decimal? @map("last_cost") @db.Decimal(18, 4)
+
+  currentVersion Int      @default(1) @map("current_version")
+  createdBy      String   @map("created_by") // axis user id
+  updatedBy      String?  @map("updated_by")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  stockUom    UnitOfMeasure     @relation(fields: [stockUomId], references: [id])
+  replacedBy  Material?         @relation("MaterialReplacement", fields: [replacedById], references: [id])
+  replaces    Material[]        @relation("MaterialReplacement")
+  versions    MaterialVersion[]
+  barcodes    MaterialBarcode[]
+  conversions UnitConversion[]
+  lots        Lot[]
+  serials     SerialNumber[]
+  balances    StockBalance[]
+  movements   StockMovement[]
+
+  @@index([category, subcategory])
+  @@index([type])
+  @@index([status])
+  @@map("materials")
+}
+
+/// Cada alteração material gera uma versão com snapshot completo (7.3.6).
+model MaterialVersion {
+  id           String   @id @default(uuid())
+  materialId   String   @map("material_id")
+  version      Int
+  snapshot     Json
+  changeReason String?  @map("change_reason")
+  changedBy    String   @map("changed_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+
+  @@unique([materialId, version])
+  @@map("material_versions")
+}
+
+model MaterialBarcode {
+  id         String   @id @default(uuid())
+  materialId String   @map("material_id")
+  code       String   @unique // GTIN/EAN, código interno, código de embalagem
+  kind       String   @default("GTIN")
+  uomId      String?  @map("uom_id")
+  factor     Decimal  @default(1) @db.Decimal(18, 6)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+
+  @@index([materialId])
+  @@map("material_barcodes")
+}
+
+// ---------------------------------------------------------------------------
+// Almoxarifados e endereços (seção 5)
+// ---------------------------------------------------------------------------
+
+model Warehouse {
+  id                    String          @id @default(uuid())
+  code                  String          @unique
+  name                  String
+  type                  WarehouseType
+  status                WarehouseStatus @default(ATIVO)
+  companyAxisId         String?         @map("company_axis_id")
+  unitAxisId            String?         @map("unit_axis_id")
+  projectAxisId         String?         @map("project_axis_id") // estoque de projeto/obra
+  responsibleAxisUserId String?         @map("responsible_axis_user_id")
+  addressText           String?         @map("address_text")
+  createdBy             String          @map("created_by")
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
+
+  locations Location[]
+  access    UserWarehouseAccess[]
+
+  @@map("warehouses")
+}
+
+model Location {
+  id            String         @id @default(uuid())
+  warehouseId   String         @map("warehouse_id")
+  parentId      String?        @map("parent_id")
+  level         LocationLevel
+  code          String // legível e único dentro do almoxarifado, ex.: A01-C02-E03-N1-P04
+  name          String?
+  status        LocationStatus @default(ATIVO)
+  blockedReason String?        @map("blocked_reason")
+  isVirtual     Boolean        @default(false) @map("is_virtual") // quarentena, trânsito, perda, descarte
+
+  capacityKind       CapacityKind? @map("capacity_kind")
+  capacityValue      Decimal?      @map("capacity_value") @db.Decimal(18, 4)
+  allowedCategories  String[]      @default([]) @map("allowed_categories")
+  allowedRiskClasses String[]      @default([]) @map("allowed_risk_classes")
+  temperatureMin     Decimal?      @map("temperature_min") @db.Decimal(6, 2)
+  temperatureMax     Decimal?      @map("temperature_max") @db.Decimal(6, 2)
+  restrictedAccess   Boolean       @default(false) @map("restricted_access")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  warehouse     Warehouse       @relation(fields: [warehouseId], references: [id])
+  parent        Location?       @relation("LocationTree", fields: [parentId], references: [id])
+  children      Location[]      @relation("LocationTree")
+  serials       SerialNumber[]
+  balances      StockBalance[]
+  movementsFrom StockMovement[] @relation("MovementFrom")
+  movementsTo   StockMovement[] @relation("MovementTo")
+
+  @@unique([warehouseId, code])
+  @@index([warehouseId, parentId])
+  @@map("locations")
+}
+
+// ---------------------------------------------------------------------------
+// RBAC local (seção 6 + 0.3)
+// ---------------------------------------------------------------------------
+
+model LogisticsRole {
+  id          String   @id @default(uuid())
+  code        String   @unique // ex.: ALMOXARIFE
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  permissions  RolePermission[]
+  axisMappings AxisRoleToLogisticsRole[]
+  userGrants   UserLogisticsRole[]
+
+  @@map("logistics_roles")
+}
+
+model LogisticsPermission {
+  id          String @id @default(uuid())
+  code        String @unique // "recurso:acao", ex.: material:write
+  description String
+
+  roles RolePermission[]
+
+  @@map("logistics_permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       LogisticsRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission LogisticsPermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Mapeia roles vindas no JWT do Axis para perfis de Logística; editável sem redeploy do Axis.
+model AxisRoleToLogisticsRole {
+  axisRole        String @map("axis_role")
+  logisticsRoleId String @map("logistics_role_id")
+
+  logisticsRole LogisticsRole @relation(fields: [logisticsRoleId], references: [id], onDelete: Cascade)
+
+  @@id([axisRole, logisticsRoleId])
+  @@map("axis_role_to_logistics_role")
+}
+
+/// Perfil de Logística concedido a um usuário específico do Axis, somado ao que vem do mapeamento por role
+/// (ex.: um colaborador que atua como almoxarife sem mudar a role dele no Axis).
+model UserLogisticsRole {
+  axisUserId      String   @map("axis_user_id")
+  logisticsRoleId String   @map("logistics_role_id")
+  grantedBy       String?  @map("granted_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  logisticsRole LogisticsRole @relation(fields: [logisticsRoleId], references: [id], onDelete: Cascade)
+
+  @@id([axisUserId, logisticsRoleId])
+  @@map("user_logistics_roles")
+}
+
+/// Escopo por almoxarifado (6): usuário sem linha nenhuma só acessa os almoxarifados se tiver `warehouse:access_all`.
+model UserWarehouseAccess {
+  axisUserId  String   @map("axis_user_id")
+  warehouseId String   @map("warehouse_id")
+  grantedBy   String?  @map("granted_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  warehouse Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+
+  @@id([axisUserId, warehouseId])
+  @@map("user_warehouse_access")
+}
+
+// ---------------------------------------------------------------------------
+// Auditoria (seção 20) — trilha append-only
+// ---------------------------------------------------------------------------
+
+model AuditEvent {
+  id            String   @id @default(uuid())
+  actorAxisId   String   @map("actor_axis_id")
+  action        String // ex.: material.created
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  diff          Json?
+  origin        String?
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([aggregateType, aggregateId])
+  @@index([actorAxisId, createdAt])
+  @@map("audit_events")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 2 — Estoque: lotes, séries, ledger e saldos (seções 4, 11, 14, 14.1)
+// ---------------------------------------------------------------------------
+
+enum LotStatus {
+  LIBERADO
+  QUARENTENA
+  BLOQUEADO
+}
+
+enum SerialCondition {
+  NOVO
+  BOM
+  EM_MANUTENCAO
+  AVARIADO
+  BAIXADO
+}
+
+/// Condição do estoque (4): só DISPONIVEL compõe o saldo disponível.
+enum StockCondition {
+  DISPONIVEL
+  QUARENTENA
+  BLOQUEADO
+  AVARIADO
+}
+
+/// Propriedade separada (11.15): nunca se mistura contabilmente.
+enum Ownership {
+  PROPRIO
+  CLIENTE
+  TERCEIRO_CONSIGNADO
+  LGC_EM_TERCEIRO
+}
+
+enum MovementType {
+  ENTRADA_RECEBIMENTO
+  ENTRADA_DEVOLUCAO
+  SAIDA_ENTREGA
+  TRANSFERENCIA
+  AJUSTE_POSITIVO
+  AJUSTE_NEGATIVO
+  BAIXA_PERDA
+  DESCARTE
+}
+
+model Lot {
+  id             String    @id @default(uuid())
+  materialId     String    @map("material_id")
+  lotNumber      String    @map("lot_number")
+  manufacturedAt DateTime? @map("manufactured_at") @db.Date
+  expiresAt      DateTime? @map("expires_at") @db.Date
+  status         LotStatus @default(LIBERADO)
+  statusReason   String?   @map("status_reason")
+  supplierAxisId String?   @map("supplier_axis_id")
+  createdBy      String    @map("created_by")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  material  Material        @relation(fields: [materialId], references: [id])
+  balances  StockBalance[]
+  movements StockMovement[]
+  serials   SerialNumber[]
+
+  @@unique([materialId, lotNumber])
+  @@index([materialId, expiresAt])
+  @@map("lots")
+}
+
+model SerialNumber {
+  id                String          @id @default(uuid())
+  materialId        String          @map("material_id")
+  serial            String
+  assetTag          String?         @unique @map("asset_tag") // patrimônio
+  condition         SerialCondition @default(NOVO)
+  lotId             String?         @map("lot_id")
+  currentLocationId String?         @map("current_location_id") // nulo = fora do estoque (7: não existe em dois locais)
+  custodianAxisId   String?         @map("custodian_axis_id")
+  createdBy         String          @map("created_by")
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+
+  material  Material        @relation(fields: [materialId], references: [id])
+  lot       Lot?            @relation(fields: [lotId], references: [id])
+  location  Location?       @relation(fields: [currentLocationId], references: [id])
+  movements StockMovement[]
+
+  @@unique([materialId, serial])
+  @@index([currentLocationId])
+  @@map("serial_numbers")
+}
+
+/// Ledger imutável (11.1): sem UPDATE/DELETE (trigger no banco); correção = movimento reverso vinculado.
+model StockMovement {
+  id                   String         @id @default(uuid())
+  seq                  Int            @unique @default(autoincrement())
+  type                 MovementType
+  materialId           String         @map("material_id")
+  quantity             Decimal        @db.Decimal(18, 6)
+  uomId                String         @map("uom_id")
+  lotId                String?        @map("lot_id")
+  serialId             String?        @map("serial_id")
+  fromLocationId       String?        @map("from_location_id")
+  toLocationId         String?        @map("to_location_id")
+  fromCondition        StockCondition @default(DISPONIVEL) @map("from_condition")
+  toCondition          StockCondition @default(DISPONIVEL) @map("to_condition")
+  ownership            Ownership      @default(PROPRIO)
+  reason               String
+  axisDocumentRef      String?        @map("axis_document_ref")
+  axisApprovalRef      String?        @map("axis_approval_ref")
+  logisticsDocumentRef String?        @map("logistics_document_ref")
+  projectAxisId        String?        @map("project_axis_id")
+  costCenterAxisId     String?        @map("cost_center_axis_id")
+  clientAxisId         String?        @map("client_axis_id")
+  custodianAxisId      String?        @map("custodian_axis_id")
+  unitCost             Decimal?       @map("unit_cost") @db.Decimal(18, 4)
+  effectiveAt          DateTime       @map("effective_at")
+  registeredAt         DateTime       @default(now()) @map("registered_at")
+  actorAxisId          String         @map("actor_axis_id")
+  deviceId             String?        @map("device_id")
+  reversesMovementId   String?        @unique @map("reverses_movement_id")
+  correlationId        String         @map("correlation_id")
+  idempotencyKey       String         @unique @map("idempotency_key")
+
+  material     Material       @relation(fields: [materialId], references: [id])
+  lot          Lot?           @relation(fields: [lotId], references: [id])
+  serialNo     SerialNumber?  @relation(fields: [serialId], references: [id])
+  fromLocation Location?      @relation("MovementFrom", fields: [fromLocationId], references: [id])
+  toLocation   Location?      @relation("MovementTo", fields: [toLocationId], references: [id])
+  reverses     StockMovement? @relation("MovementReversal", fields: [reversesMovementId], references: [id])
+  reversedBy   StockMovement? @relation("MovementReversal")
+
+  @@index([materialId, effectiveAt])
+  @@index([fromLocationId])
+  @@index([toLocationId])
+  @@index([correlationId])
+  @@map("stock_movements")
+}
+
+/// Saldo derivado do ledger; só é alterado pelo serviço de movimentação, na mesma transação do movimento.
+/// `lotKey` = id do lote ou '' (permite unicidade com lote opcional). CHECK(quantity >= 0) no banco: sem estoque negativo (11.2).
+model StockBalance {
+  id          String         @id @default(uuid())
+  materialId  String         @map("material_id")
+  locationId  String         @map("location_id")
+  lotId       String?        @map("lot_id")
+  lotKey      String         @default("") @map("lot_key")
+  condition   StockCondition @default(DISPONIVEL)
+  ownership   Ownership      @default(PROPRIO)
+  quantity    Decimal        @default(0) @db.Decimal(18, 6)
+  reservedQty Decimal        @default(0) @map("reserved_qty") @db.Decimal(18, 6) // preenchido a partir do Sprint 3
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  material Material @relation(fields: [materialId], references: [id])
+  location Location @relation(fields: [locationId], references: [id])
+  lot      Lot?     @relation(fields: [lotId], references: [id])
+
+  @@unique([materialId, locationId, lotKey, condition, ownership])
+  @@index([locationId])
+  @@map("stock_balances")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 3 — Ordens de atendimento e reservas (seções 9.1, 10.1, 11)
+// ---------------------------------------------------------------------------
+
+enum FulfillmentStatus {
+  RECEBIDA
+  EM_ANALISE
+  RESERVADA
+  RESERVADA_PARCIAL
+  LIBERADA_SEPARACAO
+  EM_SEPARACAO
+  SEPARADA
+  EM_CONFERENCIA
+  PRONTA_EXPEDICAO
+  EXPEDIDA
+  ENTREGUE
+  ENCERRADA
+  AGUARDANDO_ESTOQUE
+  AGUARDANDO_INFORMACAO
+  BLOQUEADA
+  CANCELAMENTO_SOLICITADO
+  CANCELADA
+  DIVERGENCIA
+}
+
+enum ReservationStatus {
+  ATIVA
+  CONSUMIDA
+  LIBERADA
+  EXPIRADA
+}
+
+model FulfillmentOrder {
+  id                String            @id @default(uuid())
+  seq               Int               @unique @default(autoincrement())
+  axisRequestId     String            @map("axis_request_id")
+  requestVersion    Int               @default(1) @map("request_version")
+  sourceEventId     String?           @map("source_event_id")
+  status            FulfillmentStatus @default(RECEBIDA)
+  statusReason      String?           @map("status_reason")
+  warehouseId       String?           @map("warehouse_id")
+  projectAxisId     String?           @map("project_axis_id")
+  costCenterAxisId  String?           @map("cost_center_axis_id")
+  requesterAxisId   String?           @map("requester_axis_id")
+  recipientAxisId   String?           @map("recipient_axis_id")
+  neededBy          DateTime?         @map("needed_by") @db.Date
+  notes             String?
+  referenceWarnings Json              @default("[]") @map("reference_warnings")
+  createdBy         String            @map("created_by")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  items FulfillmentItem[]
+
+  @@unique([axisRequestId, requestVersion])
+  @@index([status])
+  @@index([requesterAxisId])
+  @@map("fulfillment_orders")
+}
+
+model FulfillmentItem {
+  id                  String   @id @default(uuid())
+  orderId             String   @map("order_id")
+  materialId          String   @map("material_id")
+  requestedMaterialId String   @map("requested_material_id") // preserva o SKU solicitado em substituições (11.11)
+  quantity            Decimal  @db.Decimal(18, 6)
+  uomId               String   @map("uom_id")
+  notes               String?
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  order        FulfillmentOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([orderId])
+  @@index([materialId])
+  @@map("fulfillment_items")
+}
+
+/// Compromisso de estoque: soma em stock_balances.reserved_qty enquanto ATIVA.
+model Reservation {
+  id            String            @id @default(uuid())
+  itemId        String            @map("item_id")
+  materialId    String            @map("material_id")
+  balanceId     String            @map("balance_id")
+  locationId    String            @map("location_id")
+  lotId         String?           @map("lot_id")
+  quantity      Decimal           @db.Decimal(18, 6)
+  status        ReservationStatus @default(ATIVA)
+  version       Int               @default(1) // versão da requisição Axis que originou (11.8)
+  expiresAt     DateTime          @map("expires_at")
+  releasedAt    DateTime?         @map("released_at")
+  consumedQty   Decimal           @default(0) @map("consumed_qty") @db.Decimal(18, 6) // já baixado do saldo por entregas
+  releaseReason String?           @map("release_reason")
+  createdAt     DateTime          @default(now()) @map("created_at")
+
+  item FulfillmentItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId])
+  @@index([status, expiresAt])
+  @@index([balanceId])
+  @@map("reservations")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 4 — Separação, embalagem, expedição e entrega (seções 9.4, 9.5)
+// ---------------------------------------------------------------------------
+
+enum PickingTaskStatus {
+  ABERTA
+  EM_SEPARACAO
+  SEPARADA
+  EM_CONFERENCIA
+  CONFERIDA
+  CANCELADA
+}
+
+enum PickingItemStatus {
+  PENDENTE
+  SEPARADO
+  DIVERGENTE
+}
+
+enum ShipmentStatus {
+  PRONTO
+  EXPEDIDA
+  PARCIAL
+  ENTREGUE
+  RECUSADA
+}
+
+enum PackageStatus {
+  ABERTO
+  EXPEDIDO
+  ENTREGUE
+  RECUSADO
+}
+
+enum DeliveryOutcome {
+  ENTREGUE
+  PARCIAL
+  RECUSADA
+}
+
+model PickingTask {
+  id            String            @id @default(uuid())
+  seq           Int               @unique @default(autoincrement())
+  orderId       String            @map("order_id")
+  warehouseId   String            @map("warehouse_id")
+  status        PickingTaskStatus @default(ABERTA)
+  priority      Int               @default(0)
+  requiresCheck Boolean           @default(false) @map("requires_check") // conferência independente (9.4.5)
+  pickedBy      String?           @map("picked_by")
+  checkedBy     String?           @map("checked_by")
+  createdBy     String            @map("created_by")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  completedAt   DateTime?         @map("completed_at")
+  checkedAt     DateTime?         @map("checked_at")
+
+  items PickingItem[]
+
+  @@index([orderId])
+  @@index([warehouseId, status])
+  @@map("picking_tasks")
+}
+
+model PickingItem {
+  id                String            @id @default(uuid())
+  taskId            String            @map("task_id")
+  reservationId     String            @unique @map("reservation_id")
+  fulfillmentItemId String            @map("fulfillment_item_id")
+  materialId        String            @map("material_id")
+  locationId        String            @map("location_id")
+  lotId             String?           @map("lot_id")
+  serialIds         String[]          @default([]) @map("serial_ids") // séries separadas (item seriado)
+  quantityPlanned   Decimal           @map("quantity_planned") @db.Decimal(18, 6)
+  quantityPicked    Decimal           @default(0) @map("quantity_picked") @db.Decimal(18, 6)
+  status            PickingItemStatus @default(PENDENTE)
+  divergenceReason  String?           @map("divergence_reason")
+
+  task         PickingTask   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  packageItems PackageItem[]
+
+  @@index([taskId])
+  @@map("picking_items")
+}
+
+model Shipment {
+  id           String         @id @default(uuid())
+  seq          Int            @unique @default(autoincrement())
+  orderId      String         @map("order_id")
+  status       ShipmentStatus @default(PRONTO)
+  destination  String?
+  carrier      String?
+  route        String?
+  vehicle      String?
+  manifestCode String?        @unique @map("manifest_code") // romaneio
+  dispatchedAt DateTime?      @map("dispatched_at")
+  dispatchedBy String?        @map("dispatched_by")
+  createdBy    String         @map("created_by")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  packages Package[]
+  proofs   DeliveryProof[]
+
+  @@index([orderId])
+  @@map("shipments")
+}
+
+model Package {
+  id         String        @id @default(uuid())
+  seq        Int           @unique @default(autoincrement())
+  shipmentId String        @map("shipment_id")
+  orderId    String        @map("order_id")
+  status     PackageStatus @default(ABERTO)
+  weightKg   Decimal?      @map("weight_kg") @db.Decimal(12, 4)
+  lengthCm   Decimal?      @map("length_cm") @db.Decimal(10, 2)
+  widthCm    Decimal?      @map("width_cm") @db.Decimal(10, 2)
+  heightCm   Decimal?      @map("height_cm") @db.Decimal(10, 2)
+  seal       String? // lacre
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  shipment Shipment      @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  items    PackageItem[]
+
+  @@index([shipmentId])
+  @@map("packages")
+}
+
+model PackageItem {
+  id            String  @id @default(uuid())
+  packageId     String  @map("package_id")
+  pickingItemId String  @map("picking_item_id")
+  quantity      Decimal @db.Decimal(18, 6)
+
+  package     Package     @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  pickingItem PickingItem @relation(fields: [pickingItemId], references: [id])
+
+  @@index([packageId])
+  @@index([pickingItemId])
+  @@map("package_items")
+}
+
+model DeliveryProof {
+  id             String          @id @default(uuid())
+  shipmentId     String          @map("shipment_id")
+  outcome        DeliveryOutcome
+  receiverName   String          @map("receiver_name")
+  receiverAxisId String?         @map("receiver_axis_id")
+  deliveredAt    DateTime        @map("delivered_at")
+  latitude       Decimal?        @db.Decimal(9, 6)
+  longitude      Decimal?        @db.Decimal(9, 6)
+  signatureRef   String?         @map("signature_ref")
+  photoRef       String?         @map("photo_ref")
+  notes          String?
+  packageIds     String[]        @default([]) @map("package_ids")
+  registeredBy   String          @map("registered_by")
+  createdAt      DateTime        @default(now()) @map("created_at")
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId])
+  @@map("delivery_proofs")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 5 — Recebimento, inspeção, armazenagem e transferências (9.2, 9.3, 9.7)
+// ---------------------------------------------------------------------------
+
+enum ReceiptStatus {
+  AGENDADO
+  EM_CONFERENCIA
+  RECEBIDO_PENDENTE_INSPECAO
+  LIBERADO
+  ARMAZENADO
+  DIVERGENTE
+  QUARENTENA
+  REJEITADO
+  DEVOLVIDO_FORNECEDOR
+}
+
+enum ReceiptItemStatus {
+  CONFERIDO
+  EM_INSPECAO
+  LIBERADO
+  REJEITADO
+  ARMAZENADO
+}
+
+enum InspectionDecision {
+  APROVADO
+  REPROVADO
+}
+
+enum PutawayStatus {
+  ABERTA
+  CONCLUIDA
+}
+
+enum TransferStatus {
+  SOLICITADA
+  APROVADA
+  SEPARANDO
+  EXPEDIDA
+  EM_TRANSITO
+  RECEBIDA
+  ENCERRADA
+  CANCELADA
+}
+
+model Receipt {
+  id                   String        @id @default(uuid())
+  seq                  Int           @unique @default(autoincrement())
+  warehouseId          String        @map("warehouse_id")
+  receivingLocationId  String        @map("receiving_location_id")
+  status               ReceiptStatus @default(AGENDADO)
+  axisPurchaseOrderId  String?       @map("axis_purchase_order_id")
+  supplierAxisId       String?       @map("supplier_axis_id")
+  invoiceNumber        String?       @map("invoice_number")
+  vehicle              String?
+  volumes              Int?
+  exceptionApprovalRef String?       @map("exception_approval_ref") // recebimento sem pedido exige exceção aprovada
+  expectedItems        Json          @default("[]") @map("expected_items") // [{materialId, quantity}] do pedido Axis
+  hasDivergence        Boolean       @default(false) @map("has_divergence")
+  divergenceNotes      Json          @default("[]") @map("divergence_notes")
+  createdBy            String        @map("created_by")
+  completedBy          String?       @map("completed_by")
+  createdAt            DateTime      @default(now()) @map("created_at")
+  completedAt          DateTime?     @map("completed_at")
+
+  items ReceiptItem[]
+
+  @@index([warehouseId, status])
+  @@map("receipts")
+}
+
+model ReceiptItem {
+  id                 String            @id @default(uuid())
+  receiptId          String            @map("receipt_id")
+  materialId         String            @map("material_id")
+  quantity           Decimal           @db.Decimal(18, 6)
+  lotNumber          String?           @map("lot_number")
+  manufacturedAt     DateTime?         @map("manufactured_at") @db.Date
+  expiresAt          DateTime?         @map("expires_at") @db.Date
+  serials            String[]          @default([])
+  damaged            Boolean           @default(false)
+  inspectionRequired Boolean           @default(false) @map("inspection_required")
+  inspectionReason   String?           @map("inspection_reason")
+  unitCost           Decimal?          @map("unit_cost") @db.Decimal(18, 4)
+  photoRefs          String[]          @default([]) @map("photo_refs")
+  certificateRef     String?           @map("certificate_ref")
+  notes              String?
+  status             ReceiptItemStatus @default(CONFERIDO)
+  lotId              String?           @map("lot_id")
+  serialIds          String[]          @default([]) @map("serial_ids")
+  createdAt          DateTime          @default(now()) @map("created_at")
+
+  receipt     Receipt            @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  inspections InspectionResult[]
+  putaways    PutawayTask[]
+
+  @@index([receiptId])
+  @@map("receipt_items")
+}
+
+model InspectionResult {
+  id             String             @id @default(uuid())
+  receiptItemId  String             @map("receipt_item_id")
+  decision       InspectionDecision
+  checklist      Json               @default("{}")
+  certificateRef String?            @map("certificate_ref")
+  notes          String?
+  inspectedBy    String             @map("inspected_by")
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  item ReceiptItem @relation(fields: [receiptItemId], references: [id], onDelete: Cascade)
+
+  @@index([receiptItemId])
+  @@map("inspection_results")
+}
+
+model PutawayTask {
+  id                  String         @id @default(uuid())
+  seq                 Int            @unique @default(autoincrement())
+  receiptItemId       String         @map("receipt_item_id")
+  warehouseId         String         @map("warehouse_id")
+  materialId          String         @map("material_id")
+  lotId               String?        @map("lot_id")
+  serialIds           String[]       @default([]) @map("serial_ids")
+  quantity            Decimal        @db.Decimal(18, 6)
+  fromLocationId      String         @map("from_location_id")
+  suggestedLocationId String?        @map("suggested_location_id")
+  confirmedLocationId String?        @map("confirmed_location_id")
+  condition           StockCondition @default(DISPONIVEL)
+  status              PutawayStatus  @default(ABERTA)
+  confirmedBy         String?        @map("confirmed_by")
+  confirmedAt         DateTime?      @map("confirmed_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  item ReceiptItem @relation(fields: [receiptItemId], references: [id], onDelete: Cascade)
+
+  @@index([warehouseId, status])
+  @@map("putaway_tasks")
+}
+
+model Transfer {
+  id              String         @id @default(uuid())
+  seq             Int            @unique @default(autoincrement())
+  fromWarehouseId String         @map("from_warehouse_id")
+  toWarehouseId   String         @map("to_warehouse_id")
+  status          TransferStatus @default(SOLICITADA)
+  urgent          Boolean        @default(false)
+  reason          String
+  hasDivergence   Boolean        @default(false) @map("has_divergence")
+  requestedBy     String         @map("requested_by")
+  approvedBy      String?        @map("approved_by")
+  separatedBy     String?        @map("separated_by")
+  dispatchedBy    String?        @map("dispatched_by")
+  receivedBy      String?        @map("received_by")
+  createdAt       DateTime       @default(now()) @map("created_at")
+  dispatchedAt    DateTime?      @map("dispatched_at")
+  receivedAt      DateTime?      @map("received_at")
+
+  items TransferItem[]
+
+  @@index([status])
+  @@map("transfers")
+}
+
+model TransferItem {
+  id             String  @id @default(uuid())
+  transferId     String  @map("transfer_id")
+  materialId     String  @map("material_id")
+  fromLocationId String  @map("from_location_id")
+  toLocationId   String? @map("to_location_id")
+  lotId          String? @map("lot_id")
+  serialId       String? @map("serial_id")
+  quantity       Decimal @db.Decimal(18, 6)
+  balanceId      String? @map("balance_id") // saldo de origem com a reserva (9.7)
+  reservedQty    Decimal @default(0) @map("reserved_qty") @db.Decimal(18, 6)
+  receivedQty    Decimal @default(0) @map("received_qty") @db.Decimal(18, 6)
+
+  transfer Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@index([transferId])
+  @@map("transfer_items")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 6 — Devoluções, custódia e etiquetas (9.6, 16)
+// ---------------------------------------------------------------------------
+
+enum CustodyStatus {
+  ATIVO
+  DEVOLVIDO
+  PERDIDO
+}
+
+enum ReturnType {
+  SOBRA
+  FERRAMENTA
+  ATIVO
+  DEFEITUOSO
+  AVARIA
+  TROCA_TAMANHO
+  RETORNO_PROJETO
+  RETORNO_TERCEIRO
+}
+
+enum ReturnDisposition {
+  DISPONIVEL
+  MANUTENCAO
+  QUARENTENA
+  AVARIADO_REPARO
+  SUCATA
+}
+
+enum ReturnItemStatus {
+  PENDENTE_INSPECAO
+  CLASSIFICADO
+}
+
+enum ReturnStatus {
+  RECEBIDA
+  ENCERRADA
+}
+
+model CustodyTerm {
+  id               String        @id @default(uuid())
+  seq              Int           @unique @default(autoincrement())
+  custodianAxisId  String        @map("custodian_axis_id")
+  materialId       String        @map("material_id")
+  serialId         String?       @map("serial_id")
+  lotId            String?       @map("lot_id")
+  quantity         Decimal       @db.Decimal(18, 6)
+  returnedQty      Decimal       @default(0) @map("returned_qty") @db.Decimal(18, 6)
+  status           CustodyStatus @default(ATIVO)
+  orderId          String?       @map("order_id")
+  shipmentId       String?       @map("shipment_id")
+  projectAxisId    String?       @map("project_axis_id")
+  acceptanceRef    String?       @map("acceptance_ref") // assinatura/aceite do termo
+  expectedReturnAt DateTime?     @map("expected_return_at") @db.Date
+  deliveredAt      DateTime      @default(now()) @map("delivered_at")
+  closedAt         DateTime?     @map("closed_at")
+  closeNotes       String?       @map("close_notes")
+  createdBy        String        @map("created_by")
+
+  @@index([custodianAxisId, status])
+  @@index([materialId])
+  @@map("custody_terms")
+}
+
+model Return {
+  id                  String       @id @default(uuid())
+  seq                 Int          @unique @default(autoincrement())
+  type                ReturnType
+  status              ReturnStatus @default(RECEBIDA)
+  warehouseId         String       @map("warehouse_id")
+  receivingLocationId String       @map("receiving_location_id")
+  returnedByAxisId    String?      @map("returned_by_axis_id")
+  projectAxisId       String?      @map("project_axis_id")
+  custodyTermId       String?      @map("custody_term_id")
+  notes               String?
+  createdBy           String       @map("created_by")
+  createdAt           DateTime     @default(now()) @map("created_at")
+
+  items ReturnItem[]
+
+  @@index([warehouseId, status])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id           String             @id @default(uuid())
+  returnId     String             @map("return_id")
+  materialId   String             @map("material_id")
+  quantity     Decimal            @db.Decimal(18, 6)
+  lotId        String?            @map("lot_id")
+  serialId     String?            @map("serial_id")
+  status       ReturnItemStatus   @default(PENDENTE_INSPECAO)
+  disposition  ReturnDisposition?
+  classifiedBy String?            @map("classified_by")
+  classifiedAt DateTime?          @map("classified_at")
+  approvalRef  String?            @map("approval_ref")
+  notes        String?
+
+  return Return @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId])
+  @@map("return_items")
+}
+
+/// Reimpressão auditada com motivo (16.1).
+model LabelPrint {
+  id        String   @id @default(uuid())
+  kind      String
+  refId     String   @map("ref_id")
+  copies    Int      @default(1)
+  format    String   @default("json")
+  isReprint Boolean  @default(false) @map("is_reprint")
+  reason    String?
+  printedBy String   @map("printed_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([kind, refId])
+  @@map("label_prints")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 7 — Inventário (9.8)
+// ---------------------------------------------------------------------------
+
+enum StockCountType {
+  GERAL
+  ROTATIVO_ABC
+  ENDERECO
+  ITEM
+  LOTE
+  PROJETO
+  AMOSTRAGEM
+}
+
+enum StockCountStatus {
+  ABERTA
+  EM_CONTAGEM
+  EM_RECONTAGEM
+  APURADA
+  CONCLUIDA
+  CANCELADA
+}
+
+enum CountLineStatus {
+  PENDENTE
+  CONTADO
+  RECONTAR
+  CONFERIDO
+  DIVERGENTE
+}
+
+model StockCount {
+  id           String           @id @default(uuid())
+  seq          Int              @unique @default(autoincrement())
+  type         StockCountType
+  status       StockCountStatus @default(ABERTA)
+  warehouseId  String           @map("warehouse_id")
+  scope        Json             @default("{}")
+  tolerancePct Decimal          @default(0) @map("tolerance_pct") @db.Decimal(6, 2) // acima disso exige recontagem
+  frozen       Boolean          @default(true) // congelamento lógico dos endereços do escopo
+  actionPlan   String?          @map("action_plan")
+  approvalRef  String?          @map("approval_ref")
+  createdBy    String           @map("created_by")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  closedAt     DateTime?        @map("closed_at")
+
+  lines StockCountLine[]
+
+  @@index([warehouseId, status])
+  @@map("stock_counts")
+}
+
+model StockCountLine {
+  id                   String          @id @default(uuid())
+  countId              String          @map("count_id")
+  materialId           String          @map("material_id")
+  locationId           String          @map("location_id")
+  lotId                String?         @map("lot_id")
+  serialId             String?         @map("serial_id")
+  condition            StockCondition  @default(DISPONIVEL)
+  ownership            Ownership       @default(PROPRIO)
+  systemQty            Decimal         @map("system_qty") @db.Decimal(18, 6) // retratado só a quem gerencia (contagem cega)
+  unitCost             Decimal?        @map("unit_cost") @db.Decimal(18, 4)
+  count1Qty            Decimal?        @map("count1_qty") @db.Decimal(18, 6)
+  count1By             String?         @map("count1_by")
+  count1At             DateTime?       @map("count1_at")
+  count2Qty            Decimal?        @map("count2_qty") @db.Decimal(18, 6)
+  count2By             String?         @map("count2_by")
+  count2At             DateTime?       @map("count2_at")
+  finalQty             Decimal?        @map("final_qty") @db.Decimal(18, 6)
+  varianceQty          Decimal?        @map("variance_qty") @db.Decimal(18, 6)
+  status               CountLineStatus @default(PENDENTE)
+  reason               String?
+  notes                String?
+  adjustmentMovementId String?         @map("adjustment_movement_id")
+
+  count StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+
+  @@index([countId, status])
+  @@index([locationId])
+  @@map("stock_count_lines")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 8 — Reposição, alertas e indicadores (9.9, 18, 19)
+// ---------------------------------------------------------------------------
+
+enum SuggestionStatus {
+  ABERTA
+  ENVIADA_AXIS
+  APROVADA_AXIS
+  ATENDIDA
+  DESCARTADA
+}
+
+enum AlertKind {
+  ESTOQUE_ABAIXO_PONTO_REPOSICAO
+  RUPTURA_PREVISTA
+  LOTE_VENCENDO
+  RESERVA_EXPIRANDO
+  REQUISICAO_SEM_MOVIMENTO
+  MATERIAL_BLOQUEADO_RESERVADO
+  TRANSITO_NAO_RECEBIDO
+  CUSTODIA_VENCIDA
+  DIVERGENCIA_INVENTARIO
+  FALHA_INTEGRACAO
+  CONSUMO_ANOMALO
+}
+
+enum AlertSeverity {
+  INFO
+  ATENCAO
+  CRITICO
+}
+
+enum AlertStatus {
+  ABERTO
+  RECONHECIDO
+  RESOLVIDO
+}
+
+/// Parâmetros de reposição por material e almoxarifado (7.2).
+model StockPolicy {
+  id           String   @id @default(uuid())
+  materialId   String   @map("material_id")
+  warehouseId  String   @map("warehouse_id")
+  minQty       Decimal  @default(0) @map("min_qty") @db.Decimal(18, 6)
+  maxQty       Decimal? @map("max_qty") @db.Decimal(18, 6)
+  safetyQty    Decimal  @default(0) @map("safety_qty") @db.Decimal(18, 6)
+  reorderPoint Decimal? @map("reorder_point") @db.Decimal(18, 6) // nulo = calculado por consumo × lead time + segurança
+  updatedBy    String   @map("updated_by")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([materialId, warehouseId])
+  @@map("stock_policies")
+}
+
+/// Sugestão — nunca um pedido financeiro autônomo (9.9).
+model ReplenishmentSuggestion {
+  id                  String           @id @default(uuid())
+  seq                 Int              @unique @default(autoincrement())
+  warehouseId         String           @map("warehouse_id")
+  materialId          String           @map("material_id")
+  status              SuggestionStatus @default(ABERTA)
+  suggestedQty        Decimal          @map("suggested_qty") @db.Decimal(18, 6)
+  approvedQty         Decimal?         @map("approved_qty") @db.Decimal(18, 6)
+  expectedAt          DateTime?        @map("expected_at") @db.Date
+  axisPurchaseOrderId String?          @map("axis_purchase_order_id")
+  justification       Json             @default("{}")
+  discardReason       String?          @map("discard_reason")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  calculatedAt        DateTime         @default(now()) @map("calculated_at")
+  sentAt              DateTime?        @map("sent_at")
+
+  @@index([warehouseId, materialId, status])
+  @@map("replenishment_suggestions")
+}
+
+model Alert {
+  id              String        @id @default(uuid())
+  kind            AlertKind
+  severity        AlertSeverity
+  status          AlertStatus   @default(ABERTO)
+  warehouseId     String?       @map("warehouse_id")
+  refType         String?       @map("ref_type")
+  refId           String?       @map("ref_id")
+  message         String
+  responsibleRole String        @map("responsible_role") // perfil que deve tratar; notificar não concede acesso ao registro
+  dedupeKey       String        @map("dedupe_key")
+  data            Json          @default("{}")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  acknowledgedBy  String?       @map("acknowledged_by")
+  acknowledgedAt  DateTime?     @map("acknowledged_at")
+  resolvedAt      DateTime?     @map("resolved_at")
+
+  @@index([status, severity])
+  @@index([dedupeKey, status])
+  @@map("alerts")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 9 — PWA operacional: operações offline sincronizadas com idempotência (15.2, 11.17)
+// ---------------------------------------------------------------------------
+
+enum OfflineOpStatus {
+  APLICADA
+  CONFLITO
+  REJEITADA
+}
+
+model OfflineOperation {
+  id          String          @id @default(uuid())
+  deviceId    String          @map("device_id")
+  opId        String          @map("op_id") // gerado no dispositivo; idempotente
+  type        String
+  payloadHash String          @map("payload_hash")
+  userId      String          @map("user_id")
+  status      OfflineOpStatus
+  message     String?
+  code        String?
+  result      Json?
+  clientAt    DateTime        @map("client_at")
+  appliedAt   DateTime        @default(now()) @map("applied_at")
+
+  @@unique([deviceId, opId])
+  @@index([userId, appliedAt])
+  @@map("offline_operations")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 10 — Reconciliação (12.4): divergência vira fila, nunca correção silenciosa
+// ---------------------------------------------------------------------------
+
+enum IssueStatus {
+  ABERTA
+  RESOLVIDA
+}
+
+model ReconciliationIssue {
+  id         String      @id @default(uuid())
+  kind       String // BALANCE_VS_LEDGER | RESERVED_DRIFT | ORPHAN_RESERVATION | OUTBOX_DEAD_LETTER | ...
+  severity   String      @default("ATENCAO")
+  refType    String      @map("ref_type")
+  refId      String      @map("ref_id")
+  dedupeKey  String      @map("dedupe_key")
+  details    Json        @default("{}")
+  status     IssueStatus @default(ABERTA)
+  detectedAt DateTime    @default(now()) @map("detected_at")
+  lastSeenAt DateTime    @default(now()) @map("last_seen_at")
+  resolvedAt DateTime?   @map("resolved_at")
+  resolvedBy String?     @map("resolved_by")
+  resolution String?
+
+  @@index([status, kind])
+  @@index([dedupeKey, status])
+  @@map("reconciliation_issues")
+}
+
+// ---------------------------------------------------------------------------
+// Sprint 2 — Integração com o Axis (seção 12)
+// ---------------------------------------------------------------------------
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+  PENDING
+  DELIVERED
+}
+
+/// Inbox (idempotência por event_id) e outbox transacional (Logística → Axis).
+model IntegrationMessage {
+  id            String           @id @default(uuid())
+  direction     MessageDirection
+  eventId       String           @map("event_id")
+  eventType     String           @map("event_type")
+  occurredAt    DateTime         @map("occurred_at")
+  payload       Json
+  status        MessageStatus
+  attempts      Int              @default(0)
+  lastError     String?          @map("last_error")
+  correlationId String?          @map("correlation_id")
+  nextAttemptAt DateTime?        @map("next_attempt_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  processedAt   DateTime?        @map("processed_at")
+
+  @@unique([direction, eventId])
+  @@index([direction, status, nextAttemptAt])
+  @@map("integration_messages")
+}
+
+/// Cache dos mestres do Axis (empresa, unidade, usuário, colaborador, cliente, projeto, centro de custo):
+/// guarda só identificador externo + dados mínimos; nunca é editável aqui (3.3).
+model AxisMasterCache {
+  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER | COMPANY | UNIT
+  axisId           String   @map("axis_id")
+  code             String?
+  name             String?
+  active           Boolean  @default(true)
+  data             Json     @default("{}")
+  sourceOccurredAt DateTime @map("source_occurred_at") // controle de versão/ordem de eventos (12.4)
+  syncedAt         DateTime @default(now()) @map("synced_at")
+
+  @@id([kind, axisId])
+  @@index([kind, active])
+  @@map("axis_master_cache")
+}
