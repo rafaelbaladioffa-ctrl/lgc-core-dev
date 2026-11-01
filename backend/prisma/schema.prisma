@@ -1199,6 +1199,103 @@ model StockCountLine {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 8 — Reposição, alertas e indicadores (9.9, 18, 19)
+// ---------------------------------------------------------------------------
+
+enum SuggestionStatus {
+  ABERTA
+  ENVIADA_AXIS
+  APROVADA_AXIS
+  ATENDIDA
+  DESCARTADA
+}
+
+enum AlertKind {
+  ESTOQUE_ABAIXO_PONTO_REPOSICAO
+  RUPTURA_PREVISTA
+  LOTE_VENCENDO
+  RESERVA_EXPIRANDO
+  REQUISICAO_SEM_MOVIMENTO
+  MATERIAL_BLOQUEADO_RESERVADO
+  TRANSITO_NAO_RECEBIDO
+  CUSTODIA_VENCIDA
+  DIVERGENCIA_INVENTARIO
+  FALHA_INTEGRACAO
+  CONSUMO_ANOMALO
+}
+
+enum AlertSeverity {
+  INFO
+  ATENCAO
+  CRITICO
+}
+
+enum AlertStatus {
+  ABERTO
+  RECONHECIDO
+  RESOLVIDO
+}
+
+/// Parâmetros de reposição por material e almoxarifado (7.2).
+model StockPolicy {
+  id           String   @id @default(uuid())
+  materialId   String   @map("material_id")
+  warehouseId  String   @map("warehouse_id")
+  minQty       Decimal  @default(0) @map("min_qty") @db.Decimal(18, 6)
+  maxQty       Decimal? @map("max_qty") @db.Decimal(18, 6)
+  safetyQty    Decimal  @default(0) @map("safety_qty") @db.Decimal(18, 6)
+  reorderPoint Decimal? @map("reorder_point") @db.Decimal(18, 6) // nulo = calculado por consumo × lead time + segurança
+  updatedBy    String   @map("updated_by")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@unique([materialId, warehouseId])
+  @@map("stock_policies")
+}
+
+/// Sugestão — nunca um pedido financeiro autônomo (9.9).
+model ReplenishmentSuggestion {
+  id                  String           @id @default(uuid())
+  seq                 Int              @unique @default(autoincrement())
+  warehouseId         String           @map("warehouse_id")
+  materialId          String           @map("material_id")
+  status              SuggestionStatus @default(ABERTA)
+  suggestedQty        Decimal          @map("suggested_qty") @db.Decimal(18, 6)
+  approvedQty         Decimal?         @map("approved_qty") @db.Decimal(18, 6)
+  expectedAt          DateTime?        @map("expected_at") @db.Date
+  axisPurchaseOrderId String?          @map("axis_purchase_order_id")
+  justification       Json             @default("{}")
+  discardReason       String?          @map("discard_reason")
+  createdAt           DateTime         @default(now()) @map("created_at")
+  calculatedAt        DateTime         @default(now()) @map("calculated_at")
+  sentAt              DateTime?        @map("sent_at")
+
+  @@index([warehouseId, materialId, status])
+  @@map("replenishment_suggestions")
+}
+
+model Alert {
+  id              String        @id @default(uuid())
+  kind            AlertKind
+  severity        AlertSeverity
+  status          AlertStatus   @default(ABERTO)
+  warehouseId     String?       @map("warehouse_id")
+  refType         String?       @map("ref_type")
+  refId           String?       @map("ref_id")
+  message         String
+  responsibleRole String        @map("responsible_role") // perfil que deve tratar; notificar não concede acesso ao registro
+  dedupeKey       String        @map("dedupe_key")
+  data            Json          @default("{}")
+  createdAt       DateTime      @default(now()) @map("created_at")
+  acknowledgedBy  String?       @map("acknowledged_by")
+  acknowledgedAt  DateTime?     @map("acknowledged_at")
+  resolvedAt      DateTime?     @map("resolved_at")
+
+  @@index([status, severity])
+  @@index([dedupeKey, status])
+  @@map("alerts")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 

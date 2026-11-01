@@ -186,6 +186,8 @@ export class ReceivingService {
         if (status === 'LIBERADO') await this.openPutaway(tx, { ...it, lotId, serialIds }, m, r.warehouseId, r.receivingLocationId, condition);
       }
 
+      // Recebimento contra pedido aprovado no Axis atende a sugestão de reposição correspondente.
+      if (r.axisPurchaseOrderId) await tx.replenishmentSuggestion.updateMany({ where: { axisPurchaseOrderId: r.axisPurchaseOrderId, warehouseId: r.warehouseId, status: 'APROVADA_AXIS' }, data: { status: 'ATENDIDA' } });
       const pending = await tx.receiptItem.count({ where: { receiptId: id, status: 'EM_INSPECAO' } });
       const status = notes.length > 0 ? 'DIVERGENTE' : pending > 0 ? 'RECEBIDO_PENDENTE_INSPECAO' : 'LIBERADO';
       const updated = await tx.receipt.update({ where: { id }, data: { status, hasDivergence: notes.length > 0, divergenceNotes: notes, completedBy: user.userId, completedAt: new Date() } });

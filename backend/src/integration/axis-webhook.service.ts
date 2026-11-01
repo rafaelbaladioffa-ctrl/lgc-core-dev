@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { ReplenishmentService } from '../replenishment/replenishment.service.js';
 import { FulfillmentService } from '../fulfillment/fulfillment.service.js';
 import { adaptMaterialRequestEvent } from './material-request.adapter.js';
 
@@ -35,6 +36,7 @@ export class AxisWebhookService {
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
     private readonly fulfillment: FulfillmentService,
+    private readonly replenishment: ReplenishmentService,
   ) {}
 
   verifySignature(rawBody: Buffer | undefined, header: string | undefined) {
@@ -127,6 +129,11 @@ export class AxisWebhookService {
         if (!str('project_id')) throw new BadRequestException('project_id ausente.');
         master = { kind: 'PROJECT', axisId: str('project_id')!, code: str('code'), name: str('name'), active: str('status') ? !INACTIVE_PROJECT_STATUS.includes(str('status')!) : undefined, data: p };
         break;
+      case 'purchase_order':
+        // Pedido aprovado/alterado no Axis (9.9): registra previsão e evita nova sugestão equivalente.
+        if (action !== 'approved' && action !== 'changed') return 'ignored';
+        await this.replenishment.registerPurchase(tx, p);
+        return 'processed';
       default: {
         // Adaptador 0.4: ticket.status_changed (legado) / material_request.* → evento de domínio.
         const domain = adaptMaterialRequestEvent(env.event_type, p);

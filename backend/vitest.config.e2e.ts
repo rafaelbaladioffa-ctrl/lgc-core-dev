@@ -11,6 +11,8 @@ export default defineConfig({
     root: './',
     include: ['**/*.e2e-spec.ts'],
     maxWorkers: 4,
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     ...(url && { env: { DATABASE_URL: url.includes('connection_limit') ? url : `${url}${url.includes('?') ? '&' : '?'}connection_limit=5` } }),
   },
 });

@@ -350,7 +350,7 @@ export class ShippingService {
               type: 'SAIDA_ENTREGA', materialId: material.id, quantity: line.quantity, lotId: r.lotId ?? undefined, serialId: line.serialId, fromLocationId: r.locationId,
               reason: `Entrega ${orderCode(order.seq)} (${pad('EXP', s.seq)})`, axisDocumentRef: order.axisRequestId, logisticsDocumentRef: pad('ROM', s.seq),
               projectAxisId: order.projectAxisId ?? undefined, costCenterAxisId: order.costCenterAxisId ?? undefined,
-              custodianAxisId: custody ? dto.receiverAxisId : undefined, correlationId: order.id,
+              custodianAxisId: custody ? dto.receiverAxisId : undefined, correlationId: order.id, unitCost: material.averageCost ? Number(material.averageCost) : undefined, // custo histórico recebido do Axis
             }, line.key, user);
             // Termo de custódia (9.5): EPI, ferramenta, equipamento, ativo ou seriado ficam sob responsabilidade do recebedor.
             if (isCustodyMaterial(material) && dto.receiverAxisId) {
