@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { buildMaterialBody, emptyMaterial, validateMaterial } from './MaterialForm';
+import { buildMaterialBody, codePreview, emptyMaterial, validateMaterial } from './MaterialForm';
 
-const ok = () => ({ ...emptyMaterial(), code: 'EPI-CAP-0001', shortDescription: 'Capacete', category: 'EPI', type: 'EPI', stockUomId: 'u1' });
+const ok = () => ({ ...emptyMaterial(), family: 'EPI', subcode: 'CAP', shortDescription: 'Capacete', category: 'EPI', type: 'EPI', stockUomId: 'u1' });
 
 describe('validateMaterial', () => {
   it('cadastro válido não tem erros', () => expect(validateMaterial(ok(), 'create')).toEqual({}));
   it('obrigatórios e formato do código', () => {
     const e = validateMaterial(emptyMaterial(), 'create');
-    expect(Object.keys(e)).toEqual(expect.arrayContaining(['code', 'shortDescription', 'category', 'type', 'stockUomId']));
-    expect(validateMaterial({ ...ok(), code: 'epi cap' }, 'create').code).toMatch(/inválido/);
-    expect(validateMaterial({ ...ok(), code: 'ABC' }, 'create').code).toBeTruthy();
+    expect(Object.keys(e)).toEqual(expect.arrayContaining(['family', 'subcode', 'shortDescription', 'category', 'type', 'stockUomId']));
+    expect(validateMaterial({ ...ok(), subcode: 'ca' }, 'create').subcode).toBeTruthy();
+    expect(validateMaterial({ ...ok(), subcode: 'CAPS' }, 'create').subcode).toBeTruthy();
   });
-  it('na edição o código não é exigido', () => expect(validateMaterial({ ...ok(), code: '' }, 'edit').code).toBeUndefined());
+  it('na edição família e subcódigo não são exigidos', () => expect(validateMaterial({ ...ok(), family: '', subcode: '' }, 'edit')).toEqual({}));
+  it('prévia do código', () => { expect(codePreview('EPI', 'CAP')).toBe('EPI-CAP-####'); expect(codePreview('', 'c')).toBe('???-???-####'); });
   it('regras de controle espelham a API', () => {
     expect(validateMaterial({ ...ok(), expiryControlled: true }, 'create').expiryControlled).toBeTruthy();
     expect(validateMaterial({ ...ok(), exitMethod: 'FEFO' }, 'create').exitMethod).toBeTruthy();
@@ -26,8 +27,9 @@ describe('validateMaterial', () => {
 describe('buildMaterialBody', () => {
   it('criação envia o código e os campos preenchidos', () => {
     const b = buildMaterialBody({ ...ok(), brand: ' 3M ' }, 'create');
-    expect(b).toMatchObject({ code: 'EPI-CAP-0001', shortDescription: 'Capacete', brand: '3M', type: 'EPI', stockUomId: 'u1' });
+    expect(b).toMatchObject({ family: 'EPI', subcode: 'CAP', shortDescription: 'Capacete', brand: '3M', type: 'EPI', stockUomId: 'u1' });
     expect(b).not.toHaveProperty('subcategory');
+    expect(b).not.toHaveProperty('code');
   });
   it('edição envia só o que mudou, sem código, com o motivo', () => {
     const orig = ok();

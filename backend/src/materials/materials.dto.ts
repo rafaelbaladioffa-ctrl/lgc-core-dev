@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { IsBoolean, IsEnum, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, IsUUID, Matches, Max, MaxLength, Min, MinLength } from 'class-validator';
+import { FAMILY_PREFIXES } from './material-families.js';
 import { Criticality, DemandClass, ExitMethod, MaterialType } from '@prisma/client';
 
 const CODE_REGEX = /^[A-Z0-9]+(-[A-Z0-9]+)+$/;
@@ -63,8 +64,15 @@ export class MaterialFieldsDto {
 }
 
 export class CreateMaterialDto extends MaterialFieldsDto {
-  @Matches(CODE_REGEX, { message: 'Código inválido. Use maiúsculas, números e hífens (ex.: EPI-CAP-0001).' }) @MaxLength(40)
-  code!: string;
+  /** Gerado pelo servidor (família + subcódigo + sequencial). Só aceito com a permissão material:set_code (importação). */
+  @IsOptional() @Matches(CODE_REGEX, { message: 'Código inválido. Use maiúsculas, números e hífens (ex.: EPI-CAP-0001).' }) @MaxLength(40)
+  code?: string;
+
+  @IsOptional() @IsIn(FAMILY_PREFIXES, { message: 'Família de material inválida.' })
+  family?: string;
+
+  @IsOptional() @Matches(/^[A-Z]{3}$/, { message: 'O subcódigo deve ter 3 letras maiúsculas (ex.: CAP).' })
+  subcode?: string;
 
   @IsString({ message: 'Informe a descrição curta.' }) @MinLength(3, { message: 'A descrição curta deve ter ao menos 3 caracteres.' }) @MaxLength(160)
   declare shortDescription: string;

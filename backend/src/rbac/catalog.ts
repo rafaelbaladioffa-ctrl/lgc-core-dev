@@ -3,6 +3,7 @@
 export const PERMISSIONS: Record<string, string> = {
   'material:read': 'Consultar catálogo de materiais',
   'material:write': 'Criar e alterar materiais (gera versão)',
+  'material:set_code': 'Informar o código do material manualmente (importação/migração; o normal é gerar automaticamente)',
   'material:read_cost': 'Ver custo médio e último custo',
   'warehouse:read': 'Consultar almoxarifados e endereços',
   'warehouse:write': 'Administrar almoxarifados e endereços',
@@ -60,7 +61,7 @@ export const ROLES: Array<{ code: string; name: string; description: string; per
   { code: 'AUDITOR', name: 'Auditor', description: 'Leitura de documentos, movimentos e trilha, sem alteração', permissions: [...BASE_READ, 'material:read_cost', 'audit:read', 'rbac:read', 'warehouse:access_all', 'fulfillment:read', 'fulfillment:read_all', 'document:read', 'alert:read', 'dashboard:read', 'purchasing:read'] },
   { code: 'ADMIN_CATALOGO', name: 'Administrador de catálogo', description: 'Mantém materiais e parâmetros', permissions: [...BASE_READ, 'material:write', 'material:read_cost', 'uom:write', 'policy:write'] },
   // Administrador técnico: integrações e RBAC, sem acesso automático a operações restritas (seção 6).
-  { code: 'ADMIN_TECNICO', name: 'Administrador técnico', description: 'Configura integrações e acessos', permissions: ['uom:read', 'rbac:read', 'rbac:write', 'integration:configure', 'audit:read', 'fulfillment:create', 'alert:read', 'alert:manage', 'reconciliation:manage'] },
+  { code: 'ADMIN_TECNICO', name: 'Administrador técnico', description: 'Configura integrações e acessos', permissions: ['material:set_code', 'uom:read', 'rbac:read', 'rbac:write', 'integration:configure', 'audit:read', 'fulfillment:create', 'alert:read', 'alert:manage', 'reconciliation:manage'] },
 ];
 
 /** Mapeamento inicial das roles do Axis (seed do core) → perfis de Logística; editável depois no banco. */

@@ -53,7 +53,7 @@ describe('MaterialsService.validateRules', () => {
     const service = new MaterialsService(prisma as never, { record: vi.fn() } as never);
     const user = { userId: 'x', permissions: [] } as unknown as AuthenticatedUser;
     await service.create(
-        { code: 'SER-0001', shortDescription: 'Teste', category: 'Teste', type: 'ATIVO', stockUomId: '00000000-0000-4000-8000-000000000000', serialControlled: true } as never,
+        { family: 'TI', subcode: 'NOT', shortDescription: 'Teste', category: 'Teste', type: 'ATIVO', stockUomId: '00000000-0000-4000-8000-000000000000', serialControlled: true } as never,
         user,
     );
     expect(prisma.$transaction).toHaveBeenCalled(); // passou pelas regras (não lançou BadRequest)

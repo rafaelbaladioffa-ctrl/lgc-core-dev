@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -66,21 +66,36 @@ export class MaterialsService {
     return this.prisma.materialVersion.findMany({ where: { materialId: id }, orderBy: { version: 'desc' } });
   }
 
+  /** Próximo código da família+subcódigo (ex.: EPI-CAP-0004), serializado por trava de transação. */
+  private async nextCode(tx: Prisma.TransactionClient, prefix: string, sub: string): Promise<string> {
+    const stem = `${prefix}-${sub}-`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${'material-code:' + stem}))`;
+    const rows = await tx.material.findMany({ where: { code: { startsWith: stem } }, select: { code: true } });
+    let max = 0;
+    for (const r of rows) { const m = /^(\d{4,})$/.exec(r.code.slice(stem.length)); if (m) max = Math.max(max, Number(m[1])); }
+    if (max >= 9999) throw new UnprocessableEntityException(`A sequência ${stem}#### chegou ao limite (9999). Use outro subcódigo.`);
+    return `${stem}${String(max + 1).padStart(4, '0')}`;
+  }
+
   async create(input: CreateMaterialDto, user: AuthenticatedUser) {
+    const { family, subcode, ...rest } = input;
+    if (rest.code !== undefined && !user.permissions.includes('material:set_code')) throw new BadRequestException('O código do material é gerado automaticamente; não informe o código.');
+    if (rest.code === undefined && (!family || !subcode)) throw new BadRequestException('Informe a família e o subcódigo (3 letras) para gerar o código do material.');
     // Item seriado sai por série específica; sem isso o default FIFO do banco quebraria qualquer PATCH posterior.
-    const dto = { ...input, exitMethod: input.exitMethod ?? (input.serialControlled ? ('SERIE_ESPECIFICA' as const) : undefined) };
+    const dto = { ...rest, exitMethod: input.exitMethod ?? (input.serialControlled ? ('SERIE_ESPECIFICA' as const) : undefined) };
     this.validateRules(dto);
     const uom = await this.prisma.unitOfMeasure.findUnique({ where: { id: dto.stockUomId } });
     if (!uom || !uom.active) throw new BadRequestException('Unidade de estoque inexistente ou inativa.');
     try {
       return await this.prisma.$transaction(async (tx) => {
-        const material = await tx.material.create({ data: { ...dto, createdBy: user.userId } });
+        const code = dto.code ?? (await this.nextCode(tx, family!, subcode!));
+        const material = await tx.material.create({ data: { ...dto, code, createdBy: user.userId } });
         await tx.materialVersion.create({ data: { materialId: material.id, version: 1, snapshot: this.snapshot(material), changedBy: user.userId, changeReason: 'Criação' } });
         await this.audit.record(user.userId, 'material.created', 'material', material.id, { code: material.code }, tx);
         return this.present(material, user);
       });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException(`Já existe um material com o código ${dto.code}.`);
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException(`Já existe um material com este código${dto.code ? ` (${dto.code})` : ''}.`);
       throw e;
     }
   }

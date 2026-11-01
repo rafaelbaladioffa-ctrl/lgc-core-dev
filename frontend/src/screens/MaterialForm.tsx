@@ -5,17 +5,17 @@ import { useLoad } from '../ui';
 export const MATERIAL_TYPES: Record<string, string> = { CONSUMO: 'Consumo', FERRAMENTA: 'Ferramenta', EQUIPAMENTO: 'Equipamento', ATIVO: 'Ativo', EMBALAGEM: 'Embalagem', QUIMICO: 'Químico', EPI: 'EPI', EPC: 'EPC', SOBRESSALENTE: 'Sobressalente' };
 const EXIT: Record<string, string> = { FIFO: 'FIFO (primeiro a entrar, primeiro a sair)', FEFO: 'FEFO (primeiro a vencer, primeiro a sair)', SERIE_ESPECIFICA: 'Série específica' };
 const AUTH_BY = ['HSE', 'QUALIDADE', 'TI', 'GESTOR'];
-const CODE_RE = /^[A-Z0-9]+(-[A-Z0-9]+)+$/;
+const SUB_RE = /^[A-Z]{3}$/;
 
 export interface MaterialValues {
-  code: string; shortDescription: string; technicalDescription: string; category: string; subcategory: string; type: string; stockUomId: string;
+  code: string; family: string; subcode: string; shortDescription: string; technicalDescription: string; category: string; subcategory: string; type: string; stockUomId: string;
   manufacturer: string; brand: string; model: string; manufacturerCode: string;
   lotControlled: boolean; expiryControlled: boolean; serialControlled: boolean; assetTagged: boolean; requiresCa: boolean; requiresCalibration: boolean; hasSizeGrid: boolean; returnable: boolean; disposable: boolean;
   exitMethod: string; criticality: string; minShelfLifeDays: string; requiresAuthorization: boolean; authorizationBy: string; changeReason: string;
 }
 
 export const emptyMaterial = (): MaterialValues => ({
-  code: '', shortDescription: '', technicalDescription: '', category: '', subcategory: '', type: '', stockUomId: '', manufacturer: '', brand: '', model: '', manufacturerCode: '',
+  code: '', family: '', subcode: '', shortDescription: '', technicalDescription: '', category: '', subcategory: '', type: '', stockUomId: '', manufacturer: '', brand: '', model: '', manufacturerCode: '',
   lotControlled: false, expiryControlled: false, serialControlled: false, assetTagged: false, requiresCa: false, requiresCalibration: false, hasSizeGrid: false, returnable: false, disposable: false,
   exitMethod: 'FIFO', criticality: 'C', minShelfLifeDays: '', requiresAuthorization: false, authorizationBy: '', changeReason: '',
 });
@@ -26,8 +26,8 @@ export type Errors = Partial<Record<keyof MaterialValues, string>>;
 export function validateMaterial(v: MaterialValues, mode: 'create' | 'edit'): Errors {
   const e: Errors = {};
   if (mode === 'create') {
-    if (!v.code.trim()) e.code = 'Informe o código.';
-    else if (!CODE_RE.test(v.code.trim())) e.code = 'Código inválido. Use maiúsculas, números e hífens (ex.: EPI-CAP-0001).';
+    if (!v.family) e.family = 'Informe a família do material.';
+    if (!SUB_RE.test(v.subcode.trim())) e.subcode = 'O subcódigo deve ter 3 letras maiúsculas (ex.: CAP).';
   }
   if (v.shortDescription.trim().length < 3) e.shortDescription = 'A descrição curta deve ter ao menos 3 caracteres.';
   if (v.shortDescription.trim().length > 160) e.shortDescription = 'A descrição curta deve ter no máximo 160 caracteres.';
@@ -50,7 +50,7 @@ const BOOL_KEYS = ['lotControlled', 'expiryControlled', 'serialControlled', 'ass
 export function buildMaterialBody(v: MaterialValues, mode: 'create' | 'edit', original?: MaterialValues): Record<string, unknown> {
   const body: Record<string, unknown> = {};
   const changed = <K extends keyof MaterialValues>(k: K) => mode === 'create' || !original || original[k] !== v[k];
-  if (mode === 'create') body.code = v.code.trim();
+  if (mode === 'create') { body.family = v.family; body.subcode = v.subcode.trim(); }
   for (const k of TEXT_KEYS) if (changed(k)) { const t = v[k].trim(); if (t !== '') body[k] = t; }
   if (changed('type') && v.type) body.type = v.type;
   if (changed('stockUomId') && v.stockUomId) body.stockUomId = v.stockUomId;
@@ -73,6 +73,10 @@ export const valuesFromMaterial = (m: MaterialLike): MaterialValues => ({
 });
 
 interface Uom { id: string; code: string; name: string }
+interface Family { prefix: string; label: string; type: string }
+
+/** Prévia do código: o sequencial só é definido pelo servidor ao salvar. */
+export const codePreview = (family: string, subcode: string) => `${family || '???'}-${/^[A-Z]{3}$/.test(subcode) ? subcode : '???'}-####`;
 export interface SavedMaterial { id: string }
 
 export function MaterialForm({ mode, initial, materialId, onSaved, onCancel }: { mode: 'create' | 'edit'; initial: MaterialValues; materialId?: string; onSaved: (m: SavedMaterial) => void; onCancel: () => void }) {
@@ -81,6 +85,7 @@ export function MaterialForm({ mode, initial, materialId, onSaved, onCancel }: {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [uoms] = useLoad(() => call<Uom[]>('/units-of-measure'), []);
+  const [fams] = useLoad(() => call<Family[]>('/materials/families'), []);
   const set = <K extends keyof MaterialValues>(k: K, val: MaterialValues[K]) => setV((p) => ({ ...p, [k]: val }));
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +113,16 @@ export function MaterialForm({ mode, initial, materialId, onSaved, onCancel }: {
     <form className="card" onSubmit={submit} noValidate>
       <h3>{mode === 'create' ? 'Novo material' : 'Editar material'}</h3>
       <p className="hint">Campos marcados com * são obrigatórios.</p>
-      {mode === 'create' && text('code', 'Código', true, 40)}
+      {mode === 'edit' && <p className="hint">Código: <strong>{v.code}</strong> (gerado pelo sistema; não pode ser alterado)</p>}
+      {mode === 'create' && (
+        <div className="card">
+          <div><label className="lbl" htmlFor="m-family">Família <span aria-hidden="true">*</span></label>
+            <select id="m-family" className="inp" value={v.family} aria-required aria-invalid={!!errors.family} onChange={(e) => { const f = (fams.state === 'ready' ? fams.data : []).find((x) => x.prefix === e.target.value); setV((p) => ({ ...p, family: e.target.value, type: p.type || f?.type || '' })); }}><option value="">{fams.state === 'loading' ? 'Carregando…' : 'Selecione…'}</option>{(fams.state === 'ready' ? fams.data : []).map((f) => <option key={f.prefix} value={f.prefix}>{f.label}</option>)}</select>{fe('family')}</div>
+          <div><label className="lbl" htmlFor="m-subcode">Subcódigo (3 letras) <span aria-hidden="true">*</span></label>
+            <input id="m-subcode" className="inp" value={v.subcode} maxLength={3} placeholder="CAP" aria-required aria-invalid={!!errors.subcode} aria-describedby={errors.subcode ? 'm-subcode-err' : undefined} onChange={(e) => set('subcode', e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))} />{fe('subcode')}</div>
+          <p className="hint">Código gerado ao salvar: <strong>{codePreview(v.family, v.subcode)}</strong></p>
+        </div>
+      )}
       {text('shortDescription', 'Descrição curta', true, 160)}
       <div><label className="lbl" htmlFor="m-technicalDescription">Descrição técnica</label><textarea id="m-technicalDescription" className="inp" rows={3} maxLength={4000} value={v.technicalDescription} onChange={(e) => set('technicalDescription', e.target.value)} /></div>
       {text('category', 'Categoria', true)}

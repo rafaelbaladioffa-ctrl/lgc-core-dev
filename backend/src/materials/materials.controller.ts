@@ -3,6 +3,7 @@ import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
 import { CreateMaterialDto, ListMaterialsQuery, UpdateMaterialDto } from './materials.dto.js';
+import { MATERIAL_FAMILIES } from './material-families.js';
 import { MaterialsService } from './materials.service.js';
 
 @Controller('materials')
@@ -13,6 +14,12 @@ export class MaterialsController {
   @RequirePermissions('material:read')
   list(@Query() query: ListMaterialsQuery, @CurrentUser() user: AuthenticatedUser) {
     return this.materials.list(query, user);
+  }
+
+  @Get('families')
+  @RequirePermissions('material:read')
+  families() {
+    return MATERIAL_FAMILIES;
   }
 
   @Get(':id')
