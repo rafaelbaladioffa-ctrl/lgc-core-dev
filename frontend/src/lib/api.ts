@@ -53,7 +53,7 @@ function renew(): Promise<boolean> {
   return refreshing;
 }
 
-async function call<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
+export async function call<T>(path: string, init?: RequestInit, retried = false): Promise<T> {
   if (!session) throw new ApiError(401, 'Sessão não iniciada.');
   if (!retried && session.refreshToken && msUntilExpiry(session.token) < 30_000) await renew(); // evita o 401 óbvio
   const res = await fetch(`${session.apiUrl}${path}`, { ...init, headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.token}`, ...(init?.headers ?? {}) } });

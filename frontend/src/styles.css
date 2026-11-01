@@ -68,3 +68,22 @@ textarea.inp { padding: 12px; }
   body { font-size: 16px; }
 }
 @media (max-width: 599px) { .topbar-search { display: none; } .topbar-brand { width: auto; } }
+
+/* Telas de consulta (tabelas, filtros, paginação) */
+.toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin: 8px 0 12px; }
+.toolbar .field { display: grid; gap: 2px; font-size: 13px; color: var(--muted); }
+.toolbar .inp, .toolbar select.inp { min-height: 38px; font-size: 14px; width: auto; min-width: 160px; border-width: 1px; }
+.toolbar .btn { min-height: 38px; padding: 0 14px; font-size: 14px; }
+.table-wrap { overflow-x: auto; background: var(--card); border: 1px solid var(--axis-cloud); border-radius: var(--radius); }
+table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
+.tbl th { text-align: left; padding: 8px 12px; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); border-bottom: 1px solid var(--axis-cloud); white-space: nowrap; }
+.tbl td { padding: 8px 12px; border-bottom: 1px solid var(--axis-cloud); vertical-align: top; }
+.tbl tbody tr.clickable { cursor: pointer; } .tbl tbody tr.clickable:hover { background: rgba(59,130,246,.08); }
+.tbl td.num, .tbl th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 10px 0; font-size: 14px; color: var(--muted); }
+.pager .btn { min-height: 34px; padding: 0 12px; font-size: 14px; margin: 0; }
+.pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; background: rgba(59,130,246,.14); color: var(--text); margin: 0 4px 2px 0; }
+.pill.warn { background: rgba(245,158,11,.2); } .pill.bad { background: rgba(185,28,28,.15); } .pill.ok { background: rgba(21,128,61,.16); }
+.kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 16px; }
+.kv dt { font-size: 12px; color: var(--muted); } .kv dd { margin: 0; font-weight: 600; }
+.skeleton { height: 14px; border-radius: 4px; background: var(--axis-cloud); opacity: .6; }

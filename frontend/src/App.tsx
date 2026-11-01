@@ -5,11 +5,15 @@ import { resolveCode, type Scanned } from './lib/codes';
 import { idbStore, kv } from './lib/db';
 import { fmtDateTime, fmtQty, parseQty } from './lib/format';
 import { OfflineQueue, type OpType, type QueueOp } from './lib/queue';
+import { Catalog } from './screens/Catalog';
+import { Stock } from './screens/Stock';
 import { cameraSupported, startCamera } from './lib/scanner';
 
-type Tab = 'sep' | 'arm' | 'inv' | 'sync';
+type Tab = 'cat' | 'est' | 'sep' | 'arm' | 'inv' | 'sync';
 /** Itens do menu lateral, com a permissão local que libera cada tela (mesmo padrão do shell do Axis). */
 const NAV_ITEMS: Array<{ key: Tab; label: string; icon: string; permission?: string }> = [
+  { key: 'cat', label: 'Catálogo', icon: '◈', permission: 'material:read' },
+  { key: 'est', label: 'Estoque', icon: '▦', permission: 'stock:read' },
   { key: 'sep', label: 'Separação', icon: '⚑', permission: 'picking:execute' },
   { key: 'arm', label: 'Armazenagem', icon: '▣', permission: 'receipt:execute' },
   { key: 'inv', label: 'Inventário', icon: '☆', permission: 'stockcount:count' },
@@ -210,7 +214,9 @@ export function App() {
         </aside>
         <main className="page">
           {msg && <p className="notice" role="status">{msg}</p>}
-          {!boot && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
+          {tab === 'cat' && <Catalog warehouseId={settings.warehouseId} />}
+          {tab === 'est' && settings.warehouseId && <Stock warehouseId={settings.warehouseId} />}
+          {!boot && (tab === 'sep' || tab === 'arm' || tab === 'inv') && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
           {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
           {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
           {boot && tab === 'inv' && <Counting boot={boot} ops={ops} enqueue={enqueue} />}
@@ -218,7 +224,7 @@ export function App() {
         </main>
       </div>
       <nav className="tabs">
-        {NAV_ITEMS.map((i) => (
+        {NAV_ITEMS.filter((i) => i.key !== 'cat' && i.key !== 'est').map((i) => (
           <button key={i.key} className={tab === i.key ? 'tab active' : 'tab'} onClick={() => setTab(i.key)}>{i.label}</button>
         ))}
       </nav>
