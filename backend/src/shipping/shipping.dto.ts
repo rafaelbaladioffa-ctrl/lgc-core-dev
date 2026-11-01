@@ -79,6 +79,9 @@ export class ConfirmDeliveryDto {
   @IsOptional() @IsString() @MaxLength(300) photoRef?: string;
   @IsOptional() @IsString() @MaxLength(500) notes?: string;
 
+  /** Devolução prevista dos itens em custódia (ferramentas/ativos). */
+  @IsOptional() @IsDateString({ strict: true }, { message: 'Data de devolução prevista inválida (AAAA-MM-DD).' }) expectedReturnAt?: string;
+
   /** Obrigatório em PARCIAL: volumes efetivamente entregues. */
   @IsOptional() @IsArray() @IsUUID('all', { each: true, message: 'Volume inválido.' }) packageIds?: string[];
 }

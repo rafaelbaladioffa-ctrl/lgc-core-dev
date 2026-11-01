@@ -996,6 +996,126 @@ model TransferItem {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 6 — Devoluções, custódia e etiquetas (9.6, 16)
+// ---------------------------------------------------------------------------
+
+enum CustodyStatus {
+  ATIVO
+  DEVOLVIDO
+  PERDIDO
+}
+
+enum ReturnType {
+  SOBRA
+  FERRAMENTA
+  ATIVO
+  DEFEITUOSO
+  AVARIA
+  TROCA_TAMANHO
+  RETORNO_PROJETO
+  RETORNO_TERCEIRO
+}
+
+enum ReturnDisposition {
+  DISPONIVEL
+  MANUTENCAO
+  QUARENTENA
+  AVARIADO_REPARO
+  SUCATA
+}
+
+enum ReturnItemStatus {
+  PENDENTE_INSPECAO
+  CLASSIFICADO
+}
+
+enum ReturnStatus {
+  RECEBIDA
+  ENCERRADA
+}
+
+model CustodyTerm {
+  id               String        @id @default(uuid())
+  seq              Int           @unique @default(autoincrement())
+  custodianAxisId  String        @map("custodian_axis_id")
+  materialId       String        @map("material_id")
+  serialId         String?       @map("serial_id")
+  lotId            String?       @map("lot_id")
+  quantity         Decimal       @db.Decimal(18, 6)
+  returnedQty      Decimal       @default(0) @map("returned_qty") @db.Decimal(18, 6)
+  status           CustodyStatus @default(ATIVO)
+  orderId          String?       @map("order_id")
+  shipmentId       String?       @map("shipment_id")
+  projectAxisId    String?       @map("project_axis_id")
+  acceptanceRef    String?       @map("acceptance_ref") // assinatura/aceite do termo
+  expectedReturnAt DateTime?     @map("expected_return_at") @db.Date
+  deliveredAt      DateTime      @default(now()) @map("delivered_at")
+  closedAt         DateTime?     @map("closed_at")
+  closeNotes       String?       @map("close_notes")
+  createdBy        String        @map("created_by")
+
+  @@index([custodianAxisId, status])
+  @@index([materialId])
+  @@map("custody_terms")
+}
+
+model Return {
+  id                  String       @id @default(uuid())
+  seq                 Int          @unique @default(autoincrement())
+  type                ReturnType
+  status              ReturnStatus @default(RECEBIDA)
+  warehouseId         String       @map("warehouse_id")
+  receivingLocationId String       @map("receiving_location_id")
+  returnedByAxisId    String?      @map("returned_by_axis_id")
+  projectAxisId       String?      @map("project_axis_id")
+  custodyTermId       String?      @map("custody_term_id")
+  notes               String?
+  createdBy           String       @map("created_by")
+  createdAt           DateTime     @default(now()) @map("created_at")
+
+  items ReturnItem[]
+
+  @@index([warehouseId, status])
+  @@map("returns")
+}
+
+model ReturnItem {
+  id           String             @id @default(uuid())
+  returnId     String             @map("return_id")
+  materialId   String             @map("material_id")
+  quantity     Decimal            @db.Decimal(18, 6)
+  lotId        String?            @map("lot_id")
+  serialId     String?            @map("serial_id")
+  status       ReturnItemStatus   @default(PENDENTE_INSPECAO)
+  disposition  ReturnDisposition?
+  classifiedBy String?            @map("classified_by")
+  classifiedAt DateTime?          @map("classified_at")
+  approvalRef  String?            @map("approval_ref")
+  notes        String?
+
+  return Return @relation(fields: [returnId], references: [id], onDelete: Cascade)
+
+  @@index([returnId])
+  @@map("return_items")
+}
+
+/// Reimpressão auditada com motivo (16.1).
+model LabelPrint {
+  id        String   @id @default(uuid())
+  kind      String
+  refId     String   @map("ref_id")
+  copies    Int      @default(1)
+  format    String   @default("json")
+  isReprint Boolean  @default(false) @map("is_reprint")
+  reason    String?
+  printedBy String   @map("printed_by")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([kind, refId])
+  @@map("label_prints")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 

@@ -11,9 +11,8 @@ import type { CheckDto, ConfirmDeliveryDto, DispatchDto, ListTasksQuery, PackDto
 
 type Tx = Prisma.TransactionClient;
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
+export const isCustodyMaterial = (m: { returnable: boolean; assetTagged: boolean; serialControlled: boolean; type: string }) => m.returnable || m.assetTagged || m.serialControlled || ['EPI', 'FERRAMENTA', 'EQUIPAMENTO', 'ATIVO'].includes(m.type);
 const pad = (prefix: string, n: number) => `${prefix}-${String(n).padStart(8, '0')}`;
-/** Tipos que geram custódia (13): exigem identificação do recebedor. */
-const CUSTODY_TYPES = ['EPI', 'FERRAMENTA', 'EQUIPAMENTO', 'ATIVO'];
 
 @Injectable()
 export class ShippingService {
@@ -327,7 +326,7 @@ export class ShippingService {
 
       // Custódia/EPI/ativo exige identificação do recebedor (11.13); desligado não recebe (11.14).
       const materials = await tx.material.findMany({ where: { id: { in: delivering.flatMap((p) => p.items.map((i) => i.pickingItem.materialId)) } } });
-      const custody = materials.some((m) => m.returnable || m.assetTagged || m.serialControlled || CUSTODY_TYPES.includes(m.type));
+      const custody = materials.some((m) => isCustodyMaterial(m));
       if (custody && !dto.receiverAxisId) throw new UnprocessableEntityException(problem('Material em custódia (EPI, ferramenta, ativo ou seriado) exige a identificação do recebedor no Axis (receiverAxisId).', 'AXIS_REFERENCE_INVALID'));
       await this.assertRecipientActive(tx, dto.receiverAxisId);
       const matById = new Map(materials.map((m) => [m.id, m]));
@@ -353,6 +352,13 @@ export class ShippingService {
               projectAxisId: order.projectAxisId ?? undefined, costCenterAxisId: order.costCenterAxisId ?? undefined,
               custodianAxisId: custody ? dto.receiverAxisId : undefined, correlationId: order.id,
             }, line.key, user);
+            // Termo de custódia (9.5): EPI, ferramenta, equipamento, ativo ou seriado ficam sob responsabilidade do recebedor.
+            if (isCustodyMaterial(material) && dto.receiverAxisId) {
+              const term = await tx.custodyTerm.create({
+                data: { custodianAxisId: dto.receiverAxisId, materialId: material.id, serialId: line.serialId, lotId: r.lotId, quantity: line.quantity, orderId: order.id, shipmentId: id, projectAxisId: order.projectAxisId, acceptanceRef: dto.signatureRef, expectedReturnAt: dto.expectedReturnAt ? new Date(dto.expectedReturnAt) : undefined, createdBy: user.userId },
+              });
+              await this.emit(tx, 'asset.custody.changed', { custody_term_id: term.id, custodian_id: dto.receiverAxisId, material_id: material.id, serial_id: line.serialId ?? null, action: 'delivered' });
+            }
           }
         }
       }

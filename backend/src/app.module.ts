@@ -15,6 +15,8 @@ import { FulfillmentModule } from './fulfillment/fulfillment.module.js';
 import { ShippingModule } from './shipping/shipping.module.js';
 import { ReceivingModule } from './receiving/receiving.module.js';
 import { TransfersModule } from './transfers/transfers.module.js';
+import { ReturnsModule } from './returns/returns.module.js';
+import { DocumentsModule } from './documents/documents.module.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
 
@@ -33,6 +35,8 @@ import { HealthController } from './health/health.controller.js';
     ShippingModule,
     ReceivingModule,
     TransfersModule,
+    ReturnsModule,
+    DocumentsModule,
     IntegrationModule,
   ],
   controllers: [HealthController],
