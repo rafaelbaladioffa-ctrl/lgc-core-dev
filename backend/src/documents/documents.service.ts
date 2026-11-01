@@ -124,6 +124,25 @@ export class DocumentsService {
       { columns: ['Material', 'Descrição', 'Qtd.', 'Destinação', 'Aprovação Axis', 'Parecer'], rows: r.items.map((i) => { const m = mats.get(i.materialId)!; return [m.code, m.shortDescription, num(i.quantity), i.disposition ?? 'PENDENTE', i.approvalRef ?? '—', i.notes ?? '—']; }) });
   }
 
+  /** Relatório de inventário antes/depois (16.2, 9.8): saldo do sistema x apurado, com valor da divergência (R$) para quem vê custo. */
+  async stockCount(id: string, user: AuthenticatedUser) {
+    const c = await this.prisma.stockCount.findUnique({ where: { id }, include: { lines: true } });
+    if (!c) throw new NotFoundException('Inventário não encontrado.');
+    await this.rbac.assertWarehouseAccess(user, c.warehouseId);
+    const mats = await this.materialMap(c.lines.map((l) => l.materialId));
+    const locs = new Map((await this.prisma.location.findMany({ where: { id: { in: c.lines.map((l) => l.locationId) } } })).map((l) => [l.id, l.code]));
+    const canCost = user.permissions.includes('material:read_cost');
+    const rows = [...c.lines].sort((a, b) => (locs.get(a.locationId) ?? '').localeCompare(locs.get(b.locationId) ?? '')).map((l) => {
+      const m = mats.get(l.materialId)!;
+      const value = l.varianceQty && l.unitCost ? brl(Number(l.varianceQty.toString()) * Number(l.unitCost.toString())) : '—';
+      return [locs.get(l.locationId) ?? '—', m.code, m.shortDescription, num(l.systemQty), l.finalQty ? num(l.finalQty) : '—', l.varianceQty ? num(l.varianceQty) : '0', l.status, l.reason ?? '—', ...(canCost ? [value] : [])];
+    });
+    return this.base('Relatório de inventário', pad('INV', c.seq), user,
+      { Tipo: c.type, Situação: c.status, 'Tolerância': `${Number(c.tolerancePct.toString()).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}%`, 'Aprovação Axis': c.approvalRef ?? '—', 'Aberto em': fmtDateTime(c.createdAt), 'Concluído em': fmtDateTime(c.closedAt) }, ['Responsável pelo inventário', 'Gestor do almoxarifado'],
+      { columns: ['Endereço', 'Material', 'Descrição', 'Antes (sistema)', 'Depois (apurado)', 'Divergência', 'Situação', 'Motivo', ...(canCost ? ['Valor divergência'] : [])], rows },
+      c.actionPlan ? [`Plano de ação: ${c.actionPlan}`] : undefined);
+  }
+
   /** Extrato de movimentações (16.2): período e filtros; custo só com material:read_cost. */
   async statement(q: { materialId?: string; locationId?: string; from?: string; to?: string }, user: AuthenticatedUser) {
     const wh = await this.rbac.accessibleWarehouseIds(user);

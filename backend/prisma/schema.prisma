@@ -1116,6 +1116,89 @@ model LabelPrint {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 7 — Inventário (9.8)
+// ---------------------------------------------------------------------------
+
+enum StockCountType {
+  GERAL
+  ROTATIVO_ABC
+  ENDERECO
+  ITEM
+  LOTE
+  PROJETO
+  AMOSTRAGEM
+}
+
+enum StockCountStatus {
+  ABERTA
+  EM_CONTAGEM
+  EM_RECONTAGEM
+  APURADA
+  CONCLUIDA
+  CANCELADA
+}
+
+enum CountLineStatus {
+  PENDENTE
+  CONTADO
+  RECONTAR
+  CONFERIDO
+  DIVERGENTE
+}
+
+model StockCount {
+  id           String           @id @default(uuid())
+  seq          Int              @unique @default(autoincrement())
+  type         StockCountType
+  status       StockCountStatus @default(ABERTA)
+  warehouseId  String           @map("warehouse_id")
+  scope        Json             @default("{}")
+  tolerancePct Decimal          @default(0) @map("tolerance_pct") @db.Decimal(6, 2) // acima disso exige recontagem
+  frozen       Boolean          @default(true) // congelamento lógico dos endereços do escopo
+  actionPlan   String?          @map("action_plan")
+  approvalRef  String?          @map("approval_ref")
+  createdBy    String           @map("created_by")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  closedAt     DateTime?        @map("closed_at")
+
+  lines StockCountLine[]
+
+  @@index([warehouseId, status])
+  @@map("stock_counts")
+}
+
+model StockCountLine {
+  id                   String          @id @default(uuid())
+  countId              String          @map("count_id")
+  materialId           String          @map("material_id")
+  locationId           String          @map("location_id")
+  lotId                String?         @map("lot_id")
+  serialId             String?         @map("serial_id")
+  condition            StockCondition  @default(DISPONIVEL)
+  ownership            Ownership       @default(PROPRIO)
+  systemQty            Decimal         @map("system_qty") @db.Decimal(18, 6) // retratado só a quem gerencia (contagem cega)
+  unitCost             Decimal?        @map("unit_cost") @db.Decimal(18, 4)
+  count1Qty            Decimal?        @map("count1_qty") @db.Decimal(18, 6)
+  count1By             String?         @map("count1_by")
+  count1At             DateTime?       @map("count1_at")
+  count2Qty            Decimal?        @map("count2_qty") @db.Decimal(18, 6)
+  count2By             String?         @map("count2_by")
+  count2At             DateTime?       @map("count2_at")
+  finalQty             Decimal?        @map("final_qty") @db.Decimal(18, 6)
+  varianceQty          Decimal?        @map("variance_qty") @db.Decimal(18, 6)
+  status               CountLineStatus @default(PENDENTE)
+  reason               String?
+  notes                String?
+  adjustmentMovementId String?         @map("adjustment_movement_id")
+
+  count StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+
+  @@index([countId, status])
+  @@index([locationId])
+  @@map("stock_count_lines")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 

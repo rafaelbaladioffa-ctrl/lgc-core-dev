@@ -30,6 +30,7 @@ export const PERMISSIONS: Record<string, string> = {
   'shipment:execute': 'Criar volumes, romaneios e expedições',
   'inspection:execute': 'Inspecionar, bloquear e liberar lotes',
   'custody:execute': 'Etiquetar, custodiar e transferir ativos',
+  'stockcount:count': 'Realizar contagens de inventário',
   'stockcount:manage': 'Supervisionar inventários',
   'adjustment:request': 'Solicitar ajustes, baixas e perdas (aprovação no Axis)',
   'purchasing:read': 'Consultar consumo, faltas e reposição',
@@ -43,9 +44,9 @@ const BASE_READ = ['material:read', 'warehouse:read', 'uom:read', 'stock:read'];
 
 export const ROLES: Array<{ code: string; name: string; description: string; permissions: string[] }> = [
   { code: 'SOLICITANTE', name: 'Solicitante Axis', description: 'Consulta catálogo/disponibilidade permitida', permissions: ['material:read', 'uom:read', 'stock:read', 'fulfillment:read'] },
-  { code: 'ALMOXARIFE', name: 'Almoxarife', description: 'Recebe, armazena, separa, confere, entrega e registra devolução', permissions: [...BASE_READ, 'receipt:execute', 'picking:execute', 'adjustment:request', 'stock:post', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'shipment:execute', 'transfer:request', 'return:execute', 'label:print', 'document:read'] },
-  { code: 'CONFERENTE', name: 'Conferente', description: 'Valida entrada/saída de forma independente', permissions: [...BASE_READ, 'picking:execute'] },
-  { code: 'GESTOR_ALMOXARIFADO', name: 'Gestor de almoxarifado', description: 'Distribui tarefas, desbloqueia exceções e supervisiona inventários', permissions: [...BASE_READ, 'warehouse:write', 'warehouse:access_all', 'material:read_cost', 'receipt:execute', 'picking:execute', 'stockcount:manage', 'adjustment:request', 'audit:read', 'stock:post', 'stock:adjust', 'stock:reverse', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'fulfillment:create', 'shipment:execute', 'transfer:request', 'transfer:approve', 'return:execute', 'label:print', 'document:read', 'custody:execute'] },
+  { code: 'ALMOXARIFE', name: 'Almoxarife', description: 'Recebe, armazena, separa, confere, entrega e registra devolução', permissions: [...BASE_READ, 'receipt:execute', 'picking:execute', 'adjustment:request', 'stockcount:count', 'stock:post', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'shipment:execute', 'transfer:request', 'return:execute', 'label:print', 'document:read'] },
+  { code: 'CONFERENTE', name: 'Conferente', description: 'Valida entrada/saída de forma independente', permissions: [...BASE_READ, 'picking:execute', 'stockcount:count'] },
+  { code: 'GESTOR_ALMOXARIFADO', name: 'Gestor de almoxarifado', description: 'Distribui tarefas, desbloqueia exceções e supervisiona inventários', permissions: [...BASE_READ, 'warehouse:write', 'warehouse:access_all', 'material:read_cost', 'receipt:execute', 'picking:execute', 'stockcount:manage', 'stockcount:count', 'adjustment:request', 'audit:read', 'document:read', 'stock:post', 'stock:adjust', 'stock:reverse', 'lot:write', 'serial:write', 'fulfillment:read', 'fulfillment:read_all', 'fulfillment:manage', 'fulfillment:create', 'shipment:execute', 'transfer:request', 'transfer:approve', 'return:execute', 'label:print', 'document:read', 'custody:execute'] },
   { code: 'LOGISTICA_EXPEDICAO', name: 'Logística/Expedição', description: 'Volumes, romaneios, cargas, rotas e comprovantes', permissions: [...BASE_READ, 'shipment:execute', 'fulfillment:read', 'fulfillment:read_all', 'label:print', 'document:read'] },
   { code: 'CONTROLE_PATRIMONIO', name: 'Controle de patrimônio', description: 'Etiqueta, transfere, custodia e baixa ativos', permissions: [...BASE_READ, 'custody:execute', 'adjustment:request', 'serial:write', 'return:execute', 'label:print', 'document:read'] },
   { code: 'HSE_QUALIDADE', name: 'HSE/Qualidade', description: 'Inspeciona, bloqueia/libera lotes e consulta certificados', permissions: [...BASE_READ, 'inspection:execute', 'lot:block', 'return:execute', 'document:read'] },

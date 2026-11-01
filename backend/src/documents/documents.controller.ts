@@ -41,6 +41,9 @@ export class DocumentsController {
   @Get('returns/:id') @RequirePermissions('document:read')
   returnDoc(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() u: AuthenticatedUser) { return this.docs.returnDoc(id, u); }
 
+  @Get('stock-counts/:id') @RequirePermissions('document:read')
+  stockCount(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() u: AuthenticatedUser) { return this.docs.stockCount(id, u); }
+
   @Get('movements') @RequirePermissions('document:read')
   statement(@Query() q: StatementQuery, @CurrentUser() u: AuthenticatedUser) { return this.docs.statement(q, u); }
 }

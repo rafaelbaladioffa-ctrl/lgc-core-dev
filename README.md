@@ -47,3 +47,8 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - `POST /fulfillment-orders/:id/resolve-cancellation`: resolve CANCELAMENTO_SOLICITADO e entrega recusada (libera reservas, cancela tarefa/volume). Recusa de entrega → DIVERGENCIA até resolvida.
 - `POST /labels/print` (LOCATION, MATERIAL+lote, SERIAL, PACKAGE; json ou ZPL; reimpressão exige motivo e é auditada em `label_prints`).
 - `GET /documents/*`: comprovante de recebimento, divergência, lista de separação, romaneios (expedição/transferência), comprovante de entrega, termo de custódia, comprovante/certificado de devolução-descarte e extrato de movimentações (JSON pronto para PDF; datas DD/MM/AAAA HH:mm, moeda R$, custo só com `material:read_cost`).
+
+## Sprint 7 — inventário (9.8)
+- `POST /stock-counts` (tipos GERAL/ROTATIVO_ABC/ENDERECO/ITEM/LOTE/PROJETO/AMOSTRAGEM) tira o retrato do saldo e **congela** os endereços (movimento comum nesses endereços é recusado); um inventário ativo por endereço.
+- Contagem cega: `GET :id/sheet` nunca traz o saldo do sistema; 1ª contagem → `close-round` → o que excede a tolerância (`tolerancePct`) vai para recontagem **por outro operador** → apuração (`APURADA`, evento `inventory.variance_detected`).
+- `GET :id/report` (antes/depois, valor R$, recorrência), `PUT :id/action-plan`, `POST :id/adjustments` (permissões `stockcount:manage` + `stock:adjust`, `approvalRef` do Axis e motivo padronizado por divergência) → movimentos AJUSTE_POSITIVO/NEGATIVO e conclusão. `GET /documents/stock-counts/:id` emite o relatório de inventário.

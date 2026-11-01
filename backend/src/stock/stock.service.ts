@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma, StockCondition } from '@prisma/client';
 import type { StockMovement } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { problem } from '../common/errors.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
@@ -14,7 +15,7 @@ const ADJUST_TYPES = ['AJUSTE_POSITIVO', 'AJUSTE_NEGATIVO', 'BAIXA_PERDA', 'DESC
 /** Saídas que consomem estoque utilizável: lote vencido/bloqueado não pode sair (11.6). */
 const USABLE_EXIT_TYPES = ['SAIDA_ENTREGA', 'TRANSFERENCIA'];
 
-export type MovementInput = Omit<PostMovementDto, 'quantity'> & { quantity: Prisma.Decimal; reversesMovementId?: string };
+export type MovementInput = Omit<PostMovementDto, 'quantity'> & { quantity: Prisma.Decimal; reversesMovementId?: string; bypassFreeze?: boolean };
 
 export const movementCode = (seq: number) => `MOV-${String(seq).padStart(8, '0')}`;
 
@@ -146,6 +147,11 @@ export class StockService {
       if (!isReversal && !ADJUST_TYPES.includes(input.type) && (l.status !== 'ATIVO' || l.warehouse.status !== 'ATIVO')) {
         throw new UnprocessableEntityException(`O endereço ${l.code} está bloqueado ou inativo.`);
       }
+    }
+    // Congelamento lógico (9.8): endereço em inventário ativo não aceita movimento comum.
+    if (!input.bypassFreeze && locIds.length > 0) {
+      const frozen = await tx.stockCountLine.count({ where: { locationId: { in: locIds }, count: { frozen: true, status: { in: ['ABERTA', 'EM_CONTAGEM', 'EM_RECONTAGEM', 'APURADA'] } } } });
+      if (frozen > 0) throw new UnprocessableEntityException(problem('Endereço congelado por inventário em andamento: movimentos ficam bloqueados até a conclusão.', 'INVALID_LOCATION'));
     }
     const dest = loc(input.toLocationId);
     if (dest && !isReversal && dest.allowedCategories.length > 0 && !dest.allowedCategories.includes(material.category)) {

@@ -17,6 +17,7 @@ import { ReceivingModule } from './receiving/receiving.module.js';
 import { TransfersModule } from './transfers/transfers.module.js';
 import { ReturnsModule } from './returns/returns.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
+import { InventoryModule } from './inventory/inventory.module.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
 
@@ -37,6 +38,7 @@ import { HealthController } from './health/health.controller.js';
     TransfersModule,
     ReturnsModule,
     DocumentsModule,
+    InventoryModule,
     IntegrationModule,
   ],
   controllers: [HealthController],
