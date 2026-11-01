@@ -1296,6 +1296,35 @@ model Alert {
 }
 
 // ---------------------------------------------------------------------------
+// Sprint 9 — PWA operacional: operações offline sincronizadas com idempotência (15.2, 11.17)
+// ---------------------------------------------------------------------------
+
+enum OfflineOpStatus {
+  APLICADA
+  CONFLITO
+  REJEITADA
+}
+
+model OfflineOperation {
+  id          String          @id @default(uuid())
+  deviceId    String          @map("device_id")
+  opId        String          @map("op_id") // gerado no dispositivo; idempotente
+  type        String
+  payloadHash String          @map("payload_hash")
+  userId      String          @map("user_id")
+  status      OfflineOpStatus
+  message     String?
+  code        String?
+  result      Json?
+  clientAt    DateTime        @map("client_at")
+  appliedAt   DateTime        @default(now()) @map("applied_at")
+
+  @@unique([deviceId, opId])
+  @@index([userId, appliedAt])
+  @@map("offline_operations")
+}
+
+// ---------------------------------------------------------------------------
 // Sprint 2 — Integração com o Axis (seção 12)
 // ---------------------------------------------------------------------------
 
