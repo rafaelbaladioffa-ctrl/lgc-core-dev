@@ -222,7 +222,8 @@ describe('Sprint 8 (bordas) — reposição, alertas e indicadores', () => {
       await policy(m, w.id, { minQty: 5 }).expect(200);
       await stockIn(m, 20, w.loc);
       await scan();
-      expect(await alertsOf(m)).toHaveLength(0);
+      await scan(); // varreduras de outras suítes rodam em paralelo; a 2ª garante que nenhuma coleta antiga ficou aplicada
+      expect((await alertsOf(m)).filter((x) => x.status !== 'RESOLVIDO')).toHaveLength(0);
       await stockOut(m, 20, w.loc); // zera → ruptura
       await scan();
       expect((await alertsOf(m)).map((a) => a.status)).toEqual(['ABERTO']);

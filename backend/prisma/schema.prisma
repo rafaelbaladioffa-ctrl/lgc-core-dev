@@ -318,6 +318,7 @@ model LogisticsRole {
 
   permissions  RolePermission[]
   axisMappings AxisRoleToLogisticsRole[]
+  userGrants   UserLogisticsRole[]
 
   @@map("logistics_roles")
 }
@@ -352,6 +353,20 @@ model AxisRoleToLogisticsRole {
 
   @@id([axisRole, logisticsRoleId])
   @@map("axis_role_to_logistics_role")
+}
+
+/// Perfil de Logística concedido a um usuário específico do Axis, somado ao que vem do mapeamento por role
+/// (ex.: um colaborador que atua como almoxarife sem mudar a role dele no Axis).
+model UserLogisticsRole {
+  axisUserId      String   @map("axis_user_id")
+  logisticsRoleId String   @map("logistics_role_id")
+  grantedBy       String?  @map("granted_by")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  logisticsRole LogisticsRole @relation(fields: [logisticsRoleId], references: [id], onDelete: Cascade)
+
+  @@id([axisUserId, logisticsRoleId])
+  @@map("user_logistics_roles")
 }
 
 /// Escopo por almoxarifado (6): usuário sem linha nenhuma só acessa os almoxarifados se tiver `warehouse:access_all`.

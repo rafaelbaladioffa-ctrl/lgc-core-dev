@@ -14,6 +14,14 @@ class SetMappingDto {
   logisticsRoles!: string[];
 }
 
+/** Perfis de Logística concedidos diretamente a um usuário do Axis (além do mapeamento por role). */
+class UserRolesDto {
+  @IsArray({ message: 'Informe a lista de perfis de Logística.' })
+  @ArrayUnique({ message: 'Perfis repetidos.' })
+  @IsString({ each: true, message: 'Código de perfil inválido.' })
+  logisticsRoles!: string[];
+}
+
 class WarehouseAccessDto {
   @IsArray({ message: 'Informe a lista de almoxarifados.' })
   @ArrayUnique({ message: 'Almoxarifados repetidos.' })
@@ -68,6 +76,31 @@ export class RbacController {
       after: dto.logisticsRoles,
     });
     return { axisRole, logisticsRoles: dto.logisticsRoles };
+  }
+
+  @Get('users/:axisUserId/roles')
+  @RequirePermissions('rbac:read')
+  async userRoles(@Param('axisUserId') axisUserId: string) {
+    const rows = await this.prisma.userLogisticsRole.findMany({ where: { axisUserId }, select: { logisticsRole: { select: { code: true } } } });
+    return { axisUserId, logisticsRoles: rows.map((r) => r.logisticsRole.code).sort() };
+  }
+
+  @Put('users/:axisUserId/roles')
+  @RequirePermissions('rbac:write')
+  async setUserRoles(@Param('axisUserId') axisUserId: string, @Body() dto: UserRolesDto, @CurrentUser() user: AuthenticatedUser) {
+    const roles = await this.prisma.logisticsRole.findMany({ where: { code: { in: dto.logisticsRoles } } });
+    if (roles.length !== dto.logisticsRoles.length) {
+      const known = new Set(roles.map((r) => r.code));
+      throw new BadRequestException(`Perfis inexistentes: ${dto.logisticsRoles.filter((c) => !known.has(c)).join(', ')}.`);
+    }
+    const before = await this.prisma.userLogisticsRole.findMany({ where: { axisUserId }, select: { logisticsRole: { select: { code: true } } } });
+    await this.prisma.$transaction([
+      this.prisma.userLogisticsRole.deleteMany({ where: { axisUserId } }),
+      this.prisma.userLogisticsRole.createMany({ data: roles.map((r) => ({ axisUserId, logisticsRoleId: r.id, grantedBy: user.userId })) }),
+    ]);
+    this.rbac.invalidateCache();
+    await this.audit.record(user.userId, 'rbac.user_roles_changed', 'axis_user', axisUserId, { before: before.map((b) => b.logisticsRole.code), after: dto.logisticsRoles });
+    return { axisUserId, logisticsRoles: dto.logisticsRoles };
   }
 
   @Get('users/:axisUserId/warehouses')

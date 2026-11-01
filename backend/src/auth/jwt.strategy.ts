@@ -53,7 +53,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       axisRoles,
       collaboratorId: payload.collaboratorId ?? null,
       mustChangePassword: payload.mustChangePassword === true,
-      permissions: await this.rbac.resolvePermissions(axisRoles),
+      permissions: await this.rbac.resolvePermissions(axisRoles, payload.sub),
     };
   }
 }

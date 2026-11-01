@@ -11,7 +11,8 @@ cp .env.example .env                 # JWT_SECRET deve ser igual ao JWT_ACCESS_S
 npm install
 npx prisma migrate deploy && npx prisma db seed
 npm run start:dev                    # http://localhost:3100/api/v1
-npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no ambiente
+npm run dev:setup                    # migrações + seed (catálogo inicial 8.1–8.8; com SEED_DEV_DATA=true cria o ALM-CENTRAL e libera SEED_DEV_GRANT_SUBS)
+npm run test:e2e:setup && npm run test:e2e   # testes em banco SEPARADO (.env.test → axis_logistica_test)
 ```
 
 ## SSO e RBAC (Sprint 1)
@@ -71,3 +72,8 @@ npm run test:e2e                     # precisa de DATABASE_URL e JWT_SECRET no a
 - **Reconciliação (12.4):** `POST /reconciliation/run`, `GET /reconciliation/issues`, `POST /reconciliation/issues/:id/resolve` — detecta e abre item; nunca corrige em silêncio.
 - **Auditoria:** toda mutação, leitura sensível e negação de acesso; `GET /audit/events`; `X-Correlation-Id` em todas as respostas.
 - **Deploy e status:** `DEPLOY.md` (compose com Postgres próprio, backend, frontend/nginx e backup) e `STATUS_FINAL.md` (o que ficou fora do MVP, contratos a confirmar e decisões da seção 28).
+
+## Desenvolvimento e testes
+- **Banco de testes separado:** copie `backend/.env.test.example` para `.env.test` (outro banco, `axis_logistica_test`); `npm run test:e2e:setup` migra e `npm run test:e2e` roda. O banco de desenvolvimento não acumula lixo de teste.
+- **Catálogo inicial:** `prisma/catalog-data.ts` é gerado por `python scripts/generate-catalog.py <PLANNING_LOGISTICA.md>` (101 SKUs das tabelas 8.1–8.8; 8.9 químicos não é carregado — exige validação técnica e de HSE). O seed só cria o que ainda não existe e `SEED_CATALOG=false` desliga.
+- **Perfil por usuário:** além do mapeamento por role do Axis, `PUT /rbac/users/:axisUserId/roles` concede perfis de Logística a um usuário específico (ex.: um colaborador que atua como almoxarife); o acesso a almoxarifados continua em `PUT /rbac/users/:axisUserId/warehouses`.

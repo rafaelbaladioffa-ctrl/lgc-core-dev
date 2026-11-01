@@ -11,7 +11,9 @@
     "deploy": "nest deploy",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
+    "prestart:dev": "prisma migrate deploy && tsx prisma/seed.ts",
     "start:dev": "nest start --watch",
+    "dev:setup": "prisma migrate deploy && tsx prisma/seed.ts",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
     "lint": "oxlint --type-aware src/ test/",
@@ -19,7 +21,8 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
-    "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
+    "test:e2e": "node --env-file=.env.test node_modules/vitest/vitest.mjs run --config ./vitest.config.e2e.ts",
+    "test:e2e:setup": "node --env-file=.env.test node_modules/prisma/build/index.js migrate deploy && node --env-file=.env.test node_modules/tsx/dist/cli.mjs prisma/seed.ts",
     "prisma:seed": "tsx prisma/seed.ts"
   },
   "prisma": {

@@ -10,15 +10,15 @@ export class RbacService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** Roles do Axis → perfis de Logística → permissões (união). Cache curto, invalidado ao alterar o mapeamento. */
-  async resolvePermissions(axisRoles: string[]): Promise<string[]> {
-    if (axisRoles.length === 0) return [];
-    const key = [...axisRoles].sort().join('|');
+  /** Roles do Axis (mapeamento) + perfis concedidos ao usuário → permissões (união). Cache curto, invalidado ao alterar o mapeamento. */
+  async resolvePermissions(axisRoles: string[], axisUserId?: string): Promise<string[]> {
+    if (axisRoles.length === 0 && !axisUserId) return [];
+    const key = `${[...axisRoles].sort().join('|')}#${axisUserId ?? ''}`;
     const hit = this.cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.permissions;
 
     const rows = await this.prisma.rolePermission.findMany({
-      where: { role: { axisMappings: { some: { axisRole: { in: axisRoles } } } } },
+      where: { role: { OR: [{ axisMappings: { some: { axisRole: { in: axisRoles } } } }, ...(axisUserId ? [{ userGrants: { some: { axisUserId } } }] : [])] } },
       select: { permission: { select: { code: true } } },
     });
     const permissions = [...new Set(rows.map((r) => r.permission.code))].sort();
@@ -30,10 +30,10 @@ export class RbacService {
     this.cache.clear();
   }
 
-  async logisticsRolesFor(axisRoles: string[]) {
-    if (axisRoles.length === 0) return [];
+  async logisticsRolesFor(axisRoles: string[], axisUserId?: string) {
+    if (axisRoles.length === 0 && !axisUserId) return [];
     return this.prisma.logisticsRole.findMany({
-      where: { axisMappings: { some: { axisRole: { in: axisRoles } } } },
+      where: { OR: [{ axisMappings: { some: { axisRole: { in: axisRoles } } } }, ...(axisUserId ? [{ userGrants: { some: { axisUserId } } }] : [])] },
       select: { code: true, name: true },
       orderBy: { code: 'asc' },
     });

@@ -27,7 +27,7 @@ export class HealthController {
       email: user.email,
       collaboratorId: user.collaboratorId,
       axisRoles: user.axisRoles,
-      logisticsRoles: await this.rbac.logisticsRolesFor(user.axisRoles),
+      logisticsRoles: await this.rbac.logisticsRolesFor(user.axisRoles, user.userId),
       permissions: user.permissions,
     };
   }
