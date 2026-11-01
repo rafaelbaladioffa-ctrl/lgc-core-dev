@@ -1,0 +1,43 @@
+/* Tokens da identidade Axis (branding/implementation/axis-theme.css), com alto contraste e alvos grandes para uso com luvas (15.2). */
+:root {
+  --axis-navy: #0a1740; --axis-blue: #3b82f6; --axis-violet: #8b5cf6; --axis-cloud: #e5e7ef; --axis-silver: #94a3b8;
+  --axis-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --bg: #f8fafc; --card: #fff; --text: #0a1740; --muted: #475569; --err: #b91c1c; --ok: #15803d; --warn: #b45309;
+  --radius: 12px; --shadow: 0 8px 24px rgba(10, 23, 64, 0.12);
+  font-family: Inter, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0a1220; --card: #111c33; --text: #e8eefc; --muted: #a8b3cc; --axis-cloud: #22304f; --err: #fca5a5; --ok: #86efac; --warn: #fcd34d; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-size: 18px; }
+.page { max-width: 640px; margin: 0 auto; padding: 0 16px 96px; }
+.top { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; background: var(--axis-navy); color: #fff; margin: 0 -16px 12px; padding: 12px 16px; }
+.badge-app { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; border: 1px solid #ffffff66; border-radius: 99px; padding: 2px 10px; }
+.dot { margin-left: auto; width: 12px; height: 12px; border-radius: 50%; }
+.dot.on { background: #22c55e; } .dot.off { background: #f59e0b; }
+.chip { background: #ffffff22; color: #fff; border: 0; border-radius: 99px; padding: 8px 14px; font-size: 14px; font-weight: 600; }
+h1 { font-size: 26px; } h2 { font-size: 21px; margin: 16px 0 8px; }
+.card { background: var(--card); border: 1px solid var(--axis-cloud); border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px; margin: 10px 0; }
+.btn-card { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.btn-card:disabled { opacity: 0.5; }
+.btn { min-height: 52px; padding: 0 20px; border: 0; border-radius: var(--radius); background: var(--axis-gradient); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn.block { display: block; width: 100%; margin: 12px 0; }
+.btn.ghost { background: transparent; color: var(--text); border: 2px solid var(--axis-silver); margin: 8px 0; }
+.inp { width: 100%; min-height: 52px; padding: 0 14px; border-radius: var(--radius); border: 2px solid var(--axis-silver); background: var(--card); color: var(--text); font: inherit; }
+.inp.big { font-size: 22px; }
+textarea.inp { padding: 12px; }
+.inp:focus-visible, .btn:focus-visible, .tab:focus-visible, .btn-card:focus-visible { outline: 3px solid var(--axis-blue); outline-offset: 2px; }
+.row { display: flex; gap: 8px; align-items: center; }
+.row .inp { flex: 1; }
+.lbl { display: block; font-weight: 700; margin: 10px 0 4px; }
+.hint { color: var(--muted); font-size: 15px; margin: 4px 0; }
+.err { color: var(--err); font-weight: 600; }
+.notice { background: #fef3c7; color: #78350f; border-radius: var(--radius); padding: 10px 14px; font-size: 15px; }
+.video { width: 100%; border-radius: var(--radius); margin-top: 10px; background: #000; }
+.line { padding: 10px 0; border-top: 1px solid var(--axis-cloud); display: grid; gap: 8px; }
+.state-CONFLITO { border-left: 6px solid var(--warn); } .state-REJEITADA { border-left: 6px solid var(--err); } .state-PENDENTE { border-left: 6px solid var(--axis-blue); }
+.tabs { position: fixed; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(4, 1fr); background: var(--card); border-top: 1px solid var(--axis-cloud); padding-bottom: env(safe-area-inset-bottom); }
+.tab { min-height: 60px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 14px; font-weight: 600; }
+.tab.active { color: var(--axis-blue); border-top: 3px solid var(--axis-blue); }
