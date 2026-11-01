@@ -1,0 +1,28 @@
+{
+  "radius": {
+    "sm": "8px",
+    "md": "12px",
+    "lg": "20px"
+  },
+  "gradient": "linear-gradient(135deg, #3B82F6 0%, #8B5CF6 100%)",
+  "font": {
+    "weights": [
+      400,
+      500,
+      600,
+      700
+    ],
+    "family": "Inter, Segoe UI, sans-serif"
+  },
+  "brand": {
+    "violet": "#8B5CF6",
+    "blue": "#3B82F6",
+    "cloud": "#E5E7EF",
+    "navy": "#0A1740",
+    "lavender": "#C4B5FD",
+    "silver": "#94A3B8"
+  },
+  "shadow": {
+    "card": "0 8px 24px rgba(10,23,64,.12)"
+  }
+}

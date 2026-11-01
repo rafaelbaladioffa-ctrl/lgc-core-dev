@@ -1,0 +1,190 @@
+:root {
+  /* Axis brand palette (kit definitivo, branding/implementation/axis-tokens.json) */
+  --axis-navy: #0a1740;
+  --axis-blue: #3b82f6;
+  --axis-violet: #8b5cf6;
+  --axis-lavender: #c4b5fd;
+  --axis-gray: #94a3b8;
+  --axis-cloud: #e5e7ef;
+  --brand-gradient: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+  --shadow-card: 0 8px 24px rgba(10, 23, 64, 0.12);
+
+  --bg: #fafafa;
+  --bg-elevated: #ffffff;
+  --bg-topbar: var(--axis-navy);
+  --bg-sidebar: var(--axis-navy);
+  --bg-sidebar-active: rgba(59, 130, 246, 0.18);
+  --text: #0f172a;
+  --text-muted: var(--axis-gray);
+  --text-sidebar: #c7cfe0;
+  --text-sidebar-active: #ffffff;
+  --text-topbar: #e8edf5;
+  --border: var(--axis-cloud);
+  --border-soft: #eef0f6;
+  --accent: var(--axis-blue);
+  --accent-contrast: #ffffff;
+  --accent-soft: rgba(59, 130, 246, 0.1);
+  --success: #1f8a52;
+  --success-soft: rgba(31, 138, 82, 0.12);
+  --warning: #b5750c;
+  --warning-soft: rgba(181, 117, 12, 0.12);
+  --danger: #c23434;
+  --danger-soft: rgba(194, 52, 52, 0.12);
+  --row-hover: #f3f5fb;
+  --table-head: #f6f7fb;
+  --shadow: 0 3px 12px rgba(10, 26, 59, 0.12);
+
+  --sans: 'Inter', 'Segoe UI', system-ui, Arial, sans-serif;
+  --mono: ui-monospace, Consolas, monospace;
+
+  --control-height: 29px;
+  --radius: 6px;
+
+  font: 13px/1.45 var(--sans);
+  color-scheme: light dark;
+  color: var(--text);
+  background: var(--bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme='dark'] {
+  --bg: #0b0f1a;
+  --bg-elevated: #121728;
+  --bg-topbar: #050b18;
+  --bg-sidebar: #050b18;
+  --bg-sidebar-active: rgba(59, 130, 246, 0.22);
+  --text: #e4e6ea;
+  --text-muted: #94a3b8;
+  --text-sidebar: #b7c0d8;
+  --text-sidebar-active: #ffffff;
+  --text-topbar: #e8edf5;
+  --border: #22293f;
+  --border-soft: #1b2133;
+  --accent: #5b8def;
+  --accent-contrast: #050b18;
+  --accent-soft: rgba(91, 141, 239, 0.18);
+  --success: #3fbf80;
+  --success-soft: rgba(63, 191, 128, 0.15);
+  --warning: #e0a53a;
+  --warning-soft: rgba(224, 165, 58, 0.15);
+  --danger: #e2605f;
+  --danger-soft: rgba(226, 96, 95, 0.15);
+  --row-hover: #161c2e;
+  --table-head: #121728;
+  --shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0b0f1a;
+    --bg-elevated: #121728;
+    --bg-topbar: #050b18;
+    --bg-sidebar: #050b18;
+    --bg-sidebar-active: rgba(59, 130, 246, 0.22);
+    --text: #e4e6ea;
+    --text-muted: #94a3b8;
+    --text-sidebar: #b7c0d8;
+    --text-sidebar-active: #ffffff;
+    --text-topbar: #e8edf5;
+    --border: #22293f;
+    --border-soft: #1b2133;
+    --accent: #5b8def;
+    --accent-contrast: #050b18;
+    --accent-soft: rgba(91, 141, 239, 0.18);
+    --success: #3fbf80;
+    --success-soft: rgba(63, 191, 128, 0.15);
+    --warning: #e0a53a;
+    --warning-soft: rgba(224, 165, 58, 0.15);
+    --danger: #e2605f;
+    --danger-soft: rgba(226, 96, 95, 0.15);
+    --row-hover: #161c2e;
+    --table-head: #121728;
+    --shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100svh;
+  background: var(--bg);
+}
+
+h1,
+h2,
+h3 {
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+
+h1 {
+  font-size: 20px;
+}
+h2 {
+  font-size: 17px;
+}
+h3 {
+  font-size: 14px;
+}
+
+.axis-eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  height: var(--control-height);
+}
+
+textarea {
+  height: auto;
+  padding: 7px 10px;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--accent-soft);
+  border-color: var(--accent);
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+code {
+  font-family: var(--mono);
+}
+
+a {
+  color: var(--accent);
+}

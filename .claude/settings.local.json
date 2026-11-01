@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(MSYS_NO_PATHCONV=1 wsl -d Ubuntu -u root -- python3 /mnt/c/Users/servidor/AppData/Local/Temp/claude/C--Users-servidor-Documents-orca-dev-lgc-dev-core/b83bf100-1083-4faa-a987-5d1e1ebf5d94/scratchpad/retest_fase1.py)",
+      "Bash(MSYS_NO_PATHCONV=1 wsl -d Ubuntu -u root -- python3 /mnt/c/Users/servidor/AppData/Local/Temp/claude/C--Users-servidor-Documents-orca-dev-lgc-dev-core/b83bf100-1083-4faa-a987-5d1e1ebf5d94/scratchpad/retest_cleanup.py)"
+    ]
+  }
+}

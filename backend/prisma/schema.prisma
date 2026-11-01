@@ -1,0 +1,868 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserStatus {
+  active
+  disabled
+}
+
+enum CollaboratorStatus {
+  ativo
+  afastado
+  ferias
+  desligado
+}
+
+enum MaritalStatus {
+  solteiro
+  casado
+  divorciado
+  viuvo
+  uniao_estavel
+}
+
+enum ContractType {
+  CLT
+  PJ
+  estagio
+  terceirizado
+}
+
+enum Gender {
+  masculino
+  feminino
+  outro
+  prefiro_nao_informar
+}
+
+enum CertificationType {
+  NR10
+  NR35
+  NR12
+  NR18
+}
+
+enum ProjectStatus {
+  proposta
+  aprovado
+  em_execucao
+  encerrado
+}
+
+enum ManagementLevel {
+  colaborador
+  supervisor
+  coordenador
+  gerente
+  diretor
+}
+
+enum OutboxStatus {
+  pending
+  delivered
+  failed
+}
+
+enum SatelliteStatus {
+  active
+  inactive
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  passwordHash   String    @map("password_hash")
+  status         UserStatus @default(active)
+  lastLoginAt    DateTime? @map("last_login_at")
+  // true when the password was set by an admin/RH at creation or reset (PLANNING.md 4.7) — forces
+  // the change-password screen on next login, before the rest of the system is reachable.
+  mustChangePassword Boolean @default(false) @map("must_change_password")
+  collaboratorId String?   @unique @map("collaborator_id")
+  collaborator   Collaborator? @relation(fields: [collaboratorId], references: [id])
+  refreshTokens  RefreshToken[]
+  userRoles      UserRole[]
+  auditLogs      AuditLog[]
+  sensitiveAccessLogs SensitiveDataAccessLog[]
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Role {
+  id              String   @id @default(uuid())
+  name            String   @unique
+  description     String?
+  rolePermissions RolePermission[]
+  userRoles       UserRole[]
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("roles")
+}
+
+model Permission {
+  id              String   @id @default(uuid())
+  resource        String
+  action          String
+  description     String?
+  rolePermissions RolePermission[]
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([resource, action])
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model Sector {
+  id                         String   @id @default(uuid())
+  // Server-generated, hierarchical: root sectors get "100", "200", ... (multiples of 100, via
+  // sector_root_code_seq); a child gets "<parent.code>.<n>" where n is 1-based and scoped to that
+  // parent (e.g. "100.1", "100.2"), recursively — a grandchild of "100.1" would be "100.1.1".
+  // No longer accepted from the client; see SectorsService.create.
+  code                       String   @unique
+  name                       String
+  parentSectorId             String?  @map("parent_sector_id")
+  parentSector               Sector?  @relation("SectorHierarchy", fields: [parentSectorId], references: [id])
+  subsectors                 Sector[] @relation("SectorHierarchy")
+  responsibleCollaboratorId  String?  @map("responsible_collaborator_id")
+  responsibleCollaborator    Collaborator? @relation("SectorResponsible", fields: [responsibleCollaboratorId], references: [id])
+  costCenters                CostCenter[]
+  collaborators              Collaborator[] @relation("CollaboratorSector")
+  requestCategories          RequestCategory[]
+  requestQueues              Queue[]
+  requests                   Request[]
+  delegations                Delegation[]
+  approvalAuthorityRules     ApprovalAuthorityRule[]
+  createdAt                  DateTime @default(now()) @map("created_at")
+  updatedAt                  DateTime @updatedAt @map("updated_at")
+
+  @@index([parentSectorId])
+  @@map("sectors")
+}
+
+model CostCenter {
+  id        String   @id @default(uuid())
+  // Same hierarchical, server-generated code scheme as Sector.code — see SectorsService.create /
+  // CostCentersService.create.
+  code      String   @unique
+  name      String
+  parentCostCenterId String? @map("parent_cost_center_id")
+  parentCostCenter   CostCenter? @relation("CostCenterHierarchy", fields: [parentCostCenterId], references: [id])
+  subCostCenters     CostCenter[] @relation("CostCenterHierarchy")
+  sectorId  String   @map("sector_id")
+  sector    Sector   @relation(fields: [sectorId], references: [id])
+  projects  Project[]
+  collaborators Collaborator[]
+  requests  Request[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([parentCostCenterId])
+  @@map("cost_centers")
+}
+
+model JobTitle {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  isTechnician  Boolean  @default(false) @map("is_technician")
+  collaborators Collaborator[]
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("job_titles")
+}
+
+model WorkSchedule {
+  id            String   @id @default(uuid())
+  name          String
+  startTime     String   @map("start_time") // "HH:mm", kept as text (no need for a DB TIME type here)
+  endTime       String   @map("end_time")
+  breakMinutes  Int?     @map("break_minutes")
+  // Weekday abbreviations, e.g. ["seg","ter","qua","qui","sex"].
+  daysOfWeek    String[] @map("days_of_week")
+  collaborators Collaborator[]
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("work_schedules")
+}
+
+model Collaborator {
+  id              String   @id @default(uuid())
+  fullName        String   @map("full_name")
+  // Sensitive fields below are stored encrypted (AES-256-GCM, app-layer) as opaque base64 strings.
+  rgEnc           String   @map("rg_enc")
+  cpfEnc          String   @map("cpf_enc")
+  cpfHash         String   @unique @map("cpf_hash") // deterministic hash of CPF for uniqueness/lookups without decrypting
+  ctpsEnc         String?  @map("ctps_enc")
+  pisEnc          String?  @map("pis_enc")
+  // Split from the single "email" field: corporateEmail is the collaborator's primary/contact
+  // address (unique); personalEmail is informational only. Neither drives login — User.email is
+  // the separate, independent login identifier (User.collaboratorId is just an optional link).
+  personalEmail   String?  @map("personal_email")
+  corporateEmail  String   @unique @map("corporate_email")
+  jobTitleId      String   @map("job_title_id")
+  jobTitle        JobTitle @relation(fields: [jobTitleId], references: [id])
+  sectorId        String   @map("sector_id")
+  sector          Sector   @relation("CollaboratorSector", fields: [sectorId], references: [id])
+  supervisorId    String?  @map("supervisor_id")
+  supervisor      Collaborator? @relation("CollaboratorHierarchy", fields: [supervisorId], references: [id])
+  subordinates    Collaborator[] @relation("CollaboratorHierarchy")
+  asoDate         DateTime? @map("aso_date")
+  asoValidity     DateTime? @map("aso_validity")
+  // Was a boolean "has a yellow badge?" flag; the planning session reclassified it as the actual
+  // badge/login identifier string once pointed out it isn't a yes/no indicator.
+  yellowBadge     String?  @map("yellow_badge")
+  status          CollaboratorStatus @default(ativo)
+  offboardedAt    DateTime? @map("offboarded_at")
+  // Used only to resolve the multi-level approval chain for high-cost ticket requests (see
+  // PLANNING.md 4.6.2) — deliberately independent of jobTitleId, which is the HR job title.
+  managementLevel ManagementLevel @default(colaborador) @map("management_level")
+
+  // Matrícula: atomic sequential employee code (0000, 0001, ...), read from the
+  // `collaborator_matricula_seq` Postgres sequence at creation time — same pattern as the client
+  // code and project proposal sequence (see ClientsService/ProjectsService). Stored zero-padded;
+  // read-only from the API's perspective (never set by the client, never updated).
+  matricula       String   @unique
+
+  // Personal / contact data (not subject to the app-layer encryption used for RG/CPF/CTPS/PIS —
+  // the planning session classified these as non-sensitive for this purpose).
+  phone                 String?   @map("phone")
+  emergencyContactName  String?   @map("emergency_contact_name")
+  emergencyContactPhone String?   @map("emergency_contact_phone")
+  birthDate             DateTime? @map("birth_date")
+  maritalStatus         MaritalStatus? @map("marital_status")
+  gender                Gender?   @map("gender")
+
+  // Address — filled by the frontend's ViaCEP autocomplete on the `cep` field, but every field
+  // stays independently editable (ViaCEP responses are sometimes wrong or incomplete).
+  cep           String? @map("cep")
+  addressStreet String? @map("address_street")
+  addressNumber String? @map("address_number")
+  addressComplement String? @map("address_complement")
+  addressDistrict String? @map("address_district")
+  addressCity   String? @map("address_city")
+  addressState  String? @map("address_state")
+
+  // Employment data
+  admissionDate  DateTime? @map("admission_date")
+  contractType   ContractType? @map("contract_type")
+  workScheduleId String?   @map("work_schedule_id")
+  workSchedule   WorkSchedule? @relation(fields: [workScheduleId], references: [id])
+  // Optional — which cost center this collaborator is allocated to. Not filtered by sector in
+  // the UI (deliberate: the planning session confirmed the full list, not a sector-scoped one).
+  costCenterId   String?   @map("cost_center_id")
+  costCenter     CostCenter? @relation(fields: [costCenterId], references: [id])
+
+  // Documents / compliance. Photo follows the same metadata-only pattern as ticket attachments
+  // (filename + storage path; no binary storage backend exists in this system yet).
+  photoFilename    String? @map("photo_filename")
+  photoStoragePath String? @map("photo_storage_path")
+  uniformSize      String? @map("uniform_size")
+  cnhCategory      String? @map("cnh_category")
+  cnhNumber        String? @map("cnh_number")
+  cnhExpiresAt     DateTime? @map("cnh_expires_at")
+
+  user                  User?
+  sectorsResponsibleFor Sector[] @relation("SectorResponsible")
+  certifications        TechnicianCertification[]
+  sensitiveAccessLogs   SensitiveDataAccessLog[]
+  projectsResponsibleFor Project[]
+  requestsSubmitted     Request[] @relation("RequestRequester")
+  requestsForBeneficiary Request[] @relation("RequestBeneficiary")
+  requestsAssigned      Request[] @relation("RequestAssignee")
+  requestComments       RequestComment[]
+  requestAttachmentsUploaded RequestAttachment[]
+  requestApprovals      RequestApproval[] @relation("RequestApprover")
+  delegationsGiven      Delegation[] @relation("DelegationDelegator")
+  delegationsReceived   Delegation[] @relation("DelegationDelegate")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([sectorId])
+  @@index([supervisorId])
+  @@index([jobTitleId])
+  @@index([workScheduleId])
+  @@index([costCenterId])
+  @@map("collaborators")
+}
+
+model TechnicianCertification {
+  id             String   @id @default(uuid())
+  collaboratorId String   @map("collaborator_id")
+  collaborator   Collaborator @relation(fields: [collaboratorId], references: [id], onDelete: Cascade)
+  type           CertificationType
+  issuedAt       DateTime @map("issued_at")
+  expiresAt      DateTime @map("expires_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@index([collaboratorId])
+  @@index([expiresAt])
+  @@map("technician_certifications")
+}
+
+model SensitiveDataAccessLog {
+  id             String   @id @default(uuid())
+  collaboratorId String   @map("collaborator_id")
+  collaborator   Collaborator @relation(fields: [collaboratorId], references: [id], onDelete: Cascade)
+  actorUserId    String   @map("actor_user_id")
+  actor          User     @relation(fields: [actorUserId], references: [id])
+  fields         String[] @map("fields")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([collaboratorId])
+  @@index([actorUserId])
+  @@map("sensitive_data_access_logs")
+}
+
+model Client {
+  id        String   @id @default(uuid())
+  code      Int      @unique
+  legalName String   @map("legal_name")
+  cnpj      String?  @unique
+  contacts  Json?
+  address   Json?
+  projects  Project[]
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("clients")
+}
+
+model Project {
+  id                        String   @id @default(uuid())
+  code                      String   @unique
+  clientId                  String   @map("client_id")
+  client                    Client   @relation(fields: [clientId], references: [id])
+  costCenterId               String   @map("cost_center_id")
+  costCenter                 CostCenter @relation(fields: [costCenterId], references: [id])
+  responsibleCollaboratorId String   @map("responsible_collaborator_id")
+  responsibleCollaborator    Collaborator @relation(fields: [responsibleCollaboratorId], references: [id])
+  status                    ProjectStatus @default(proposta)
+  // Stored for audit/query purposes; the authoritative source of truth is the `project_proposal_seq`
+  // Postgres sequence, read atomically at creation time (see ProjectsService.generateCode).
+  proposalSequence          Int      @map("proposal_sequence")
+  requests                  Request[]
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  @@index([clientId])
+  @@index([costCenterId])
+  @@map("projects")
+}
+
+// --- Requisições — Fase 1 da nova spec (REQUISICOES_SPEC.md), que substitui PLANNING.md 4.6 e
+// a implementação ticket_* anterior. Catálogo versionado, estados completos, auditoria
+// append-only. Simplificações documentadas desta fase (ver hand-off notes): form_data continua
+// jsonb (não normalizado campo a campo), motor de SLA é só estrutura (sem calendário/pausas),
+// não há tela de administração do catálogo (seed), sem upload binário real.
+
+enum RequestConfidentiality {
+  interna
+  confidencial
+  restrita
+}
+
+enum RequestPriority {
+  baixa
+  normal
+  alta
+  critica
+}
+
+enum RequestStatus {
+  rascunho
+  enviada
+  em_triagem
+  aguardando_aprovacao
+  aprovada
+  planejada
+  em_atendimento
+  aguardando_solicitante
+  aguardando_terceiro
+  concluida
+  encerrada
+  devolvida_ajuste
+  reprovada
+  cancelada
+  suspensa
+  reaberta
+  expirada
+}
+
+enum RequestApprovalStatus {
+  pendente
+  aprovado
+  reprovado
+  devolvido
+}
+
+/// Regra de conclusão de um nó de aprovação paralelo (§9.1) — ver RequestApproval.completionRule.
+enum RequestApprovalCompletionRule {
+  todos
+  qualquer_um
+  n_de_m
+}
+
+enum RequestCommentVisibility {
+  publico
+  interno
+}
+
+enum SlaMetric {
+  primeira_resposta
+  solucao
+}
+
+/// Categoria de requisição (REQUISICOES_SPEC.md §13.1 `request_categories`) — o catálogo em si;
+/// o formulário e o workflow ficam na versão publicada (CategoryVersion), nunca aqui.
+model RequestCategory {
+  id              String                  @id @default(uuid())
+  code            String                  @unique
+  name            String
+  sectorId        String                  @map("sector_id")
+  sector          Sector                  @relation(fields: [sectorId], references: [id])
+  parentCategoryId String?                @map("parent_category_id")
+  parentCategory  RequestCategory?        @relation("RequestCategoryHierarchy", fields: [parentCategoryId], references: [id])
+  subcategories   RequestCategory[]       @relation("RequestCategoryHierarchy")
+  confidentiality RequestConfidentiality  @default(interna)
+  active          Boolean                 @default(true)
+  // §15.2/§11: categorias de entrega/mudança/serviço exigem aceite explícito do solicitante
+  // antes de ENCERRADA — ver Request.requesterAcceptedAt e RequestsService.close.
+  requiresAcceptance Boolean              @default(false) @map("requires_acceptance")
+  // §9.2: em vez do workflowSchema fixo da versão, resolve a cadeia de aprovação pela matriz de
+  // alçada por valor (ApprovalAuthorityRule) — ver RequestsService.triage.
+  useDynamicAuthority Boolean             @default(false) @map("use_dynamic_authority")
+  versions        CategoryVersion[]
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  @@index([sectorId])
+  @@index([parentCategoryId])
+  @@map("request_categories")
+}
+
+/// Versão publicada de uma categoria (§13.1 `category_versions`) — formSchema/workflowSchema são
+/// o snapshot imutável usado por toda requisição criada sob essa versão (§11.1: alterar uma
+/// versão nova nunca muda requisições já abertas sob a anterior).
+model CategoryVersion {
+  id                      String           @id @default(uuid())
+  categoryId              String           @map("category_id")
+  category                RequestCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  version                 Int
+  // Campos dinâmicos do formulário: [{ key, label, type, required, options?, optionsSource? }].
+  formSchema              Json             @map("form_schema")
+  // Passos de aprovação desta versão: [{ stepOrder, approverRule: 'gestor_direto'|'management_level', requiredLevel? }].
+  workflowSchema          Json             @map("workflow_schema")
+  slaFirstResponseMinutes Int              @map("sla_first_response_minutes")
+  slaResolutionMinutes    Int              @map("sla_resolution_minutes")
+  publishedAt             DateTime         @default(now()) @map("published_at")
+  publishedBy             String?          @map("published_by")
+  requests                Request[]
+  createdAt               DateTime         @default(now()) @map("created_at")
+
+  @@unique([categoryId, version])
+  @@index([categoryId])
+  @@map("category_versions")
+}
+
+/// Fila de atendimento de um setor (§13.1 `queues`) — toda requisição cai numa fila; por ora
+/// uma fila padrão por setor (distribuição/roteamento avançado é Fase 2).
+model Queue {
+  id        String    @id @default(uuid())
+  sectorId  String    @map("sector_id")
+  sector    Sector    @relation(fields: [sectorId], references: [id])
+  name      String
+  requests  Request[]
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  @@index([sectorId])
+  @@map("queues")
+}
+
+/// Requisição (§13.1 `requests`, exibida como "Requisição" na UI). `code` segue o novo formato
+/// `REQ-{ano}-{sequencial}` (REQUISICOES_SPEC.md §6, §13.2) — não mais `REQ-000123`.
+model Request {
+  id                    String                  @id @default(uuid())
+  code                  String                  @unique
+  categoryVersionId     String                  @map("category_version_id")
+  categoryVersion       CategoryVersion         @relation(fields: [categoryVersionId], references: [id])
+  sectorId              String                  @map("sector_id")
+  sector                Sector                  @relation(fields: [sectorId], references: [id])
+  queueId               String?                 @map("queue_id")
+  queue                 Queue?                  @relation(fields: [queueId], references: [id])
+  requesterId           String                  @map("requester_id")
+  requester             Collaborator            @relation("RequestRequester", fields: [requesterId], references: [id])
+  // Abertura em nome de terceiro (§4.1); igual ao requester quando não há representação.
+  beneficiaryId         String                  @map("beneficiary_id")
+  beneficiary           Collaborator            @relation("RequestBeneficiary", fields: [beneficiaryId], references: [id])
+  assigneeId            String?                 @map("assignee_id")
+  assignee              Collaborator?           @relation("RequestAssignee", fields: [assigneeId], references: [id])
+  title                 String
+  description           String
+  priority              RequestPriority         @default(normal)
+  confidentiality       RequestConfidentiality  @default(interna)
+  status                RequestStatus           @default(rascunho)
+  neededBy              DateTime?               @map("needed_by")
+  projectId             String?                 @map("project_id")
+  project               Project?                @relation(fields: [projectId], references: [id])
+  costCenterId          String?                 @map("cost_center_id")
+  costCenter            CostCenter?             @relation(fields: [costCenterId], references: [id])
+  estimatedValue        Decimal?                @map("estimated_value") @db.Decimal(19, 4)
+  currency              String                  @default("BRL")
+  // Campos dinâmicos da categoria (CategoryVersion.formSchema) — ver nota de simplificação no
+  // topo deste bloco: não normalizado em request_field_values nesta fase.
+  formData              Json?                   @map("form_data")
+  // Denúncia/relato ético (§7.3) com `anonimo=true` no formulário — o `requesterId` acima nunca
+  // é apagado (precisa pra auditoria), mas fica oculto de todo participante do fluxo que não
+  // tenha `request:view_whistleblower_identity` (RequestsService.maskIdentityIfAnonymous).
+  anonymous             Boolean                 @default(false)
+  // Otimista (§13.2 lock_version) — incrementado a cada PATCH; evita sobrescrever edição
+  // concorrente (409 em vez de last-write-wins).
+  lockVersion           Int                     @default(0) @map("lock_version")
+  submittedAt           DateTime?               @map("submitted_at")
+  slaDueFirstResponseAt DateTime?               @map("sla_due_first_response_at")
+  slaDueResolutionAt    DateTime?               @map("sla_due_resolution_at")
+  // §10.2: escalonamento automático de SLA — um único passo (atendente → supervisor dele),
+  // disparado uma vez quando o relógio de solução estoura (RequestsService.runSlaAlertsAndEscalation).
+  escalatedAt           DateTime?               @map("escalated_at")
+  escalationLevel       Int                     @default(0) @map("escalation_level")
+  closedAt              DateTime?               @map("closed_at")
+  // Preenchido por accept() quando a categoria exige aceite (§15.2/§11) — close() recusa
+  // encerrar sem isso quando CategoryVersion.category.requiresAcceptance é true.
+  requesterAcceptedAt   DateTime?               @map("requester_accepted_at")
+  comments              RequestComment[]
+  attachments           RequestAttachment[]
+  approvals             RequestApproval[]
+  slaClocks             SlaClock[]
+  relationsAsSource     RequestRelation[] @relation("RequestRelationSource")
+  relationsAsTarget     RequestRelation[] @relation("RequestRelationTarget")
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  @@index([categoryVersionId])
+  @@index([sectorId])
+  @@index([queueId])
+  @@index([status])
+  @@index([requesterId])
+  @@index([assigneeId])
+  @@map("requests")
+}
+
+/// Ano-escopo do contador de `requests.code` (REQ-{ano}-{sequencial}) — trava a linha do ano
+/// (SELECT ... FOR UPDATE) dentro da transação de criação, mesmo padrão já usado para os códigos
+/// hierárquicos de setor/centro de custo (PLANNING.md 5.5).
+model RequestNumberCounter {
+  year      Int @id
+  lastValue Int @default(0) @map("last_value")
+
+  @@map("request_number_counters")
+}
+
+/// Execução da cadeia de aprovação de uma requisição, resolvida a partir do `workflowSchema` da
+/// CategoryVersion no momento da criação/reenvio (mesma lógica de antes, agora dirigida por
+/// configuração em vez de um campo fixo `has_cost`).
+/// Uma linha por aprovador. Vários aprovadores no mesmo `stepOrder` formam um nó paralelo (§9.1)
+/// — `completionRule` (igual em todas as linhas daquele stepOrder) diz como o nó se resolve:
+/// `todos` exige todas aprovadas, `qualquer_um` basta uma, `n_de_m` exige `requiredCount`.
+model RequestApproval {
+  id             String                          @id @default(uuid())
+  requestId      String                          @map("request_id")
+  request        Request                         @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  stepOrder      Int                             @map("step_order")
+  requiredLevel  ManagementLevel?                @map("required_level")
+  approverId     String                          @map("approver_id")
+  approver       Collaborator                    @relation("RequestApprover", fields: [approverId], references: [id])
+  status         RequestApprovalStatus           @default(pendente)
+  completionRule RequestApprovalCompletionRule   @default(todos) @map("completion_rule")
+  requiredCount  Int?                            @map("required_count")
+  decidedAt      DateTime?                       @map("decided_at")
+  comment        String?
+  createdAt      DateTime                        @default(now()) @map("created_at")
+
+  @@index([requestId])
+  @@index([approverId])
+  @@map("approvals")
+}
+
+model RequestComment {
+  id         String                   @id @default(uuid())
+  requestId  String                   @map("request_id")
+  request    Request                  @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  authorId   String                   @map("author_id")
+  author     Collaborator             @relation(fields: [authorId], references: [id])
+  visibility RequestCommentVisibility @default(publico)
+  body       String
+  createdAt  DateTime                 @default(now()) @map("created_at")
+
+  @@index([requestId])
+  @@map("request_comments")
+}
+
+/// Metadado apenas — sem backend de upload binário ainda (mesmo padrão de
+/// collaborators.photo_filename/photo_storage_path).
+/// Anexo seguro versionado (§16) — hash/MIME/nome seguro são reais; **armazenamento é BYTEA no
+/// Postgres como solução temporária** (decisão explícita da sessão de planejamento, 2026-11-01)
+/// até a escolha de infraestrutura definitiva (disco/object storage) e de um motor de
+/// antimalware de verdade — ver nota de simplificação em requests.service.ts. Substituir um
+/// anexo cria uma linha nova com `previousVersionId` apontando pra anterior; nunca sobrescreve.
+model RequestAttachment {
+  id                String              @id @default(uuid())
+  requestId         String              @map("request_id")
+  request           Request             @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  // Nome original informado por quem enviou — nunca usado como nome de arquivo real (ver
+  // safeFilename); só exibido na UI.
+  filename          String
+  // Gerado (uuid + extensão derivada do mimeType detectado) — o único nome que qualquer
+  // referência de armazenamento/download usa.
+  safeFilename      String              @map("safe_filename")
+  // Detectado pelos magic bytes do conteúdo, nunca confiado do Content-Type informado pelo
+  // cliente (§16 "MIME validado pelo conteúdo").
+  mimeType          String              @map("mime_type")
+  sizeBytes         Int                 @map("size_bytes")
+  contentHash       String              @map("content_hash")
+  content           Bytes
+  version           Int                 @default(1)
+  previousVersionId String?             @map("previous_version_id")
+  previousVersion   RequestAttachment?  @relation("AttachmentVersion", fields: [previousVersionId], references: [id])
+  nextVersions      RequestAttachment[] @relation("AttachmentVersion")
+  uploadedBy        String              @map("uploaded_by")
+  uploader          Collaborator        @relation(fields: [uploadedBy], references: [id])
+  createdAt         DateTime            @default(now()) @map("created_at")
+
+  @@index([requestId])
+  @@map("request_attachments")
+}
+
+/// Estrutura do relógio de SLA (§10, §13.1 `sla_clocks`) — Fase 1 só guarda meta/início/fim;
+/// calendário útil, feriados e pausas automáticas ficam para a Fase 2 (motor completo).
+model SlaClock {
+  id        String     @id @default(uuid())
+  requestId String     @map("request_id")
+  request   Request    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  metric    SlaMetric
+  targetAt  DateTime   @map("target_at")
+  startedAt DateTime   @default(now()) @map("started_at")
+  pausedAt  DateTime?  @map("paused_at")
+  stoppedAt DateTime?  @map("stopped_at")
+  breached  Boolean    @default(false)
+  // §10.2: alertas em 50/80/100% — guarda quais já disparou pra nunca duplicar
+  // (RequestsService.runSlaAlertsAndEscalation). [] = nenhum ainda.
+  alertedThresholds Int[] @default([]) @map("alerted_thresholds")
+
+  @@index([requestId])
+  @@map("sla_clocks")
+}
+
+/// Feriado do calendário de SLA (§10.2) — um único calendário global: o Axis não modela
+/// empresa/unidade como entidades separadas ainda, então "por empresa/unidade" do documento
+/// não se aplica aqui (simplificação documentada no hand-off).
+model Holiday {
+  id        String   @id @default(uuid())
+  date      DateTime @db.Date
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([date])
+  @@map("holidays")
+}
+
+/// Trilha de auditoria append-only (§13.1/§17 `audit_events`) — nunca editável pela API; toda
+/// mudança de estado relevante da requisição grava uma linha aqui, além do que já existe em
+/// `audit_logs` (esse último é genérico do resto do sistema; este é específico de Requisições
+/// para bater com o contrato do novo documento).
+model AuditEvent {
+  id            String   @id @default(uuid())
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  event         String
+  actorId       String?  @map("actor_id")
+  beforeJson    Json?    @map("before_json")
+  afterJson     Json?    @map("after_json")
+  correlationId String?  @map("correlation_id")
+  source        String   @default("api")
+  occurredAt    DateTime @default(now()) @map("occurred_at")
+
+  @@index([aggregateType, aggregateId])
+  @@index([occurredAt])
+  @@map("audit_events")
+}
+
+// --- Requisições — Fase 2 (REQUISICOES_SPEC.md §23 "Governança"), incremento inicial: conflito de
+// interesse, delegação de aprovação, janela de reabertura com vínculo `origina`. O motor de
+// workflow configurável (TODOS/QUALQUER_UM/N_DE_M), a matriz de alçada dinâmica, o calendário de
+// SLA completo, anexos seguros versionados, subtarefas/aceite e os dashboards ficam para um
+// próximo incremento — ver nota de hand-off.
+
+enum RequestRelationType {
+  depende_de
+  bloqueia
+  duplica
+  origina
+  subtarefa_de
+}
+
+/// Delegação de aprovação (§9.1, §11, §21.2) — início/fim/escopo explícitos, nunca retroativa
+/// (startsAt não pode ser no passado na criação); uma decisão só pode ser tomada "em nome de"
+/// quem delega enquanto `revokedAt` é nulo e `now` está entre `startsAt`/`endsAt`.
+model Delegation {
+  id          String       @id @default(uuid())
+  delegatorId String       @map("delegator_id")
+  delegator   Collaborator @relation("DelegationDelegator", fields: [delegatorId], references: [id])
+  delegateId  String       @map("delegate_id")
+  delegate    Collaborator @relation("DelegationDelegate", fields: [delegateId], references: [id])
+  // Escopo opcional: restringe a delegação a um setor específico (null = toda a alçada do
+  // delegador). Granularidade mais fina (categoria, valor) fica para quando a matriz de alçada
+  // dinâmica (item 2 da Fase 2) existir.
+  sectorId    String?      @map("sector_id")
+  sector      Sector?      @relation(fields: [sectorId], references: [id])
+  startsAt    DateTime     @map("starts_at")
+  endsAt      DateTime     @map("ends_at")
+  approvedBy  String?      @map("approved_by")
+  revokedAt   DateTime?    @map("revoked_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  @@index([delegatorId])
+  @@index([delegateId])
+  @@map("delegations")
+}
+
+/// Vínculo entre requisições (§11.14) — usado hoje só por `reopen()` para ligar uma reabertura
+/// fora da janela de 5 dias úteis (`origina`) à requisição nova que ela cria.
+model RequestRelation {
+  id           String              @id @default(uuid())
+  sourceId     String              @map("source_id")
+  source       Request             @relation("RequestRelationSource", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId     String              @map("target_id")
+  target       Request             @relation("RequestRelationTarget", fields: [targetId], references: [id], onDelete: Cascade)
+  relationType RequestRelationType @map("relation_type")
+  createdAt    DateTime            @default(now()) @map("created_at")
+
+  @@index([sourceId])
+  @@index([targetId])
+  @@map("request_relations")
+}
+
+/// Faixa de valor → níveis de aprovação exigidos (§9.2) — "valores são parâmetros de
+/// implantação, não constantes no código": administrável via API, não fixo.
+/// `sectorId` nulo = regra global; uma regra com setor específico tem prioridade sobre a global
+/// que cobrir o mesmo valor (ver RequestsService.findAuthorityRule). `maxValue` nulo = sem teto
+/// (última faixa, "acima de").
+model ApprovalAuthorityRule {
+  id        String            @id @default(uuid())
+  sectorId  String?           @map("sector_id")
+  sector    Sector?           @relation(fields: [sectorId], references: [id])
+  minValue  Decimal           @map("min_value") @db.Decimal(19, 4)
+  maxValue  Decimal?          @map("max_value") @db.Decimal(19, 4)
+  // Ordem de aprovação para esta faixa, ex.: [supervisor, gerente] — reaproveita
+  // RequestsService.resolveApprovalChain (ramo management_level) pra resolver quem são.
+  levels    ManagementLevel[]
+  active    Boolean           @default(true)
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  @@index([sectorId])
+  @@map("approval_authority_rules")
+}
+
+model IntegrationOutbox {
+  id          String       @id @default(uuid())
+  eventType   String       @map("event_type")
+  payload     Json
+  status      OutboxStatus @default(pending)
+  attempts    Int          @default(0)
+  lastError   String?      @map("last_error")
+  // Not in PLANNING.md 5.15 as written, but required for the exponential-backoff retry
+  // described in section 3.1 to actually work (otherwise there's no way to know when a
+  // failed event becomes eligible for retry again). Defaults to "now" so new events are
+  // picked up on the dispatcher's very next run.
+  nextAttemptAt DateTime   @default(now()) @map("next_attempt_at")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  deliveredAt DateTime?    @map("delivered_at")
+
+  @@index([status, nextAttemptAt])
+  @@map("integration_outbox")
+}
+
+model IntegrationSatellite {
+  id            String          @id @default(uuid())
+  name          String          @unique
+  webhookUrl    String          @map("webhook_url")
+  // URL do frontend humano do satélite (ex.: https://logistica.lgc.com.br) — diferente de
+  // webhookUrl (backend-a-backend, eventos). Usada só pelo "launcher" em Integrações; satélites
+  // sem frontend próprio (só webhook) deixam nulo.
+  frontendUrl   String?         @map("frontend_url")
+  hmacSecretEnc String          @map("hmac_secret_enc")
+  apiKeyHash    String          @map("api_key_hash")
+  status        SatelliteStatus @default(active)
+  subscriptions IntegrationSubscription[]
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@map("integration_satellites")
+}
+
+model IntegrationSubscription {
+  satelliteId String   @map("satellite_id")
+  satellite   IntegrationSatellite @relation(fields: [satelliteId], references: [id], onDelete: Cascade)
+  eventType   String   @map("event_type")
+
+  @@id([satelliteId, eventType])
+  @@map("integration_subscriptions")
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  actorUserId  String   @map("actor_user_id")
+  actor        User     @relation(fields: [actorUserId], references: [id])
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([actorUserId])
+  @@index([resourceType, resourceId])
+  @@map("audit_logs")
+}

@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "axis-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "frontend", "run", "dev", "--", "--port", "5173"],
+      "port": 5173
+    },
+    {
+      "name": "axis-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "backend", "run", "start:dev"],
+      "port": 3000
+    },
+    {
+      "name": "logistica-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-logistica\\frontend", "run", "dev", "--", "--port", "5174"],
+      "port": 5174
+    },
+    {
+      "name": "logistica-backend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-logistica\\backend", "run", "start:dev"],
+      "port": 3100
+    }
+  ]
+}

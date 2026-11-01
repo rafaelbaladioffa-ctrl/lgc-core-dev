@@ -1,0 +1,1 @@
+module.exports={theme:{extend:{colors:{axis:{navy:'#0A1740',blue:'#3B82F6',violet:'#8B5CF6',lavender:'#C4B5FD',silver:'#94A3B8',cloud:'#E5E7EF'}},fontFamily:{sans:['Inter','Segoe UI','sans-serif']},backgroundImage:{'axis-gradient':'linear-gradient(135deg,#3B82F6 0%,#8B5CF6 100%)'}}}};

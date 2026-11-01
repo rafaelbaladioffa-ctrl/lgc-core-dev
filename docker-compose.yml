@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: axis
+      POSTGRES_PASSWORD: axis
+      POSTGRES_DB: axis
+    ports:
+      - "5432:5432"
+    volumes:
+      - axis_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U axis -d axis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://axis:axis@postgres:5432/axis?schema=public
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/main.js"
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:80"
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGHOST: postgres
+      PGUSER: axis
+      PGPASSWORD: axis
+      PGDATABASE: axis
+      RETENTION_DAYS: "30"
+    volumes:
+      - axis_backups:/backups
+      - ./backend/scripts:/scripts:ro
+    entrypoint: ["sh", "-c"]
+    # Runs an immediate backup on start, then one every 24h. For a fixed clock time instead,
+    # swap this for a host/CI cron entry calling `docker compose exec backup sh /scripts/backup-postgres.sh`.
+    command: >
+      "sh /scripts/backup-postgres.sh;
+       while true; do sleep 86400; sh /scripts/backup-postgres.sh; done"
+
+volumes:
+  axis_postgres_data:
+  axis_backups:

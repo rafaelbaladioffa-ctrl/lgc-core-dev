@@ -1,0 +1,1 @@
+export const axisBrand={name:'Axis',descriptor:'ERP + SGI',colors:{navy:'#0A1740',blue:'#3B82F6',violet:'#8B5CF6',lavender:'#C4B5FD',silver:'#94A3B8',cloud:'#E5E7EF'},assets:{logo:'/brand/axis_logo_primary.svg',logoDark:'/brand/axis_logo_dark.svg',icon:'/brand/axis_app_icon.svg'}} as const;
