@@ -23,6 +23,8 @@ function build(opts: { raw?: unknown[][]; open?: Array<Record<string, unknown>>;
       findUnique: vi.fn(async () => opts.issue ?? null),
     },
   };
+  // run() serializa a gravação numa transação com lock advisory: o mock reaproveita o próprio objeto como `tx`.
+  Object.assign(prisma, { $executeRaw: vi.fn(async () => 1), $transaction: vi.fn(async (fn: (t: unknown) => unknown) => fn(prisma)) });
   const audit = { record: vi.fn(async () => ({})) };
   return { svc: new ReconciliationService(prisma as never, audit as never), prisma, audit };
 }
@@ -41,7 +43,7 @@ describe('ReconciliationService (unit)', () => {
       dlq: [{ id: 'msg-1', eventType: 'stock.moved', attempts: 5, lastError: 'HTTP 500' }],
     });
     const r = await b.svc.run('tester');
-    expect(r).toEqual({ found: 5, created: 5, refreshed: 0, closed: 0 });
+    expect(r).toEqual({ found: 5, created: 5, refreshed: 0, closed: 0, truncated: [] });
     const kinds = b.prisma.reconciliationIssue.create.mock.calls.map((c) => (c[0] as { data: { kind: string; dedupeKey: string; severity: string } }).data);
     expect(kinds.map((k) => [k.kind, k.dedupeKey, k.severity])).toEqual([
       ['BALANCE_VS_LEDGER', 'BALANCE_VS_LEDGER:bal-1', 'CRITICO'],
@@ -76,7 +78,7 @@ describe('ReconciliationService (unit)', () => {
     const existing = { id: 'iss-1', dedupeKey: 'BALANCE_VS_LEDGER:bal-1', status: 'ABERTA' };
     const b = build({ raw: [[ledgerRow], []], open: [existing] });
     const r = await b.svc.run('sistema');
-    expect(r).toEqual({ found: 1, created: 0, refreshed: 1, closed: 0 });
+    expect(r).toEqual({ found: 1, created: 0, refreshed: 1, closed: 0, truncated: [] });
     expect(b.prisma.reconciliationIssue.create).not.toHaveBeenCalled();
     expect(b.prisma.reconciliationIssue.update).toHaveBeenCalledWith(expect.objectContaining({ where: { id: 'iss-1' } }));
   });
@@ -85,7 +87,7 @@ describe('ReconciliationService (unit)', () => {
     const stale = { id: 'iss-9', dedupeKey: 'RESERVED_DRIFT:bal-2', status: 'ABERTA' };
     const b = build({ open: [stale] });
     const r = await b.svc.run('sistema');
-    expect(r).toEqual({ found: 0, created: 0, refreshed: 0, closed: 1 });
+    expect(r).toEqual({ found: 0, created: 0, refreshed: 0, closed: 1, truncated: [] });
     expect(b.prisma.reconciliationIssue.update).toHaveBeenCalledWith({
       where: { id: 'iss-9' },
       data: expect.objectContaining({ status: 'RESOLVIDA', resolvedBy: 'sistema', resolution: expect.stringContaining('não detectada') }),
@@ -96,7 +98,7 @@ describe('ReconciliationService (unit)', () => {
   it('cada execução registra "reconciliation.run" na auditoria com os totais', async () => {
     const b = build({ raw: [[ledgerRow], []] });
     await b.svc.run('maria');
-    expect(b.audit.record).toHaveBeenCalledWith('maria', 'reconciliation.run', 'reconciliation', 'run', { found: 1, created: 1, refreshed: 0, closed: 0 });
+    expect(b.audit.record).toHaveBeenCalledWith('maria', 'reconciliation.run', 'reconciliation', 'run', { found: 1, created: 1, refreshed: 0, closed: 0, truncated: [] });
   });
 
   describe('resolução manual', () => {

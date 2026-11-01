@@ -340,14 +340,14 @@ describe('Sprint 10 (bordas) — hardening', () => {
       await api().get('/api/v1/reconciliation/issues').set(A(colab)).expect(403);
     });
 
-    it.fails('BUG: com mais de 200 divergências a varredura corta em 200 (sem ORDER BY) e encerra os itens que ficaram de fora', async () => {
+    it('mais de 200 divergências: todas aparecem (teto 5.000) e o que ficou de fora do corte nunca é encerrado', async () => {
       // Reprodução: a consulta de saldo reservado tem LIMIT 200 e nenhuma ordem. Com mais de 200 saldos divergentes,
       // a execução só enxerga um subconjunto; o resto deixa de ser "detectado" e cai no fechamento automático.
       const N = 205;
       const codes = Array.from({ length: N }, (_, i) => `S10E-TR-${i}-${sfx}`);
       await prisma.material.createMany({ data: codes.map((code) => ({ code, shortDescription: 'Teste de truncamento', category: 'Teste', type: 'CONSUMO', stockUomId: un, createdBy: 'admin-s10e' })) });
       const mats = await prisma.material.findMany({ where: { code: { in: codes } }, select: { id: true } });
-      await prisma.stockBalance.createMany({ data: mats.map((m) => ({ materialId: m.id, locationId: prat, reservedQty: 1 })) });
+      await prisma.stockBalance.createMany({ data: mats.map((m) => ({ materialId: m.id, locationId: prat, quantity: 5, reservedQty: 1 })) });
       const matIds = mats.map((m) => m.id);
       try {
         await runRec();
@@ -357,12 +357,12 @@ describe('Sprint 10 (bordas) — hardening', () => {
         expect(open).toBe(N);
       } finally {
         // Zera o reservado dos saldos de teste para não poluir a varredura dos outros testes da suíte.
-        await prisma.stockBalance.updateMany({ where: { materialId: { in: matIds } }, data: { reservedQty: 0 } });
+        await prisma.stockBalance.deleteMany({ where: { materialId: { in: matIds } } });
         await runRec();
       }
     }, 60_000);
 
-    it.fails('BUG: duas execuções simultâneas (cron + manual) não criam dois itens ABERTA para a mesma divergência', async () => {
+    it('BUG: duas execuções simultâneas (cron + manual) não criam dois itens ABERTA para a mesma divergência', async () => {
       // Reprodução: a divergência é uma mensagem FAILED. Duas chamadas concorrentes leem `open` antes de qualquer insert
       // e ambas criam o item, porque não há unique em (kind, ref_id) nem lock na reconciliação.
       const m = await sendMsg({ eventType: 's10e.race', status: 'FAILED', attempts: 5, lastError: 'HTTP 500' });
@@ -486,7 +486,7 @@ describe('Sprint 10 (bordas) — hardening', () => {
       expect(rows[0].diff).toMatchObject({ method: 'GET', queryFields: ['pageSize', 'actor'] });
     });
 
-    it.fails('BUG: eventos gravados pelo serviço (ex.: reconciliation.resolved) não trazem o correlation_id da requisição', async () => {
+    it('BUG: eventos gravados pelo serviço (ex.: reconciliation.resolved) não trazem o correlation_id da requisição', async () => {
       // Reprodução: AuditService.record() não recebe nem grava correlationId, então a trilha do serviço não liga
       // ao X-Correlation-Id da requisição que a originou (seção 20: ligar requisição, eventos e movimentos).
       const { materialId } = await fresh('CORR');

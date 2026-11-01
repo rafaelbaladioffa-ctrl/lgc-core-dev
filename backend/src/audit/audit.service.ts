@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { requestContext } from './correlation.middleware.js';
 
 /** Trilha append-only (seção 20): só existe `record`; nenhuma rota de atualização ou remoção. */
 @Injectable()
@@ -15,6 +16,6 @@ export class AuditService {
     diff?: Prisma.InputJsonValue,
     tx?: Prisma.TransactionClient,
   ) {
-    return (tx ?? this.prisma).auditEvent.create({ data: { actorAxisId, action, aggregateType, aggregateId, diff, origin: 'api' } });
+    return (tx ?? this.prisma).auditEvent.create({ data: { actorAxisId, action, aggregateType, aggregateId, diff, origin: 'api', correlationId: requestContext.getStore()?.correlationId } });
   }
 }
