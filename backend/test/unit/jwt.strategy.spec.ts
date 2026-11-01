@@ -28,14 +28,14 @@ describe('JwtStrategy (SSO Axis)', () => {
       mustChangePassword: false,
       permissions: ['material:read'],
     });
-    expect(rbac.resolvePermissions).toHaveBeenCalledWith(['gestor']);
+    expect(rbac.resolvePermissions).toHaveBeenCalledWith(['gestor'], 'axis-1');
   });
 
   it('roles não-array viram lista vazia', async () => {
     const { strategy, rbac } = build();
     const user = await strategy.validate({ sub: 'x', email: 'x@x', roles: 'admin' as unknown as string[] });
     expect(user.axisRoles).toEqual([]);
-    expect(rbac.resolvePermissions).toHaveBeenCalledWith([]);
+    expect(rbac.resolvePermissions).toHaveBeenCalledWith([], 'x');
   });
 
   it('collaboratorId ausente vira null; mustChangePassword só vale quando for booleano true', async () => {
@@ -48,6 +48,6 @@ describe('JwtStrategy (SSO Axis)', () => {
   it('ignora permissions embutidas no token (vale só o mapeamento local)', async () => {
     const { strategy, rbac } = build();
     await strategy.validate({ sub: 'x', email: 'x@x', roles: ['gestor'], permissions: ['rbac:write'] } as never);
-    expect(rbac.resolvePermissions).toHaveBeenCalledWith(['gestor']);
+    expect(rbac.resolvePermissions).toHaveBeenCalledWith(['gestor'], 'x');
   });
 });
