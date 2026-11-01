@@ -1,5 +1,5 @@
 /* Service worker: casca do app em cache (abre sem rede); a API nunca é cacheada aqui — os dados offline ficam no IndexedDB. */
-const CACHE = 'logistica-shell-v1';
+const CACHE = 'logistica-shell-v2';
 const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -16,6 +16,11 @@ self.addEventListener('fetch', (e) => {
   // Navegação: rede primeiro, cai para a casca em cache. Estáticos: cache primeiro, atualiza em segundo plano.
   if (e.request.mode === 'navigate') {
     e.respondWith(fetch(e.request).catch(() => caches.match('/index.html')));
+    return;
+  }
+  // Só arquivos com hash (/assets/) são imutáveis e podem sair do cache; o resto (ex.: módulos do dev server) vai sempre à rede, senão um app antigo continua sendo servido.
+  if (!url.pathname.startsWith('/assets/')) {
+    e.respondWith(fetch(e.request).catch(() => caches.match(e.request)));
     return;
   }
   e.respondWith(
