@@ -87,3 +87,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px 16px; }
 .kv dt { font-size: 12px; color: var(--muted); } .kv dd { margin: 0; font-weight: 600; }
 .skeleton { height: 14px; border-radius: 4px; background: var(--axis-cloud); opacity: .6; }
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.tiles .card { margin: 0; } .tile-v { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }

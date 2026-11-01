@@ -10,16 +10,24 @@ import { Stock } from './screens/Stock';
 import { Receiving } from './screens/Receiving';
 import { Transfers } from './screens/Transfers';
 import { Returns } from './screens/Returns';
+import { Dashboard } from './screens/Dashboard';
+import { Fulfillment } from './screens/Fulfillment';
+import { Replenishment } from './screens/Replenishment';
+import { Admin } from './screens/Admin';
 import { cameraSupported, startCamera } from './lib/scanner';
 
-type Tab = 'cat' | 'est' | 'rec' | 'trf' | 'dev' | 'sep' | 'arm' | 'inv' | 'sync';
+type Tab = 'cat' | 'est' | 'rec' | 'trf' | 'dev' | 'pan' | 'atd' | 'rep' | 'adm' | 'sep' | 'arm' | 'inv' | 'sync';
 /** Itens do menu lateral, com a permissão local que libera cada tela (mesmo padrão do shell do Axis). */
 const NAV_ITEMS: Array<{ key: Tab; label: string; icon: string; permission?: string }> = [
+  { key: 'pan', label: 'Painel', icon: '▤', permission: 'dashboard:read' },
   { key: 'cat', label: 'Catálogo', icon: '◈', permission: 'material:read' },
   { key: 'est', label: 'Estoque', icon: '▦', permission: 'stock:read' },
   { key: 'rec', label: 'Recebimento', icon: '⇩', permission: 'receipt:execute' },
   { key: 'trf', label: 'Transferências', icon: '⇄', permission: 'transfer:request' },
   { key: 'dev', label: 'Devoluções', icon: '↩', permission: 'return:execute' },
+  { key: 'atd', label: 'Atendimento', icon: '⚐', permission: 'fulfillment:read' },
+  { key: 'rep', label: 'Reposição', icon: '⟳', permission: 'alert:read' },
+  { key: 'adm', label: 'Administração', icon: '⚙', permission: 'warehouse:read' },
   { key: 'sep', label: 'Separação', icon: '⚑', permission: 'picking:execute' },
   { key: 'arm', label: 'Armazenagem', icon: '▣', permission: 'receipt:execute' },
   { key: 'inv', label: 'Inventário', icon: '☆', permission: 'stockcount:count' },
@@ -225,6 +233,10 @@ export function App() {
           {tab === 'rec' && <Receiving warehouseId={settings.warehouseId} />}
           {tab === 'trf' && <Transfers warehouseId={settings.warehouseId} />}
           {tab === 'dev' && <Returns warehouseId={settings.warehouseId} canCustody={perms?.includes('custody:execute') ?? false} />}
+          {tab === 'pan' && <Dashboard warehouseId={settings.warehouseId} />}
+          {tab === 'atd' && <Fulfillment />}
+          {tab === 'rep' && <Replenishment warehouseId={settings.warehouseId} canManage={perms?.includes('replenishment:manage') ?? false} canAck={perms?.includes('alert:read') ?? false} />}
+          {tab === 'adm' && <Admin warehouseId={settings.warehouseId} canIntegration={perms?.includes('integration:configure') ?? false} />}
           {!boot && (tab === 'sep' || tab === 'arm' || tab === 'inv') && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
           {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
           {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
@@ -233,7 +245,7 @@ export function App() {
         </main>
       </div>
       <nav className="tabs">
-        {NAV_ITEMS.filter((i) => !['cat', 'est', 'rec', 'trf', 'dev'].includes(i.key)).map((i) => (
+        {NAV_ITEMS.filter((i) => !['pan', 'cat', 'est', 'rec', 'trf', 'dev', 'atd', 'rep', 'adm'].includes(i.key)).map((i) => (
           <button key={i.key} className={tab === i.key ? 'tab active' : 'tab'} onClick={() => setTab(i.key)}>{i.label}</button>
         ))}
       </nav>
