@@ -121,7 +121,40 @@ export class MaterialsService {
     });
   }
 
-  /** Item com histórico nunca é excluído: apenas inativado (7.3.7). */
+  /** Material sem movimentação, lote nem série nunca entrou no estoque: pode ser excluído de verdade. Com histórico, só inativar (7.3.7). */
+  async deletability(id: string): Promise<{ deletable: boolean; reason?: string }> {
+    const exists = await this.prisma.material.findUnique({ where: { id }, select: { id: true } });
+    if (!exists) throw new NotFoundException('Material não encontrado.');
+    const [movements, lots, serials, balances] = await Promise.all([
+      this.prisma.stockMovement.count({ where: { materialId: id } }),
+      this.prisma.lot.count({ where: { materialId: id } }),
+      this.prisma.serialNumber.count({ where: { materialId: id } }),
+      this.prisma.stockBalance.count({ where: { materialId: id } }),
+    ]);
+    if (movements + lots + serials + balances > 0) return { deletable: false, reason: 'O material possui movimentações, lotes, séries ou saldo; use Inativar.' };
+    return { deletable: true };
+  }
+
+  async remove(id: string, user: AuthenticatedUser) {
+    const current = await this.prisma.material.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Material não encontrado.');
+    const d = await this.deletability(id);
+    if (!d.deletable) throw new ConflictException(d.reason);
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.materialBarcode.deleteMany({ where: { materialId: id } });
+        await tx.materialVersion.deleteMany({ where: { materialId: id } });
+        await tx.material.delete({ where: { id } });
+        await this.audit.record(user.userId, 'material.deleted', 'material', id, { code: current.code, shortDescription: current.shortDescription, version: current.currentVersion }, tx);
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2003') throw new ConflictException('O material é usado em outros registros (pedidos, recebimentos, políticas); use Inativar.');
+      throw e;
+    }
+    return { id, code: current.code, deleted: true };
+  }
+
+  /** Inativa (mantém o histórico). */
   async deactivate(id: string, user: AuthenticatedUser) {
     const current = await this.prisma.material.findUnique({ where: { id } });
     if (!current) throw new NotFoundException('Material não encontrado.');

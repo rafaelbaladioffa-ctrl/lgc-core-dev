@@ -132,7 +132,7 @@ describe('Sprint 1 — SSO + RBAC + catálogo', () => {
       expect(up.body.currentVersion).toBe(2);
       const versions = await api().get(`/api/v1/materials/${materialId}/versions`).set(auth(admin)).expect(200);
       expect(versions.body.map((v: { version: number }) => v.version)).toEqual([2, 1]);
-      await api().delete(`/api/v1/materials/${materialId}`).set(auth(admin)).expect(200);
+      await api().post(`/api/v1/materials/${materialId}/deactivate`).set(auth(admin)).expect(200);
       const got = await api().get(`/api/v1/materials/${materialId}`).set(auth(admin)).expect(200);
       expect(got.body.status).toBe('INATIVO');
       expect(await prisma.material.count({ where: { id: materialId } })).toBe(1);

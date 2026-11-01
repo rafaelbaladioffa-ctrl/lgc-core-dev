@@ -3,6 +3,7 @@ import { call } from '../lib/api';
 import { fmtQty } from '../lib/format';
 import { allMaterials } from '../lib/lookups';
 import { clampPage, filterBalances } from '../lib/listing';
+import { StockAdjust } from './StockAdjust';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
 interface Balance { materialId: string; locationId: string; locationCode: string; lotId: string | null; lotNumber: string | null; condition: string; ownership: string; quantity: string; reserved: string; available: string }
@@ -10,7 +11,8 @@ interface Page<T> { total: number; page: number; pageSize: number; items: T[] }
 const COND: Record<string, string> = { DISPONIVEL: 'Disponível', QUARENTENA: 'Quarentena', BLOQUEADO: 'Bloqueado', AVARIADO: 'Avariado' };
 const OWN: Record<string, string> = { PROPRIO: 'Próprio', CLIENTE: 'De cliente' };
 
-export function Stock({ warehouseId }: { warehouseId: string }) {
+export function Stock({ warehouseId, canAdjust = false }: { warehouseId: string; canAdjust?: boolean }) {
+  const [adjusting, setAdjusting] = useState<Balance | null>(null);
   const [cond, setCond] = useState('');
   const [q, setQ] = useState('');
   const [page, setPage] = useState(1);
@@ -38,10 +40,12 @@ export function Stock({ warehouseId }: { warehouseId: string }) {
     { key: 'qty', header: 'Quantidade', num: true, render: (b) => `${fmtQty(b.quantity)} ${byId.get(b.materialId)?.stockUom.code ?? ''}` },
     { key: 'res', header: 'Reservado', num: true, render: (b) => fmtQty(b.reserved) },
     { key: 'av', header: 'Disponível', num: true, render: (b) => <strong>{fmtQty(b.available)}</strong> },
+    { key: 'adj', header: '', render: (b) => (canAdjust ? <button className="btn ghost" onClick={() => setAdjusting(b)}>Ajustar</button> : null) },
   ];
   return (
     <section>
       <h2>Estoque do almoxarifado</h2>
+      {adjusting && <StockAdjust balance={adjusting} label={byId.get(adjusting.materialId)?.code ?? adjusting.materialId} onCancel={() => setAdjusting(null)} onDone={() => { setAdjusting(null); reload(); }} />}
       <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Material, endereço ou lote" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></label>
         <label className="field">Condição<select className="inp" value={cond} onChange={(e) => { setCond(e.target.value); setPage(1); }}><option value="">Todas</option>{Object.entries(COND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>

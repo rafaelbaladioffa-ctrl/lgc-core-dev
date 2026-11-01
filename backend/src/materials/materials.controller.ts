@@ -46,8 +46,21 @@ export class MaterialsController {
     return this.materials.update(id, dto, user);
   }
 
-  /** Não há exclusão definitiva: DELETE inativa o material. */
+  @Get(':id/deletable')
+  @RequirePermissions('material:write')
+  deletable(@Param('id', ParseUUIDPipe) id: string) {
+    return this.materials.deletability(id);
+  }
+
+  /** Exclusão física só sem nenhum histórico de estoque; com histórico responde 409 e a ação é inativar. */
   @Delete(':id')
+  @HttpCode(200)
+  @RequirePermissions('material:write')
+  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.materials.remove(id, user);
+  }
+
+  @Post(':id/deactivate')
   @HttpCode(200)
   @RequirePermissions('material:write')
   deactivate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {

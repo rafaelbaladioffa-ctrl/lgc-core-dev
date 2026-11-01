@@ -72,11 +72,26 @@ function MaterialDetail({ m: initial, warehouseId, canWrite, onBack }: { m: Mate
   const [vTick, setVTick] = useState(0);
   const [av] = useLoad(() => call<Availability>(`/materials/${m.id}/availability${warehouseId ? `?warehouse_id=${warehouseId}` : ''}`), [m.id, warehouseId]);
   const [vers] = useLoad(() => call<Version[]>(`/materials/${m.id}/versions`), [m.id, vTick]);
+  const [del] = useLoad(() => (canWrite ? call<{ deletable: boolean; reason?: string }>(`/materials/${m.id}/deletable`) : Promise.resolve({ deletable: false, reason: undefined as string | undefined })), [m.id, canWrite]);
+  const [actErr, setActErr] = useState('');
+  const act = async (kind: 'delete' | 'deactivate') => {
+    const msg = kind === 'delete' ? 'Excluir este material definitivamente? Ele nunca teve movimentação; a exclusão não pode ser desfeita.' : 'Inativar este material? Ele deixa de aparecer nas listas, mas o histórico é mantido.';
+    if (!window.confirm(msg)) return;
+    setActErr('');
+    try {
+      if (kind === 'delete') await call(`/materials/${m.id}`, { method: 'DELETE' }); else await call(`/materials/${m.id}/deactivate`, { method: 'POST', body: '{}' });
+      onBack();
+    } catch (e) { setActErr((e as Error).message); }
+  };
   const kv = (k: string, v: React.ReactNode) => <div><dt>{k}</dt><dd>{v || '—'}</dd></div>;
   return (
     <section>
       <button className="btn ghost" onClick={onBack}>← Catálogo</button>
       {canWrite && !editing && m.status === 'ATIVO' && <button className="btn" onClick={() => setEditing(true)}>Editar material</button>}
+      {canWrite && !editing && m.status === 'ATIVO' && del.state === 'ready' && (del.data.deletable
+        ? <button className="btn ghost" onClick={() => void act('delete')}>Excluir</button>
+        : <button className="btn ghost" onClick={() => void act('deactivate')} title={del.data.reason}>Inativar</button>)}
+      {actErr && <p className="err" role="alert">{actErr}</p>}
       {editing && <MaterialForm mode="edit" materialId={m.id} initial={valuesFromMaterial(m as never)} onCancel={() => setEditing(false)} onSaved={(saved) => { setM({ ...m, ...(saved as object) } as Material); setEditing(false); setVTick((n) => n + 1); }} />}
       <h2>{m.code} — {m.shortDescription}</h2>
       {m.technicalDescription && <p className="hint">{m.technicalDescription}</p>}

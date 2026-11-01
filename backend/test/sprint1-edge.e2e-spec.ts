@@ -105,7 +105,7 @@ describe('Sprint 1 — casos de borda', () => {
     });
 
     it('por padrão lista só ATIVO; status=INATIVO e status inválido', async () => {
-      const del = await api().delete(`/api/v1/materials/${parafusoId}`).set(auth(admin())).expect(200);
+      const del = await api().post(`/api/v1/materials/${parafusoId}/deactivate`).set(auth(admin())).expect(200);
       expect(del.body.status).toBe('INATIVO');
       const ativos = await api().get(`/api/v1/materials?category=${cat}`).set(auth(admin())).expect(200);
       expect(ativos.body.total).toBe(2);
@@ -236,7 +236,7 @@ describe('Sprint 1 — casos de borda', () => {
     });
 
     it('inativar gera versão 2 com motivo "Inativação"', async () => {
-      await api().delete(`/api/v1/materials/${id}`).set(auth(admin())).expect(200);
+      await api().post(`/api/v1/materials/${id}/deactivate`).set(auth(admin())).expect(200);
       const versions = await api().get(`/api/v1/materials/${id}/versions`).set(auth(admin())).expect(200);
       expect(versions.body).toHaveLength(2);
       expect(versions.body[0]).toMatchObject({ version: 2, changeReason: 'Inativação' });
@@ -245,7 +245,7 @@ describe('Sprint 1 — casos de borda', () => {
     });
 
     it('inativar material já inativo é idempotente (sem nova versão)', async () => {
-      const res = await api().delete(`/api/v1/materials/${id}`).set(auth(admin())).expect(200);
+      const res = await api().post(`/api/v1/materials/${id}/deactivate`).set(auth(admin())).expect(200);
       expect(res.body.currentVersion).toBe(2);
       const versions = await api().get(`/api/v1/materials/${id}/versions`).set(auth(admin())).expect(200);
       expect(versions.body).toHaveLength(2);
@@ -265,6 +265,7 @@ describe('Sprint 1 — casos de borda', () => {
 
     it('colaborador (sem material:write) não altera nem inativa', async () => {
       await api().patch(`/api/v1/materials/${id}`).set(auth(colaborador())).send({}).expect(403);
+      await api().post(`/api/v1/materials/${id}/deactivate`).set(auth(colaborador())).expect(403);
       await api().delete(`/api/v1/materials/${id}`).set(auth(colaborador())).expect(403);
     });
 
