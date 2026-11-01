@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { call } from '../lib/api';
-import { fmtDateTime } from '../lib/format';
+import { fmtDateTime, fmtQty } from '../lib/format';
 import { NewLocation, Policies } from './AdminForms';
 import { DataTable, useLoad, type Column } from '../ui';
 
@@ -38,7 +38,7 @@ function Locations({ warehouseId, canWrite }: { warehouseId?: string; canWrite: 
     { key: 'n', header: 'Nome', render: (l) => l.name ?? '—' },
     { key: 'l', header: 'Nível', render: (l) => LEVEL[l.level] ?? l.level },
     { key: 's', header: 'Situação', render: (l) => <span className={`pill ${l.status === 'ATIVO' ? 'ok' : 'warn'}`}>{LOC_STATUS[l.status] ?? l.status}</span> },
-    { key: 'cap', header: 'Capacidade', render: (l) => (l.capacityKind ? `${l.capacityValue ?? '—'} (${l.capacityKind.toLowerCase()})` : '—') },
+    { key: 'cap', header: 'Capacidade', render: (l) => (l.capacityKind ? `${l.capacityValue === null ? '—' : fmtQty(l.capacityValue)} (${l.capacityKind.toLowerCase()})` : '—') },
     { key: 'f', header: 'Observações', render: (l) => [l.isVirtual && 'Virtual', l.restrictedAccess && 'Acesso restrito', l.blockedReason].filter(Boolean).join(' · ') || '—' },
   ];
   return (
@@ -64,7 +64,7 @@ function Integration() {
   return (
     <div className="card">
       <p>{o.configured ? <span className="pill ok">Destino de eventos configurado</span> : <span className="pill warn">Destino de eventos não configurado (AXIS_EVENTS_URL)</span>}</p>
-      <dl className="kv">{o.counts.map((c) => <div key={`${c.direction}${c.status}`}><dt>{DIR[c.direction] ?? c.direction} · {MSG[c.status] ?? c.status}</dt><dd>{c.count}</dd></div>)}<div><dt>Pendente mais antiga</dt><dd>{o.oldestPendingAt ? fmtDateTime(o.oldestPendingAt) : '—'}</dd></div></dl>
+      <dl className="kv">{o.counts.map((c) => <div key={`${c.direction}${c.status}`}><dt>{DIR[c.direction] ?? c.direction} · {MSG[c.status] ?? c.status}</dt><dd>{c.count}</dd></div>)}<div><dt>Pendência mais antiga</dt><dd>{o.oldestPendingAt ? fmtDateTime(o.oldestPendingAt) : '—'}</dd></div></dl>
       {err && <p className="err" role="alert">{err}</p>}
       <div className="row"><button className="btn" disabled={busy} onClick={() => void dispatch()}>{busy ? 'Enviando…' : 'Enviar pendências agora'}</button><button className="btn ghost" onClick={reload}>Atualizar</button></div>
     </div>

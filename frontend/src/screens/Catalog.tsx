@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { call } from '../lib/api';
 import { fmtDateTime, fmtQty } from '../lib/format';
+import { materialsQuery } from '../lib/listing';
 import { DataTable, Pager, useDebounced, useLoad, yesNo, type Column } from '../ui';
 
 interface Material {
@@ -30,11 +31,7 @@ export function Catalog({ warehouseId }: { warehouseId?: string }) {
   const dq = useDebounced(q.trim());
   const [cats] = useLoad(() => call<Array<{ category: string }>>('/material-categories'), []);
   const [res, reload] = useLoad(() => {
-    const p = new URLSearchParams({ page: String(page), pageSize: '20', status });
-    if (dq) p.set('q', dq);
-    if (type) p.set('type', type);
-    if (category) p.set('category', category);
-    return call<Page<Material>>(`/materials?${p}`);
+    return call<Page<Material>>(`/materials?${materialsQuery({ page, pageSize: 20, status, q: dq, type, category })}`);
   }, [dq, type, category, status, page]);
 
   if (sel) return <MaterialDetail m={sel} warehouseId={warehouseId} onBack={() => setSel(null)} />;

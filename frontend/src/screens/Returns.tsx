@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
+import { dateBr, todaySaoPaulo } from '../lib/dates';
 import { fmtDateTime, fmtQty } from '../lib/format';
 import { allMaterials, matLabel } from '../lib/lookups';
+import { fetchAllPages } from '../lib/paging';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
 interface Ret { id: string; code: string; type: string; status: string; warehouseId: string; notes: string | null; createdAt: string; items?: RItem[] }
@@ -13,7 +15,10 @@ const TYPE: Record<string, string> = { SOBRA: 'Sobra', FERRAMENTA: 'Ferramenta',
 const STATUS: Record<string, string> = { RECEBIDA: 'Recebida', ENCERRADA: 'Encerrada' };
 const DISP: Record<string, string> = { DISPONIVEL: 'Disponível', MANUTENCAO: 'Manutenção', QUARENTENA: 'Quarentena', AVARIADO_REPARO: 'Avariado (reparo)', SUCATA: 'Sucata / descarte' };
 const CUSTODY: Record<string, string> = { ATIVO: 'Ativo', DEVOLVIDO: 'Devolvido', PERDIDO: 'Perdido' };
-const today = () => new Date().toISOString().slice(0, 10);
+const PAGE = 20;
+
+/** Termo ativo cuja devolução prevista é anterior a hoje (dia de São Paulo). */
+export const isOverdueCustody = (t: Pick<Custody, 'status' | 'expectedReturnAt'>, today: string) => t.status === 'ATIVO' && !!t.expectedReturnAt && t.expectedReturnAt.slice(0, 10) < today;
 
 export function Returns({ warehouseId, canCustody }: { warehouseId?: string; canCustody: boolean }) {
   const [part, setPart] = useState<'ret' | 'cus'>('ret');
@@ -112,39 +117,49 @@ function CustodyList({ canClose }: { canClose: boolean }) {
   const [status, setStatus] = useState('ATIVO');
   const [overdue, setOverdue] = useState(false);
   const [page, setPage] = useState(1);
-  const [res, reload] = useLoad(() => call<Page<Custody>>(`/custody?page=${page}&pageSize=20${status ? `&status=${status}` : ''}`), [status, page]);
+  const [busy, setBusy] = useState(false);
+  const url = (p: number, size: number) => `/custody?page=${p}&pageSize=${size}${status ? `&status=${status}` : ''}`;
+  // Com "atrasadas" o filtro é local: carrega todas as páginas para o total e a paginação baterem.
+  const [res, reload] = useLoad<Page<Custody>>(async () => {
+    if (!overdue) return call<Page<Custody>>(url(page, PAGE));
+    const today = todaySaoPaulo();
+    const items = (await fetchAllPages((p) => call<Page<Custody>>(url(p, 100)))).filter((t) => isOverdueCustody(t, today));
+    return { total: items.length, page: 1, pageSize: PAGE, items };
+  }, [status, page, overdue]);
   const [mats] = useLoad(allMaterials, []);
   const byId = useMemo(() => new Map((mats.state === 'ready' ? mats.data : []).map((m) => [m.id, m])), [mats]);
   const [err, setErr] = useState('');
   const lost = async (t: Custody) => {
+    if (busy) return;
     const notes = window.prompt(`Motivo da perda de ${t.code} (mínimo 3 caracteres):`)?.trim();
     if (!notes || notes.length < 3) return;
     const approvalRef = window.prompt('Número da aprovação do Axis para a baixa:')?.trim();
     if (!approvalRef) return;
     if (!window.confirm(`Marcar ${t.code} como perdido? A série será baixada.`)) return;
-    setErr('');
-    try { await call(`/custody/${t.id}/mark-lost`, { method: 'POST', body: JSON.stringify({ notes, approvalRef }) }); reload(); } catch (e) { setErr((e as Error).message); }
+    setBusy(true); setErr('');
+    try { await call(`/custody/${t.id}/mark-lost`, { method: 'POST', body: JSON.stringify({ notes, approvalRef }) }); reload(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
   const data = res.state === 'ready' ? res.data : null;
-  const rows = (data?.items ?? []).filter((t) => !overdue || (t.status === 'ATIVO' && t.expectedReturnAt && t.expectedReturnAt.slice(0, 10) < today()));
+  const today = todaySaoPaulo();
+  const rows = overdue ? (data?.items ?? []).slice((page - 1) * PAGE, page * PAGE) : (data?.items ?? []);
   const cols: Column<Custody>[] = [
     { key: 'c', header: 'Termo', render: (t) => <strong>{t.code}</strong> },
     { key: 'm', header: 'Material', render: (t) => matLabel(byId, t.materialId) },
     { key: 'q', header: 'Qtd. / devolvida', num: true, render: (t) => `${fmtQty(t.quantity)} / ${fmtQty(t.returnedQty)}` },
     { key: 'cu', header: 'Custodiante', render: (t) => <code>{t.custodianAxisId.slice(0, 8)}</code> },
     { key: 's', header: 'Situação', render: (t) => <span className={`pill ${t.status === 'ATIVO' ? 'warn' : t.status === 'PERDIDO' ? 'bad' : 'ok'}`}>{CUSTODY[t.status] ?? t.status}</span> },
-    { key: 'e', header: 'Devolução prevista', render: (t) => (t.expectedReturnAt ? <span className={t.status === 'ATIVO' && t.expectedReturnAt.slice(0, 10) < today() ? 'err' : undefined}>{t.expectedReturnAt.slice(0, 10).split('-').reverse().join('/')}</span> : '—') },
-    { key: 'a', header: '', render: (t) => (canClose && t.status === 'ATIVO' ? <button className="btn ghost" onClick={() => void lost(t)}>Marcar perdido</button> : null) },
+    { key: 'e', header: 'Devolução prevista', render: (t) => (t.expectedReturnAt ? <span className={isOverdueCustody(t, today) ? 'err' : undefined}>{dateBr(t.expectedReturnAt)}</span> : '—') },
+    { key: 'a', header: '', render: (t) => (canClose && t.status === 'ATIVO' ? <button className="btn ghost" disabled={busy} onClick={() => void lost(t)}>Marcar perdido</button> : null) },
   ];
   return (
     <>
       <form className="toolbar" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Situação<select className="inp" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}><option value="">Todas</option>{Object.entries(CUSTODY).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
-        <label className="field"><span>Atrasadas</span><input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} aria-label="Somente atrasadas" /></label>
+        <label className="field"><span>Atrasadas</span><input type="checkbox" checked={overdue} onChange={(e) => { setOverdue(e.target.checked); setPage(1); }} aria-label="Somente atrasadas" /></label>
       </form>
       {err && <p className="err" role="alert">{err}</p>}
       <DataTable cols={cols} rows={rows} state={res.state} error={res.state === 'error' ? res.message : undefined} onRetry={reload} rowKey={(t) => t.id} empty="Nenhum termo de custódia encontrado." />
-      {data && <Pager page={data.page} pageSize={data.pageSize} total={data.total} onPage={setPage} />}
+      {data && <Pager page={page} pageSize={PAGE} total={data.total} onPage={setPage} />}
     </>
   );
 }

@@ -53,7 +53,7 @@ export function Dashboard({ warehouseId }: { warehouseId?: string }) {
               <Tile label="Acuracidade do inventário" value={pct(k.accuracy.pct)} hint={`${k.accuracy.matched} de ${k.accuracy.counted} linhas conferidas`} />
               <Tile label="Nível de serviço" value={pct(k.serviceLevel.fillRatePct)} hint={`${k.serviceLevel.onTime} de ${k.serviceLevel.delivered} entregues no prazo · ${k.serviceLevel.orders} ordens`} />
               <Tile label="Rupturas" value={k.stock.stockouts} bad={k.stock.stockouts > 0} hint={`${k.stock.belowMin} abaixo do mínimo · ${k.stock.policies} políticas`} />
-              <Tile label="Cobertura média" value={k.stock.avgCoverageDays === null ? '—' : `${k.stock.avgCoverageDays} dias`} />
+              <Tile label="Cobertura média" value={k.stock.avgCoverageDays === null ? '—' : `${k.stock.avgCoverageDays.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dias`} />
               <Tile label="Em trânsito" value={k.transit.count} hint={`Tempo médio ${hours(k.transit.avgHours)}`} />
               <Tile label="Custódias atrasadas" value={k.custody.overdue} bad={k.custody.overdue > 0} />
               <Tile label="Recebimentos sem pedido" value={k.receiving.withoutOrderException} />

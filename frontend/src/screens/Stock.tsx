@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
 import { fmtQty } from '../lib/format';
 import { allMaterials } from '../lib/lookups';
+import { clampPage, filterBalances } from '../lib/listing';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
 interface Balance { materialId: string; locationId: string; locationCode: string; lotId: string | null; lotNumber: string | null; condition: string; ownership: string; quantity: string; reserved: string; available: string }
@@ -22,10 +23,12 @@ export function Stock({ warehouseId }: { warehouseId: string }) {
   }, [warehouseId, cond]);
 
   const all = res.state === 'ready' ? res.data.items : [];
-  const term = q.trim().toLowerCase();
-  const rows = term ? all.filter((b) => { const m = byId.get(b.materialId); return `${m?.code ?? ''} ${m?.shortDescription ?? ''} ${b.locationCode} ${b.lotNumber ?? ''}`.toLowerCase().includes(term); }) : all;
+  const term = q.trim();
+  const rows = filterBalances(all, byId, term);
   const size = 20;
-  const shown = rows.slice((page - 1) * size, page * size);
+  // Troca de almoxarifado ou filtro pode encolher os resultados: a página atual precisa caber no novo intervalo.
+  const cur = clampPage(page, rows.length, size);
+  const shown = rows.slice((cur - 1) * size, cur * size);
   const cols: Column<Balance>[] = [
     { key: 'mat', header: 'Material', render: (b) => { const m = byId.get(b.materialId); return m ? <><strong>{m.code}</strong> — {m.shortDescription}</> : b.materialId; } },
     { key: 'loc', header: 'Endereço', render: (b) => b.locationCode },
@@ -45,7 +48,7 @@ export function Stock({ warehouseId }: { warehouseId: string }) {
         <button type="button" className="btn ghost" onClick={() => { setQ(''); setCond(''); setPage(1); }}>Limpar filtros</button>
       </form>
       <DataTable cols={cols} rows={shown} state={res.state} error={res.state === 'error' ? res.message : undefined} onRetry={reload} rowKey={(b) => `${b.locationId}|${b.materialId}|${b.lotId}|${b.condition}|${b.ownership}`} empty={term || cond ? 'Nenhum saldo para estes filtros.' : 'Nenhum saldo neste almoxarifado.'} />
-      {res.state === 'ready' && <Pager page={page} pageSize={size} total={rows.length} onPage={setPage} />}
+      {res.state === 'ready' && <Pager page={cur} pageSize={size} total={rows.length} onPage={setPage} />}
       {res.state === 'ready' && res.data.total > all.length && <p className="hint">Mostrando os primeiros {all.length} de {res.data.total} saldos; use os filtros para refinar.</p>}
     </section>
   );

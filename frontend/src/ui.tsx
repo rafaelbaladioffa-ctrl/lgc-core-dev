@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { pageCount, pageRange } from './lib/listing';
 
 export function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
@@ -44,11 +45,11 @@ export function DataTable<R>({ cols, rows, state, error, onRetry, empty, onRow, 
 }
 
 export function Pager({ page, pageSize, total, onPage }: { page: number; pageSize: number; total: number; onPage: (p: number) => void }) {
-  const pages = Math.max(1, Math.ceil(total / pageSize));
-  const from = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const pages = pageCount(total, pageSize);
+  const { from, to } = pageRange(page, pageSize, total);
   return (
     <div className="pager">
-      <span>{from}–{Math.min(total, page * pageSize)} de {total}</span>
+      <span>{from}–{to} de {total}</span>
       <button className="btn ghost" disabled={page <= 1} onClick={() => onPage(page - 1)}>Anterior</button>
       <span>Página {page} de {pages}</span>
       <button className="btn ghost" disabled={page >= pages} onClick={() => onPage(page + 1)}>Próxima</button>

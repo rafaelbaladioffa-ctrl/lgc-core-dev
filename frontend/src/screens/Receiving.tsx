@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
+import { dateBr } from '../lib/dates';
 import { fmtDateTime, fmtQty } from '../lib/format';
 import { allMaterials, matLabel } from '../lib/lookups';
 import { DataTable, Pager, useLoad, yesNo, type Column } from '../ui';
@@ -87,7 +88,7 @@ function ReceiptDetail({ id, onBack }: { id: string; onBack: () => void }) {
       <DataTable rowKey={(i) => i.id} state="ready" rows={r.items ?? []} empty="Nenhum item conferido ainda." cols={[
         { key: 'm', header: 'Material', render: (i: RItem) => matLabel(byId, i.materialId) },
         { key: 'q', header: 'Quantidade', num: true, render: (i: RItem) => fmtQty(i.quantity) },
-        { key: 'l', header: 'Lote / validade', render: (i: RItem) => [i.lotNumber, i.expiresAt?.slice(0, 10)].filter(Boolean).join(' · ') || '—' },
+        { key: 'l', header: 'Lote / validade', render: (i: RItem) => [i.lotNumber, i.expiresAt && dateBr(i.expiresAt)].filter(Boolean).join(' · ') || '—' },
         { key: 's', header: 'Séries', render: (i: RItem) => (i.serials.length ? i.serials.join(', ') : '—') },
         { key: 'f', header: 'Alertas', render: (i: RItem) => <>{i.damaged && <span className="pill bad">Avariado</span>}{i.inspectionRequired && <span className="pill warn">Inspeção{i.inspectionReason ? `: ${i.inspectionReason}` : ''}</span>}</> },
         { key: 'st', header: 'Situação', render: (i: RItem) => ITEM_STATUS[i.status] ?? i.status },

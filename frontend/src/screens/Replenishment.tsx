@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
+import { dateBr } from '../lib/dates';
 import { fmtDateTime, fmtQty } from '../lib/format';
 import { allMaterials, matLabel } from '../lib/lookups';
 import { DataTable, useLoad, type Column } from '../ui';
@@ -51,7 +52,7 @@ function Suggestions({ warehouseId, canManage }: { warehouseId?: string; canMana
     { key: 'm', header: 'Material', render: (s) => matLabel(byId, s.materialId) },
     { key: 'q', header: 'Quantidade sugerida', num: true, render: (s) => fmtQty(s.suggestedQty) },
     { key: 'st', header: 'Situação', render: (s) => <span className={`pill ${s.status === 'ABERTA' ? 'warn' : s.status === 'DESCARTADA' ? 'bad' : 'ok'}`}>{SUG[s.status] ?? s.status}</span> },
-    { key: 'e', header: 'Previsto para', render: (s) => (s.expectedAt ? s.expectedAt.slice(0, 10).split('-').reverse().join('/') : '—') },
+    { key: 'e', header: 'Previsto para', render: (s) => dateBr(s.expectedAt) },
     { key: 'c', header: 'Calculada em', render: (s) => fmtDateTime(s.createdAt) },
     { key: 'a', header: '', render: (s) => (canManage && s.status === 'ABERTA' ? <div className="row"><button className="btn" disabled={busy} onClick={() => void act(s, 'send')}>Enviar ao Axis</button><button className="btn ghost" disabled={busy} onClick={() => void act(s, 'discard')}>Descartar</button></div> : s.discardReason ?? null) },
   ];
@@ -71,14 +72,19 @@ function Alerts({ warehouseId, canAck }: { warehouseId?: string; canAck: boolean
   const [sev, setSev] = useState('');
   const [res, reload] = useLoad(() => call<Alert[]>(`/alerts?${new URLSearchParams({ ...(sev && { severity: sev }), ...(warehouseId && { warehouseId }) })}`), [sev, warehouseId]);
   const [err, setErr] = useState('');
-  const ack = async (a: Alert) => { setErr(''); try { await call(`/alerts/${a.id}/acknowledge`, { method: 'POST', body: '{}' }); reload(); } catch (e) { setErr((e as Error).message); } };
+  const [busy, setBusy] = useState(false);
+  const ack = async (a: Alert) => {
+    if (busy) return;
+    setBusy(true); setErr('');
+    try { await call(`/alerts/${a.id}/acknowledge`, { method: 'POST', body: '{}' }); reload(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
+  };
   const cols: Column<Alert>[] = [
     { key: 'sv', header: 'Gravidade', render: (a) => <span className={`pill ${a.severity === 'CRITICO' ? 'bad' : a.severity === 'ATENCAO' ? 'warn' : ''}`}>{SEV[a.severity] ?? a.severity}</span> },
     { key: 'k', header: 'Tipo', render: (a) => a.kind.replaceAll('_', ' ').toLowerCase() },
     { key: 'm', header: 'Mensagem', render: (a) => a.message },
     { key: 'r', header: 'Responsável', render: (a) => a.responsibleRole },
     { key: 'c', header: 'Desde', render: (a) => fmtDateTime(a.createdAt) },
-    { key: 'a', header: '', render: (a) => (a.status === 'RECONHECIDO' ? 'Reconhecido' : canAck ? <button className="btn ghost" onClick={() => void ack(a)}>Reconhecer</button> : null) },
+    { key: 'a', header: '', render: (a) => (a.status === 'RECONHECIDO' ? 'Reconhecido' : canAck ? <button className="btn ghost" disabled={busy} onClick={() => void ack(a)}>Reconhecer</button> : null) },
   ];
   return (
     <>
