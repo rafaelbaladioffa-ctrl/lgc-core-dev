@@ -20,6 +20,7 @@ import { DocumentsModule } from './documents/documents.module.js';
 import { InventoryModule } from './inventory/inventory.module.js';
 import { ReplenishmentModule } from './replenishment/replenishment.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
+import { SyncModule } from './sync/sync.module.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
 
@@ -43,6 +44,7 @@ import { HealthController } from './health/health.controller.js';
     InventoryModule,
     ReplenishmentModule,
     DashboardModule,
+    SyncModule,
     IntegrationModule,
   ],
   controllers: [HealthController],
