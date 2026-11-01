@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { call } from '../lib/api';
 import { fmtDateTime } from '../lib/format';
+import { NewLocation, Policies } from './AdminForms';
 import { DataTable, useLoad, type Column } from '../ui';
 
 interface Loc { id: string; code: string; name: string | null; level: string; status: string; blockedReason: string | null; isVirtual: boolean; capacityKind: string | null; capacityValue: string | null; restrictedAccess: boolean }
@@ -11,21 +12,22 @@ const LOC_STATUS: Record<string, string> = { ATIVO: 'Ativo', BLOQUEADO: 'Bloquea
 const DIR: Record<string, string> = { INBOUND: 'Entrada (do Axis)', OUTBOUND: 'Saída (para o Axis)' };
 const MSG: Record<string, string> = { RECEIVED: 'Recebida', PROCESSED: 'Processada', IGNORED: 'Ignorada', FAILED: 'Com falha', PENDING: 'Pendente', DELIVERED: 'Entregue' };
 
-export function Admin({ warehouseId, canIntegration }: { warehouseId?: string; canIntegration: boolean }) {
-  const [part, setPart] = useState<'loc' | 'int'>('loc');
+export function Admin({ warehouseId, canIntegration, canWrite = false, canPolicy = false }: { warehouseId?: string; canIntegration: boolean; canWrite?: boolean; canPolicy?: boolean }) {
+  const [part, setPart] = useState<'loc' | 'pol' | 'int'>('loc');
   return (
     <section>
       <h2>Administração</h2>
       <div className="toolbar">
         <button className={part === 'loc' ? 'btn' : 'btn ghost'} onClick={() => setPart('loc')}>Endereços</button>
+        <button className={part === 'pol' ? 'btn' : 'btn ghost'} onClick={() => setPart('pol')}>Parâmetros de reposição</button>
         {canIntegration && <button className={part === 'int' ? 'btn' : 'btn ghost'} onClick={() => setPart('int')}>Integração com o Axis</button>}
       </div>
-      {part === 'loc' || !canIntegration ? <Locations warehouseId={warehouseId} /> : <Integration />}
+      {part === 'pol' ? <Policies warehouseId={warehouseId} canWrite={canPolicy} /> : part === 'int' && canIntegration ? <Integration /> : <Locations warehouseId={warehouseId} canWrite={canWrite} />}
     </section>
   );
 }
 
-function Locations({ warehouseId }: { warehouseId?: string }) {
+function Locations({ warehouseId, canWrite }: { warehouseId?: string; canWrite: boolean }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [res, reload] = useLoad(() => (warehouseId ? call<Loc[]>(`/warehouses/${warehouseId}/locations`) : Promise.resolve([] as Loc[])), [warehouseId]);
@@ -41,6 +43,7 @@ function Locations({ warehouseId }: { warehouseId?: string }) {
   ];
   return (
     <>
+      {canWrite && warehouseId && <NewLocation warehouseId={warehouseId} locations={res.state === 'ready' ? res.data : []} onDone={reload} />}
       <form className="toolbar" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Código ou nome" value={q} onChange={(e) => setQ(e.target.value)} /></label>
         <label className="field">Situação<select className="inp" value={status} onChange={(e) => setStatus(e.target.value)}><option value="">Todas</option>{Object.entries(LOC_STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>

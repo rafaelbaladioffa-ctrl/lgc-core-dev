@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
 import { fmtDateTime, fmtQty } from '../lib/format';
 import { allMaterials, allWarehouses, matLabel, whLabel } from '../lib/lookups';
+import { TransferReceive } from './TransferReceive';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
 interface Transfer { id: string; code: string; fromWarehouseId: string; toWarehouseId: string; status: string; urgent: boolean; reason: string; hasDivergence: boolean; requestedBy: string; createdAt: string; dispatchedAt: string | null; receivedAt: string | null; items?: TItem[] }
@@ -95,6 +96,7 @@ function TransferDetail({ id, wmap, onBack }: { id: string; wmap: Map<string, { 
         { key: 'r', header: 'Reservado', num: true, render: (i: TItem) => fmtQty(i.reservedQty) },
         { key: 'rc', header: 'Recebido', num: true, render: (i: TItem) => fmtQty(i.receivedQty) },
       ]} />
+      {transit && <TransferReceive id={id} toWarehouseId={t.toWarehouseId} items={t.items ?? []} byId={byId} onDone={reload} />}
       {err && <p className="err" role="alert">{err}</p>}
       <div className="row">{(ACTIONS[t.status] ?? []).map((a, n) => <button key={a.path} className={n === 0 ? 'btn' : 'btn ghost'} disabled={busy} onClick={() => run(a)}>{a.label}</button>)}</div>
     </section>

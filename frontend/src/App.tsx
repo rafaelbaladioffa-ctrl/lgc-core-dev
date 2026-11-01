@@ -236,7 +236,7 @@ export function App() {
           {tab === 'pan' && <Dashboard warehouseId={settings.warehouseId} />}
           {tab === 'atd' && <Fulfillment />}
           {tab === 'rep' && <Replenishment warehouseId={settings.warehouseId} canManage={perms?.includes('replenishment:manage') ?? false} canAck={perms?.includes('alert:read') ?? false} />}
-          {tab === 'adm' && <Admin warehouseId={settings.warehouseId} canIntegration={perms?.includes('integration:configure') ?? false} />}
+          {tab === 'adm' && <Admin warehouseId={settings.warehouseId} canIntegration={perms?.includes('integration:configure') ?? false} canWrite={perms?.includes('warehouse:write') ?? false} canPolicy={perms?.includes('policy:write') ?? false} />}
           {!boot && (tab === 'sep' || tab === 'arm' || tab === 'inv') && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
           {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
           {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
