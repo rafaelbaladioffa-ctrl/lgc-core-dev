@@ -57,9 +57,18 @@ export class AlertsService {
     // Disponibilidade em lote: um cálculo por (almoxarifado, lead time), não por política.
     const groups = new Map<string, typeof policies>();
     for (const p of policies) { const m = mats.get(p.materialId); if (!m || m.status !== 'ATIVO') continue; const k = `${p.warehouseId}|${m.leadTimeDays ?? 0}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
+    // Cálculo de disponibilidade em paralelo limitado (4 grupos por vez): o custo cresce com almoxarifados × lead times, não com políticas.
+    const entries = [...groups.entries()];
+    const computed = new Map<string, Map<string, Awaited<ReturnType<AvailabilityService['compute']>>[number]>>();
+    for (let i = 0; i < entries.length; i += 4) {
+      await Promise.all(entries.slice(i, i + 4).map(async ([key, group]) => {
+        const [warehouseId, lead] = key.split('|');
+        const rows = await this.availability.compute(group.map((g) => g.materialId), { warehouseId, neededBy: new Date(today.getTime() + Number(lead) * DAY) });
+        computed.set(key, new Map(rows.map((a) => [a.material_id, a])));
+      }));
+    }
     for (const [key, group] of groups) {
-      const [warehouseId, lead] = key.split('|');
-      const avs = new Map((await this.availability.compute(group.map((g) => g.materialId), { warehouseId, neededBy: new Date(today.getTime() + Number(lead) * DAY) })).map((a) => [a.material_id, a]));
+      const avs = computed.get(key)!;
       for (const p of group) {
         const m = mats.get(p.materialId)!;
         const av = avs.get(p.materialId)!;
@@ -136,7 +145,7 @@ export class AlertsService {
 
   async scan() {
     const candidates = new Map((await this.collect()).map((c) => [c.dedupeKey, c]));
-    // Varreduras simultâneas são serializadas: a segunda enxerga o que a primeira criou e não duplica ABERTO.
+    // Varreduras simultâneas são serializadas na gravação: a segunda enxerga o que a primeira criou e nunca há dois ABERTO iguais.
     return this.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('alerts-scan'))`;
       const current = await tx.alert.findMany({ where: { status: { in: ['ABERTO', 'RECONHECIDO'] } } });
@@ -157,7 +166,7 @@ export class AlertsService {
         if (!candidates.has(a.dedupeKey)) { await tx.alert.update({ where: { id: a.id }, data: { status: 'RESOLVIDO', resolvedAt: new Date() } }); resolved++; }
       }
       return { open: candidates.size, created, updated, resolved };
-    }, { timeout: 60_000, maxWait: 30_000 });
+    }, { timeout: 120_000, maxWait: 60_000 });
   }
 
   async list(q: ListAlertsQuery, user: AuthenticatedUser) {

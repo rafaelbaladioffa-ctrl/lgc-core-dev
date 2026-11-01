@@ -530,7 +530,7 @@ describe('Sprint 10 (bordas) — hardening', () => {
     });
 
     it('paginação: páginas não se repetem, somam o total e vêm em ordem decrescente de data', async () => {
-      const base = { aggregateType: 'materials', action: 'request.post', actor: 'admin-s10e' };
+      const base = { aggregateType: 'materials', action: 'request.post', actor: 'admin-s10e', to: new Date(Date.now() - 600).toISOString() }; // janela fechada: eventos novos não deslocam as páginas
       await new Promise((r) => setTimeout(r, 500)); // a gravação da auditoria é assíncrona: espera as anteriores assentarem para as páginas não se deslocarem
       const p1 = (await api().get('/api/v1/audit/events').query({ ...base, page: 1, pageSize: 7 }).set(A(admin)).expect(200)).body;
       const p2 = (await api().get('/api/v1/audit/events').query({ ...base, page: 2, pageSize: 7 }).set(A(admin)).expect(200)).body;
