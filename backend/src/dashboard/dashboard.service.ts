@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { IsDateString, IsOptional, IsUUID } from 'class-validator';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -39,6 +39,7 @@ export class DashboardService {
     const whFilter: string[] | undefined = q.warehouseId ? [q.warehouseId] : allowed === 'ALL' ? undefined : allowed;
     const from = q.from ? new Date(q.from) : new Date(Date.now() - 90 * DAY);
     const to = q.to ? new Date(q.to) : new Date();
+    if (from > to) throw new BadRequestException('Período inválido: a data inicial é posterior à final.');
     const canCost = user.permissions.includes('material:read_cost');
     const inWh = whFilter ? { in: whFilter } : undefined;
 

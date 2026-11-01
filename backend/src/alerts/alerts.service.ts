@@ -136,27 +136,28 @@ export class AlertsService {
 
   async scan() {
     const candidates = new Map((await this.collect()).map((c) => [c.dedupeKey, c]));
-    const current = await this.prisma.alert.findMany({ where: { status: { in: ['ABERTO', 'RECONHECIDO'] } } });
-    const byKey = new Map(current.map((a) => [a.dedupeKey, a]));
-    let created = 0, updated = 0, resolved = 0;
-
-    for (const c of candidates.values()) {
-      const ex = byKey.get(c.dedupeKey);
-      if (ex) {
-        if (ex.severity !== c.severity || ex.message !== c.message) { await this.prisma.alert.update({ where: { id: ex.id }, data: { severity: c.severity, message: c.message, data: (c.data ?? {}) as Prisma.InputJsonValue } }); updated++; }
-        continue;
-      }
-      await this.prisma.$transaction(async (tx) => {
+    // Varreduras simultâneas são serializadas: a segunda enxerga o que a primeira criou e não duplica ABERTO.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('alerts-scan'))`;
+      const current = await tx.alert.findMany({ where: { status: { in: ['ABERTO', 'RECONHECIDO'] } } });
+      const byKey = new Map(current.map((a) => [a.dedupeKey, a]));
+      let created = 0, updated = 0, resolved = 0;
+      for (const c of candidates.values()) {
+        const ex = byKey.get(c.dedupeKey);
+        if (ex) {
+          if (ex.severity !== c.severity || ex.message !== c.message) { await tx.alert.update({ where: { id: ex.id }, data: { severity: c.severity, message: c.message, data: (c.data ?? {}) as Prisma.InputJsonValue } }); updated++; }
+          continue;
+        }
         const a = await tx.alert.create({ data: { kind: c.kind, severity: c.severity, warehouseId: c.warehouseId ?? undefined, refType: c.refType, refId: c.refId, message: c.message, responsibleRole: c.responsibleRole, dedupeKey: c.dedupeKey, data: (c.data ?? {}) as Prisma.InputJsonValue } });
         // Críticos seguem para o papel responsável via Axis; a notificação não concede acesso ao registro (19).
         if (c.severity === 'CRITICO') await tx.integrationMessage.create({ data: { direction: 'OUTBOUND', eventId: randomUUID(), eventType: 'alert.raised', occurredAt: new Date(), status: 'PENDING', payload: { alert_id: a.id, kind: a.kind, severity: a.severity, responsible_role: a.responsibleRole, message: a.message } } });
-      });
-      created++;
-    }
-    for (const a of current) {
-      if (!candidates.has(a.dedupeKey)) { await this.prisma.alert.update({ where: { id: a.id }, data: { status: 'RESOLVIDO', resolvedAt: new Date() } }); resolved++; }
-    }
-    return { open: candidates.size, created, updated, resolved };
+        created++;
+      }
+      for (const a of current) {
+        if (!candidates.has(a.dedupeKey)) { await tx.alert.update({ where: { id: a.id }, data: { status: 'RESOLVIDO', resolvedAt: new Date() } }); resolved++; }
+      }
+      return { open: candidates.size, created, updated, resolved };
+    }, { timeout: 60_000, maxWait: 30_000 });
   }
 
   async list(q: ListAlertsQuery, user: AuthenticatedUser) {

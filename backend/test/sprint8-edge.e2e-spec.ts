@@ -163,7 +163,7 @@ describe('Sprint 8 (bordas) — reposição, alertas e indicadores', () => {
     });
 
     // BUG: calculate lê a sugestão ABERTA e só depois cria; duas chamadas simultâneas criam duas ABERTA (não há índice único parcial).
-    it.fails('duas calculate simultâneas não duplicam sugestão ABERTA', async () => {
+    it('duas calculate simultâneas não duplicam sugestão ABERTA', async () => {
       const w = await newWh('RCE');
       const m = await mk('RCE');
       await policy(m, w.id, { minQty: 0, maxQty: 50, reorderPoint: 5 }).expect(200);
@@ -194,7 +194,7 @@ describe('Sprint 8 (bordas) — reposição, alertas e indicadores', () => {
     });
 
     // BUG: dois itens do mesmo material sem sugestão prévia; o 2º sobrescreve approvedQty do 1º (fica 10 em vez de 20).
-    it.fails('itens duplicados do mesmo material no pedido não perdem quantidade', async () => {
+    it('itens duplicados do mesmo material no pedido não perdem quantidade', async () => {
       const w = await newWh('DUP');
       const m = await mk('DUP');
       const res = await webhook('purchase_order.approved', { purchase_order_id: `PO-DUP-${sfx}`, warehouse_code: w.code, items: [{ material_code: `S8E-DUP-${sfx}`, quantity: 10 }, { material_code: `S8E-DUP-${sfx}`, quantity: 10 }] });
@@ -250,7 +250,7 @@ describe('Sprint 8 (bordas) — reposição, alertas e indicadores', () => {
     });
 
     // BUG: scan lê os alertas abertos e cria sem lock nem índice único em dedupe_key para status ABERTO; duas varreduras paralelas duplicam.
-    it.fails('varreduras concorrentes não duplicam alerta ABERTO', async () => {
+    it('varreduras concorrentes não duplicam alerta ABERTO', async () => {
       const w = await newWh('CON');
       const m = await mk('CON');
       await policy(m, w.id, { minQty: 5 }).expect(200);
@@ -284,7 +284,7 @@ describe('Sprint 8 (bordas) — reposição, alertas e indicadores', () => {
 
   describe('indicadores', () => {
     // BUG: KpiQuery não valida a ordem de from/to; período invertido responde 200 em vez de 400.
-    it.fails('período com from > to é rejeitado', async () => {
+    it('período com from > to é rejeitado', async () => {
       await api().get('/api/v1/dashboard/kpis').query({ from: day(5), to: day(-5) }).set(A(gestor)).expect(400);
     });
 

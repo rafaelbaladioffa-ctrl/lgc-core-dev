@@ -130,8 +130,13 @@ export class ReplenishmentService {
         purchaseMultiple: m.purchaseMultiple?.toString() ?? null, approvedDemand: [...demand.values()].map((d) => ({ project: d.project, neededBy: d.neededBy, qty: d.qty.toString() })),
       };
       const data = { suggestedQty: qty, justification: justification as Prisma.InputJsonValue, calculatedAt: new Date() };
-      const row = open ? await this.prisma.replenishmentSuggestion.update({ where: { id: open.id }, data }) : await this.prisma.replenishmentSuggestion.create({ data: { materialId: p.materialId, warehouseId: p.warehouseId, ...data } });
-      result.push({ id: row.id, code: suggestionCode(row.seq), materialId: row.materialId, warehouseId: row.warehouseId, suggestedQty: qty.toString(), action: open ? 'atualizada' : 'criada' });
+      // Cálculos simultâneos do mesmo item/almoxarifado são serializados: nunca duas sugestões ABERTAS.
+      const { row, updated } = await this.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`rep:${p.materialId}:${p.warehouseId}`}))`;
+        const cur = await tx.replenishmentSuggestion.findFirst({ where: { materialId: p.materialId, warehouseId: p.warehouseId, status: 'ABERTA' } });
+        return cur ? { row: await tx.replenishmentSuggestion.update({ where: { id: cur.id }, data }), updated: true } : { row: await tx.replenishmentSuggestion.create({ data: { materialId: p.materialId, warehouseId: p.warehouseId, ...data } }), updated: false };
+      });
+      result.push({ id: row.id, code: suggestionCode(row.seq), materialId: row.materialId, warehouseId: row.warehouseId, suggestedQty: qty.toString(), action: updated ? 'atualizada' : 'criada' });
     }
     return { calculated: policies.length, suggestions: result, skipped, superseded };
   }
@@ -183,12 +188,21 @@ export class ReplenishmentService {
     const expected = typeof p['expected_date'] === 'string' && !Number.isNaN(Date.parse(p['expected_date'])) ? new Date(p['expected_date']) : undefined;
     const items = Array.isArray(p['items']) ? (p['items'] as Array<Record<string, unknown>>) : [];
     if (items.length === 0) throw new BadRequestException('Pedido sem itens.');
+    // Itens repetidos do mesmo material somam; o último não sobrescreve os anteriores.
+    const merged = new Map<string, { material_code: string; quantity: number; suggestion_id?: string }>();
     for (const it of items) {
-      const qty = Number(it['quantity']);
+      const code = String(it['material_code'] ?? '');
+      const q = Number(it['quantity']);
+      if (!Number.isFinite(q) || q <= 0) throw new BadRequestException('Item do pedido com quantidade inválida.');
+      const prev = merged.get(code);
+      merged.set(code, { material_code: code, quantity: (prev?.quantity ?? 0) + q, suggestion_id: prev?.suggestion_id ?? (typeof it['suggestion_id'] === 'string' ? it['suggestion_id'] : undefined) });
+    }
+    for (const it of merged.values()) {
+      const qty = Number(it.quantity);
       if (!Number.isFinite(qty) || qty <= 0) throw new BadRequestException('Item do pedido com quantidade inválida.');
-      const m = await tx.material.findFirst({ where: { code: String(it['material_code'] ?? '') } });
-      if (!m) throw new BadRequestException(`Material ${String(it['material_code'])} não encontrado.`);
-      const bySuggestion = typeof it['suggestion_id'] === 'string' ? await tx.replenishmentSuggestion.findUnique({ where: { id: it['suggestion_id'] } }) : null;
+      const m = await tx.material.findFirst({ where: { code: it.material_code } });
+      if (!m) throw new BadRequestException(`Material ${it.material_code} não encontrado.`);
+      const bySuggestion = it.suggestion_id ? await tx.replenishmentSuggestion.findUnique({ where: { id: it.suggestion_id } }) : null;
       const target = bySuggestion ?? (await tx.replenishmentSuggestion.findFirst({ where: { materialId: m.id, warehouseId: wh.id, status: { in: ['ENVIADA_AXIS', 'APROVADA_AXIS'] } }, orderBy: { seq: 'desc' } }));
       if (target) await tx.replenishmentSuggestion.update({ where: { id: target.id }, data: { status: 'APROVADA_AXIS', approvedQty: qty, expectedAt: expected, axisPurchaseOrderId: poId } });
       else await tx.replenishmentSuggestion.create({ data: { materialId: m.id, warehouseId: wh.id, status: 'APROVADA_AXIS', suggestedQty: qty, approvedQty: qty, expectedAt: expected, axisPurchaseOrderId: poId, justification: { origem: 'pedido do Axis sem sugestão prévia' } } });
