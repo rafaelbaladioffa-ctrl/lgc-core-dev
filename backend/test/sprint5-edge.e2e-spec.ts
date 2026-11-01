@@ -116,8 +116,13 @@ describe('Sprint 5 — casos de borda', () => {
       const r = (await newReceipt().expect(201)).body;
       await scan(r.id, { materialId: m, quantity: 1, unitCost: 99.9 }).expect(201);
       await complete(r.id).expect(200);
-      const ledger = (await api().get('/api/v1/stock/movements').query({ materialId: m }).set(A(rec)).expect(200)).body.items ?? [];
-      for (const row of ledger) expect(JSON.stringify(row)).not.toMatch(/99\.9|unitCost/);
+      // Controle positivo: quem tem material:read_cost vê o custo; quem não tem, não.
+      const seen = (await api().get('/api/v1/stock/movements').query({ materialId: m }).set(A(gestor)).expect(200)).body.items as Array<Record<string, unknown>>;
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.some((row) => row.unitCost !== undefined)).toBe(true);
+      const hidden = (await api().get('/api/v1/stock/movements').query({ materialId: m }).set(A(rec)).expect(200)).body.items as Array<Record<string, unknown>>;
+      expect(hidden.length).toBe(seen.length);
+      for (const row of hidden) expect(row).not.toHaveProperty('unitCost');
     });
 
     it('aprovação parcial: um item liberado e outro em inspeção deixa o recibo como RECEBIDO_PENDENTE_INSPECAO', async () => {
@@ -188,10 +193,13 @@ describe('Sprint 5 — casos de borda', () => {
       // Simula falha na segunda série: tira o saldo de uma delas antes da confirmação.
       const second = await prisma.serialNumber.findFirstOrThrow({ where: { materialId: m, serial: `RB-2-${sfx}` } });
       await prisma.serialNumber.update({ where: { id: second.id }, data: { currentLocationId: null } });
-      const before = await prisma.serialNumber.findMany({ where: { materialId: m }, select: { currentLocationId: true } });
+      const first = await prisma.serialNumber.findFirstOrThrow({ where: { materialId: m, serial: `RB-1-${sfx}` } });
+      const before = await prisma.serialNumber.findMany({ where: { materialId: m }, select: { id: true, currentLocationId: true } });
       await api().post(`/api/v1/putaway-tasks/${t!.id}/confirm`).set(A(rec)).send({ locationId: locB }).expect((res) => expect(res.status).toBeGreaterThanOrEqual(400));
-      const after = await prisma.serialNumber.findMany({ where: { materialId: m }, select: { currentLocationId: true } });
-      expect(after).toEqual(before);
+      const after = await prisma.serialNumber.findMany({ where: { materialId: m }, select: { id: true, currentLocationId: true } });
+      expect(after.sort((a, b) => a.id.localeCompare(b.id))).toEqual(before.sort((a, b) => a.id.localeCompare(b.id)));
+      expect((await prisma.serialNumber.findUniqueOrThrow({ where: { id: first.id } })).currentLocationId).toBe(docA);
+      expect(await sums(m, locB)).toBe(0);
       expect((await prisma.putawayTask.findUniqueOrThrow({ where: { id: t!.id } })).status).toBe('ABERTA');
     });
   });
@@ -236,7 +244,18 @@ describe('Sprint 5 — casos de borda', () => {
       expect(await sums(m, locA, 'DISPONIVEL')).toBe(0);
     });
 
-    it('escopo: quem só tem acesso ao destino não expede; quem só tem acesso à origem não recebe', async () => {
+    it('escopo: usuário só com acesso ao destino não aprova nem expede; só com acesso à origem não recebe', async () => {
+      const destOnly = tokenFor(['tecnico'], `dest-s5e-${sfx}`);
+      await api().put(`/api/v1/rbac/users/dest-s5e-${sfx}/warehouses`).set(A(admin)).send({ warehouseIds: [w2] }).expect(200);
+      const m = await mk('SCOPE2'); await stockAt(m, 2);
+      const t = (await trf(m, 2).expect(201)).body;
+      await api().post(`/api/v1/transfers/${t.id}/approve`).set(A(destOnly)).send({}).expect(403);
+      await api().post(`/api/v1/transfers/${t.id}/approve`).set(A(gestor)).send({}).expect(200);
+      await api().post(`/api/v1/transfers/${t.id}/start-picking`).set(A(rec)).send({}).expect(200);
+      await api().post(`/api/v1/transfers/${t.id}/dispatch`).set(A(destOnly)).send({}).expect(403);
+    });
+
+    it('escopo: quem só tem acesso à origem não recebe', async () => {
       const m = await mk('SCOPE'); await stockAt(m, 2);
       const t = (await trf(m, 2).expect(201)).body;
       await api().post(`/api/v1/transfers/${t.id}/approve`).set(A(gestor)).send({}).expect(200);
