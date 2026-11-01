@@ -61,7 +61,7 @@ export class DocumentsService {
     const lots = new Map((await this.prisma.lot.findMany({ where: { id: { in: t.items.flatMap((i) => (i.lotId ? [i.lotId] : [])) } } })).map((l) => [l.id, l]));
     return this.base('Lista de separação', pad('SEP', t.seq), user,
       { Ordem: pad('ATD', order.seq), Projeto: order.projectAxisId ?? '—', 'Necessário até': fmtDate(order.neededBy), Prioridade: String(t.priority), Conferência: t.requiresCheck ? 'Independente obrigatória' : 'Não exigida' }, ['Separador', 'Conferente'],
-      { columns: ['Endereço', 'Material', 'Descrição', 'Lote', 'Validade', 'Planejado', 'Separado', 'UM'], rows: [...t.items].sort((a, b) => (locs.get(a.locationId) ?? '').localeCompare(locs.get(b.locationId) ?? '')).map((i) => { const m = mats.get(i.materialId)!; const lot = i.lotId ? lots.get(i.lotId) : undefined; return [locs.get(i.locationId) ?? '—', m.code, m.shortDescription, lot?.lotNumber ?? '—', fmtDate(lot?.expiresAt), num(i.quantityPlanned), num(i.quantityPicked), m.stockUom.code]; }) });
+      { columns: ['Endereço', 'Material', 'Descrição', 'Lote', 'Validade', 'Planejado', 'Separado', 'UM'], rows: [...t.items].sort((a, b) => (locs.get(a.locationId) ?? '').localeCompare(locs.get(b.locationId) ?? '', 'pt-BR', { numeric: true })).map((i) => { const m = mats.get(i.materialId)!; const lot = i.lotId ? lots.get(i.lotId) : undefined; return [locs.get(i.locationId) ?? '—', m.code, m.shortDescription, lot?.lotNumber ?? '—', fmtDate(lot?.expiresAt), num(i.quantityPlanned), num(i.quantityPicked), m.stockUom.code]; }) });
   }
 
   async shipment(id: string, user: AuthenticatedUser) {
@@ -132,7 +132,7 @@ export class DocumentsService {
     const mats = await this.materialMap(c.lines.map((l) => l.materialId));
     const locs = new Map((await this.prisma.location.findMany({ where: { id: { in: c.lines.map((l) => l.locationId) } } })).map((l) => [l.id, l.code]));
     const canCost = user.permissions.includes('material:read_cost');
-    const rows = [...c.lines].sort((a, b) => (locs.get(a.locationId) ?? '').localeCompare(locs.get(b.locationId) ?? '')).map((l) => {
+    const rows = [...c.lines].sort((a, b) => (locs.get(a.locationId) ?? '').localeCompare(locs.get(b.locationId) ?? '', 'pt-BR', { numeric: true })).map((l) => {
       const m = mats.get(l.materialId)!;
       const value = l.varianceQty && l.unitCost ? brl(Number(l.varianceQty.toString()) * Number(l.unitCost.toString())) : '—';
       return [locs.get(l.locationId) ?? '—', m.code, m.shortDescription, num(l.systemQty), l.finalQty ? num(l.finalQty) : '—', l.varianceQty ? num(l.varianceQty) : '0', l.status, l.reason ?? '—', ...(canCost ? [value] : [])];

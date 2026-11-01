@@ -85,7 +85,7 @@ describe('SubmitCountDto — quantidade contada', () => {
     expect(await check(SubmitCountDto, { ...base, quantity: 1, notes: 'a'.repeat(300) })).toEqual([]);
     expect(await check(SubmitCountDto, { ...base, quantity: 1, notes: 'a'.repeat(301) })).toContain('notes');
   });
-  it.fails('BUG: quantidade vazia ("") não deve ser aceita como contagem zero', async () => {
+  it('BUG: quantidade vazia ("") não deve ser aceita como contagem zero', async () => {
     // @Type(() => Number) transforma "" em 0 e o DTO aceita: um campo esquecido vira contagem zero.
     expect(await check(SubmitCountDto, { ...base, quantity: '' })).toContain('quantity');
   });

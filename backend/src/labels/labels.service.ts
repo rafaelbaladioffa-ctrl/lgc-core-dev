@@ -71,9 +71,9 @@ export class LabelsService {
     }
   }
 
-  private zpl(l: Label) {
+  private zpl(l: Label, copies: number) {
     const rows = [l.title, ...l.lines].map((t, i) => `^FO30,${30 + i * 36}^A0N,28,28^FD${zplSafe(t)}^FS`).join('');
-    return `^XA^CI28${rows}^FO420,30^BQN,2,5^FDLA,${zplSafe(l.code)}^FS^FO30,${40 + (l.lines.length + 1) * 36}^BCN,60,Y,N,N^FD${zplSafe(l.code)}^FS^XZ`;
+    return `^XA^CI28${rows}^FO420,30^BQN,2,5^FDLA,${zplSafe(l.code)}^FS^FO30,${40 + (l.lines.length + 1) * 36}^BCN,60,Y,N,N^FD${zplSafe(l.code)}^FS^PQ${copies}^XZ`;
   }
 
   async print(dto: PrintLabelDto, user: AuthenticatedUser) {
@@ -84,6 +84,6 @@ export class LabelsService {
     const copies = dto.copies ?? 1;
     const format = dto.format ?? 'json';
     const rec = await this.prisma.labelPrint.create({ data: { kind: dto.kind, refId: key, copies, format, isReprint: previous > 0, reason: dto.reason, printedBy: user.userId } });
-    return { printId: rec.id, isReprint: rec.isReprint, copies, ...label, ...(format === 'zpl' ? { zpl: this.zpl(label) } : {}) };
+    return { printId: rec.id, isReprint: rec.isReprint, copies, ...label, ...(format === 'zpl' ? { zpl: this.zpl(label, copies) } : {}) };
   }
 }

@@ -83,7 +83,7 @@ describe('geração ZPL', () => {
 
   // BUG: o ZPL gerado ignora `copies` (falta ^PQn). Impressora de etiquetas imprime 1 cópia mesmo com copies=3.
   // Passos: POST /labels/print {kind: LOCATION, format: zpl, copies: 3} → resposta diz copies 3, mas o ZPL não tem ^PQ3.
-  it.fails('o ZPL respeita o número de cópias pedido (^PQ)', async () => {
+  it('o ZPL respeita o número de cópias pedido (^PQ)', async () => {
     const prisma = {
       location: { findUnique: vi.fn().mockResolvedValue({ id: U, code: 'A-01', level: 'AREA', status: 'ATIVO', warehouseId: 'w', warehouse: { code: 'W1', name: 'Central' } }) },
       labelPrint: { count: vi.fn().mockResolvedValue(0), create: vi.fn().mockResolvedValue({ id: 'p-1', isReprint: false }) },

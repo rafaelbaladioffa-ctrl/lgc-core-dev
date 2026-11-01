@@ -77,7 +77,7 @@ describe('lista de separação', () => {
 
   // BUG: localeCompare ordena texto, não número. Endereços sem zero à esquerda saem fora da ordem de percurso.
   // Passos: 2 itens em A-10 e A-2 → lista de separação mostra A-10 antes de A-2 (percurso errado).
-  it.fails('endereços com dígitos sem zero à esquerda (A-2 e A-10) são ordenados numericamente', async () => {
+  it('endereços com dígitos sem zero à esquerda (A-2 e A-10) são ordenados numericamente', async () => {
     // Ordem física de corredor: A-2 antes de A-10. Ordenação lexicográfica coloca A-10 antes de A-2.
     const items = [
       { locationId: 'l-10', materialId: 'm-1', lotId: null, quantityPlanned: D(1), quantityPicked: D(0) },

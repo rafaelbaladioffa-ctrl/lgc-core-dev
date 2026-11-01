@@ -98,7 +98,7 @@ export class InventoryService {
     if (!['EM_CONTAGEM', 'EM_RECONTAGEM'].includes(c.status)) throw new ConflictException('O inventário não está em contagem.');
     const round = c.status === 'EM_CONTAGEM' ? 1 : 2;
     const lines = await this.prisma.stockCountLine.findMany({
-      where: { countId: id, status: round === 1 ? 'PENDENTE' : 'RECONTAR', ...(round === 2 && { count1By: { not: user.userId } }) },
+      where: { countId: id, status: round === 1 ? 'PENDENTE' : 'RECONTAR', ...(round === 2 && { count1By: { not: user.userId }, count2Qty: null }) },
       select: { id: true, materialId: true, locationId: true, lotId: true, serialId: true, condition: true, ownership: true }, orderBy: [{ locationId: 'asc' }, { materialId: 'asc' }],
     });
     return { id: c.id, code: countCode(c.seq), round, lines };
@@ -127,11 +127,15 @@ export class InventoryService {
 
       if (c.status === 'EM_CONTAGEM') {
         if (line.status !== 'PENDENTE') throw new ConflictException('Esta linha já teve a primeira contagem.');
-        await tx.stockCountLine.update({ where: { id: line.id }, data: { count1Qty: qty, count1By: user.userId, count1At: new Date(), status: 'CONTADO', notes: dto.notes } });
+        // Condição no UPDATE: duas contagens simultâneas da mesma linha — só uma grava.
+        const n = await tx.stockCountLine.updateMany({ where: { id: line.id, status: 'PENDENTE' }, data: { count1Qty: qty, count1By: user.userId, count1At: new Date(), status: 'CONTADO', notes: dto.notes } });
+        if (n.count !== 1) throw new ConflictException('Esta linha já teve a primeira contagem.');
       } else {
         if (line.status !== 'RECONTAR') throw new ConflictException('Esta linha não está marcada para recontagem.');
         if (line.count1By === user.userId) throw new ForbiddenException('Segregação: a recontagem deve ser feita por operador diferente do da primeira contagem.');
-        await tx.stockCountLine.update({ where: { id: line.id }, data: { count2Qty: qty, count2By: user.userId, count2At: new Date(), notes: dto.notes ?? line.notes } });
+        if (line.count2Qty != null) throw new ConflictException('Esta linha já foi recontada.');
+        const n = await tx.stockCountLine.updateMany({ where: { id: line.id, status: 'RECONTAR', count2Qty: null }, data: { count2Qty: qty, count2By: user.userId, count2At: new Date(), notes: dto.notes ?? line.notes } });
+        if (n.count !== 1) throw new ConflictException('Esta linha já foi recontada.');
       }
       return { lineId: line.id, recorded: true }; // sem devolver o saldo do sistema (cega)
     });
@@ -141,7 +145,8 @@ export class InventoryService {
   async closeRound(id: string, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
       const c = await this.load(tx, id, user);
-      const lines = await tx.stockCountLine.findMany({ where: { countId: id } });
+      let lines = await tx.stockCountLine.findMany({ where: { countId: id } });
+      if (!c.frozen) lines = await this.rebaseline(tx, c, lines, c.status === 'EM_CONTAGEM' ? 1 : 2);
 
       if (c.status === 'EM_CONTAGEM') {
         const pending = lines.filter((l) => l.status === 'PENDENTE');
@@ -168,6 +173,24 @@ export class InventoryService {
       }
       throw new ConflictException(`O inventário está em ${c.status} e não tem rodada aberta.`);
     });
+  }
+
+  /**
+   * Contagem sem congelamento: o esperado no instante da contagem é o retrato + movimentos feitos depois dele
+   * e até a contagem (entradas/saídas da própria dimensão). Sem isso, o ajuste desfaria movimentos legítimos.
+   */
+  private async rebaseline(tx: Tx, c: { id: string; createdAt: Date }, lines: StockCountLine[], round: 1 | 2) {
+    const out: StockCountLine[] = [];
+    for (const l of lines) {
+      const at = round === 1 ? l.count1At : l.count2At;
+      if (l.serialId || !at || (round === 2 && l.status !== 'RECONTAR')) { out.push(l); continue; }
+      const dim = { materialId: l.materialId, lotId: l.lotId, ownership: l.ownership, registeredAt: { gt: c.createdAt, lte: at }, correlationId: { not: c.id } };
+      const ins = await tx.stockMovement.aggregate({ where: { ...dim, toLocationId: l.locationId, toCondition: l.condition }, _sum: { quantity: true } });
+      const outs = await tx.stockMovement.aggregate({ where: { ...dim, fromLocationId: l.locationId, fromCondition: l.condition }, _sum: { quantity: true } });
+      const expected = l.systemQty.plus(ins._sum.quantity ?? 0).minus(outs._sum.quantity ?? 0);
+      out.push(expected.equals(l.systemQty) ? l : await tx.stockCountLine.update({ where: { id: l.id }, data: { systemQty: expected } }));
+    }
+    return out;
   }
 
   private async finishCounting(tx: Tx, id: string, warehouseId: string) {
@@ -211,6 +234,17 @@ export class InventoryService {
   // ---------------------------------------------------------------------------------------------
 
   async applyAdjustments(id: string, dto: ApplyAdjustmentsDto, user: AuthenticatedUser) {
+    try {
+      return await this.applyAdjustmentsTx(id, dto, user);
+    } catch (e) {
+      if (e instanceof Error && /stock_balances_(quantity_nonneg|reserved_range)/.test(e.message)) {
+        throw new UnprocessableEntityException(problem('O ajuste deixaria o saldo negativo ou abaixo do reservado; trate as reservas antes de ajustar.', 'INSUFFICIENT_STOCK'));
+      }
+      throw e;
+    }
+  }
+
+  private applyAdjustmentsTx(id: string, dto: ApplyAdjustmentsDto, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
       const c = await this.load(tx, id, user);
       if (c.status !== 'APURADA') throw new ConflictException(`O inventário está em ${c.status}; só inventários apurados podem ser ajustados.`);

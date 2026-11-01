@@ -1,4 +1,4 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsObject, IsOptional, IsString, IsUUID, Max, MaxLength, Min, MinLength, ValidateNested } from 'class-validator';
 import { StockCountStatus, StockCountType } from '@prisma/client';
 
@@ -23,6 +23,7 @@ export class CreateCountDto {
 
 export class SubmitCountDto {
   @IsUUID('all', { message: 'Linha de contagem inválida.' }) lineId!: string;
+  @Transform(({ obj, key, value }) => (obj[key] === '' || obj[key] === null ? undefined : value)) // campo vazio nunca vira contagem zero
   @Type(() => Number) @IsNumber({ maxDecimalPlaces: 6 }, { message: 'Quantidade inválida.' }) @Min(0, { message: 'A quantidade contada não pode ser negativa.' }) quantity!: number;
   @IsOptional() @IsString() @MaxLength(300) notes?: string;
 }

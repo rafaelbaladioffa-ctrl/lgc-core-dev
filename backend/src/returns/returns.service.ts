@@ -35,6 +35,8 @@ export class ReturnsService {
       const loc = await tx.location.findFirst({ where: { id: dto.receivingLocationId, warehouseId: dto.warehouseId } });
       if (!loc || loc.status !== 'ATIVO') throw new UnprocessableEntityException(problem('Endereço de recebimento inexistente, inativo ou de outro almoxarifado.', 'INVALID_LOCATION'));
 
+      // Bloqueia a linha do termo: devoluções simultâneas contra o mesmo termo são serializadas.
+      if (dto.custodyTermId) await tx.$queryRaw`SELECT id FROM custody_terms WHERE id = ${dto.custodyTermId} FOR UPDATE`;
       const term = dto.custodyTermId ? await tx.custodyTerm.findUnique({ where: { id: dto.custodyTermId } }) : null;
       if (dto.custodyTermId && !term) throw new UnprocessableEntityException(problem('Termo de custódia não encontrado.', 'AXIS_REFERENCE_INVALID'));
       if (term && term.status !== 'ATIVO') throw new ConflictException('Este termo de custódia já foi encerrado.');

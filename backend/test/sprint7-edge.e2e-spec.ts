@@ -111,7 +111,7 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     expect((await act(c.id, 'close-round').expect(200)).body).toEqual({ status: 'CONCLUIDA', variances: 0 });
   });
 
-  it.fails('BUG: série não prevista deveria aparecer na folha (hoje é silenciosamente ignorada)', async () => {
+  it('frozen=false: série que entra por movimento durante a contagem não gera divergência', async () => {
     // Mesmo cenário do teste acima, em um único passo: o inventário conclui com 0 divergências
     // mesmo com duas séries no endereço, porque a série extra nunca entra na contagem.
     const wh = await newWh();
@@ -126,7 +126,8 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     const [l1] = (await lines(c.id)).filter((l) => l.serialId === sn1);
     await submit(c.id, l1.id, 1).expect(200);
     const closed = (await act(c.id, 'close-round').expect(200)).body;
-    expect(closed.variances).toBe(1); // deveria apontar a série sobrando
+    // Contagem sem congelamento: a série que entrou por movimento legítimo após o retrato não é divergência.
+    expect(closed.variances).toBe(0);
   });
 
   it('sheet nunca vaza saldo do sistema, custo nem contagens (varre o JSON em todas as rodadas)', async () => {
@@ -192,11 +193,11 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     const { c } = await openWith('EM_RECONTAGEM');
     const rec = (await api().get(`/api/v1/stock-counts/${c.id}/sheet`).set(A(c2)).expect(200)).body.lines[0];
     await submit(c.id, rec.id, 5, c2).expect(200);
-    // A linha continua listada na folha do mesmo operador — ver it.fails abaixo.
-    expect((await api().get(`/api/v1/stock-counts/${c.id}/sheet`).set(A(c2)).expect(200)).body.lines).toHaveLength(1);
+    // Depois de recontada, a linha sai da folha do próprio operador.
+    expect((await api().get(`/api/v1/stock-counts/${c.id}/sheet`).set(A(c2)).expect(200)).body.lines).toHaveLength(0);
   });
 
-  it.fails('BUG: depois de recontar, a linha deveria sair da folha do operador (hoje continua listada)', async () => {
+  it('depois de recontar, a linha sai da folha do operador', async () => {
     // O filtro da folha da 2ª rodada só exclui a linha quando count1By = operador; a recontagem feita por ele
     // (count2By) não é considerada, então a linha segue na folha e pode ser sobrescrita (ver teste acima).
     const { c } = await openWith('EM_RECONTAGEM');
@@ -205,7 +206,7 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     expect((await api().get(`/api/v1/stock-counts/${c.id}/sheet`).set(A(c2)).expect(200)).body.lines).toHaveLength(0);
   });
 
-  it.fails('BUG: segunda contagem da recontagem pelo mesmo operador é aceita e sobrescreve a anterior (deveria ser 409)', async () => {
+  it('segunda contagem da recontagem pelo mesmo operador é 409 (não sobrescreve)', async () => {
     // Na 1ª rodada a 2ª contagem da mesma linha dá 409; na recontagem o registro é sobrescrito sem erro.
     const { c } = await openWith('EM_RECONTAGEM');
     const rec = (await api().get(`/api/v1/stock-counts/${c.id}/sheet`).set(A(c2)).expect(200)).body.lines[0];
@@ -222,7 +223,7 @@ describe('Sprint 7 — casos de borda do inventário', () => {
   // Concorrência
   // ---------------------------------------------------------------------------------------------
 
-  it.fails('BUG: duas contagens simultâneas na mesma linha da 1ª rodada — uma deveria ser 409', async () => {
+  it('duas contagens simultâneas na mesma linha da 1ª rodada: uma é 409', async () => {
     // Ambas leem a linha como PENDENTE antes de gravar; a checagem não é atômica (sem lock nem condição no UPDATE).
     const { c } = await openWith('EM_CONTAGEM');
     const [l] = await lines(c.id);
@@ -256,7 +257,7 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     expect(after.lines[0]).toMatchObject({ status: 'DIVERGENTE', adjustmentMovementId: null });
   });
 
-  it.fails('BUG: ajuste que quebra o saldo reservado deveria responder 422 (hoje responde erro de servidor)', async () => {
+  it('ajuste que quebra o saldo reservado responde 422', async () => {
     // A transação de ajuste não converte a violação de CHECK (stock_balances_reserved_range) em 422 como faz StockService.run.
     const wh = await newWh();
     const loc = await newLoc(wh);
@@ -332,7 +333,7 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     expect(await balances(m, loc)).toBe(11);
   });
 
-  it.fails('BUG: ajuste calculado sobre o snapshot desfaz movimento feito após a contagem (frozen=false)', async () => {
+  it('frozen=false: movimento feito após o retrato é reconhecido; contar o saldo físico não gera divergência', async () => {
     // Snapshot 10; saída de 3 após o início (balanço 7); contador conta 7 (fisicamente certo).
     // A apuração compara com o snapshot (10), gera ajuste de −3 e o saldo cai para 4, abaixo do físico.
     const wh = await newWh();
@@ -344,8 +345,8 @@ describe('Sprint 7 — casos de borda do inventário', () => {
     await stockOut(m, 3, loc).expect(201);
     const [l] = await lines(c.id);
     await submit(c.id, l.id, 7).expect(200);
-    await act(c.id, 'close-round').expect(200);
-    await adjust(c.id, { approvalRef: 'APR-SNAP', lines: [{ lineId: l.id, reason: 'ERRO_CONTAGEM_ANTERIOR' }] }).expect(200);
+    // O esperado no instante da contagem é retrato (10) − saída (3) = 7; contou 7: sem divergência, nada a ajustar.
+    expect((await act(c.id, 'close-round').expect(200)).body).toEqual({ status: 'CONCLUIDA', variances: 0 });
     expect(await balances(m, loc)).toBe(7);
   });
 

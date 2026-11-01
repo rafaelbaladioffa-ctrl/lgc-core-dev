@@ -238,7 +238,7 @@ describe('Sprint 6 — casos de borda', () => {
     // returnedQty = 0, ambas passam na checagem e ambas gravam returnedQty = 1: duas devoluções de 1 unidade
     // contra um termo de 1 unidade, e o estoque em quarentena fica com 2.
     // Passos: termo de 1 pendente → POST /returns ×2 em paralelo com custodyTermId → ambas 201.
-    it.fails('duas devoluções simultâneas contra o mesmo termo pendente de 1 unidade: só uma passa', async () => {
+    it('duas devoluções simultâneas contra o mesmo termo pendente de 1 unidade: só uma passa', async () => {
       const m = await mk('CONC', { returnable: true });
       await stockIn(m, 3);
       const f = await flow(`S6E-CONC-${sfx}`, 1);
