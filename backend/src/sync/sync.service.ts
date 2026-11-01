@@ -46,7 +46,10 @@ export interface OpResult {
   result?: unknown;
 }
 
-const hash = (type: string, payload: unknown) => createHash('sha256').update(type + JSON.stringify(payload, Object.keys((payload as object) ?? {}).sort())).digest('hex');
+/** JSON estável (chaves ordenadas em qualquer nível): mudar só um campo aninhado muda o hash. */
+const stable = (v: unknown): string =>
+  Array.isArray(v) ? `[${v.map(stable).join(',')}]` : v && typeof v === 'object' ? `{${Object.keys(v as object).sort().map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`).join(',')}}` : JSON.stringify(v) ?? 'null';
+const hash = (type: string, payload: unknown) => createHash('sha256').update(`${type}|${stable(payload)}`).digest('hex');
 
 /**
  * Sincronização do PWA (15.2, 11.17): cada operação carrega um opId gerado no dispositivo; repetir o envio
@@ -123,12 +126,16 @@ export class SyncService {
   private async record(deviceId: string, op: OfflineOpDto, payloadHash: string, user: AuthenticatedUser, status: 'APLICADA' | 'CONFLITO' | 'REJEITADA', message?: string, code?: string, result?: unknown): Promise<OpResult> {
     // Serializa uma vez: o que volta agora e o que fica guardado para reenvios são idênticos.
     const plain = status === 'APLICADA' ? (JSON.parse(JSON.stringify(result ?? null)) as Prisma.InputJsonValue) : undefined;
-    try {
-      await this.prisma.offlineOperation.create({ data: { deviceId, opId: op.opId, type: op.type, payloadHash, userId: user.userId, status, message, code, result: plain === null ? undefined : plain, clientAt: new Date(op.clientAt) } });
-    } catch (e) {
-      // Envio paralelo da mesma operação: a outra entrega venceu; devolve o que ficou gravado.
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return { opId: op.opId, status: 'DUPLICADA' };
-      throw e;
+    // O registro é o que protege o reenvio: tenta de novo antes de desistir, para a ação já aplicada não ser repetida.
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await this.prisma.offlineOperation.create({ data: { deviceId, opId: op.opId, type: op.type, payloadHash, userId: user.userId, status, message, code, result: plain === null ? undefined : plain, clientAt: new Date(op.clientAt) } });
+        break;
+      } catch (e) {
+        if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return { opId: op.opId, status: 'DUPLICADA' };
+        if (attempt >= 3) throw e;
+        await new Promise((r) => setTimeout(r, 50 * attempt));
+      }
     }
     return { opId: op.opId, status, message, code, result: plain ?? undefined };
   }

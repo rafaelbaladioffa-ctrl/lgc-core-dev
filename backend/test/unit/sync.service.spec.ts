@@ -87,7 +87,7 @@ describe('SyncService.batch — classificação de resultados', () => {
 
   it('falha ao gravar o registro (não P2002) vira ERRO, nunca APLICADA', async () => {
     const offline = store();
-    offline.create.mockRejectedValueOnce(new Error('disk full'));
+    offline.create.mockRejectedValue(new Error('disk full')); // persistente: esgota as tentativas de gravação
     const { batch } = build({ offline });
     expect((await batch([op('picking.start', { id: TASK })])).results[0].status).toBe('ERRO');
   });
@@ -96,7 +96,7 @@ describe('SyncService.batch — classificação de resultados', () => {
   // operação e só a gravação em offline_operations falha, o dispositivo recebe ERRO, reenvia e a ação roda de novo.
   // Passos: 1) picking.scan aplicado, mas o create de offline_operations falha uma vez; 2) reenviar o mesmo opId.
   // Esperado: scan chamado uma vez. Obtido: chamado duas vezes (quantidade contada em dobro).
-  it.fails('registro que falha após a aplicação não faz o reenvio aplicar a ação de novo', async () => {
+  it('registro que falha após a aplicação não faz o reenvio aplicar a ação de novo', async () => {
     const offline = store();
     const { batch, shipping } = build({ offline });
     offline.create.mockRejectedValueOnce(new Error('timeout ao gravar'));
@@ -161,7 +161,7 @@ describe('SyncService.batch — idempotência e lote', () => {
   // que perdem as chaves não listadas no topo, então payloads que diferem só dentro de um objeto aninhado têm o mesmo hash.
   // Passos: 1) enviar opId X com payload { id, filtro: { a: 1 } } → aplicada; 2) reenviar X com { id, filtro: { a: 2 } }.
   // Esperado: REJEITADA (OP_ID_REUTILIZADO). Obtido: DUPLICADA.
-  it.fails('opId reutilizado com payload que muda só dentro de objeto aninhado é rejeitado', async () => {
+  it('opId reutilizado com payload que muda só dentro de objeto aninhado é rejeitado', async () => {
     const { batch } = build();
     await batch([op('count.submit', { id: TASK, filtro: { a: 1 } })]);
     const [r] = (await batch([op('count.submit', { id: TASK, filtro: { a: 2 } })])).results;

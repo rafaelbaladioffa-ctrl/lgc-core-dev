@@ -28,7 +28,7 @@ describe('parseQty — milhar, notação científica e listas', () => {
   });
   // Bug: quando há vírgula, todos os pontos são removidos como milhar; em "1,000.5" o ponto some e a vírgula vira decimal.
   // Passos: digitar "1,000.5" no campo de quantidade. Esperado: null ou 1000.5. Obtido: 1.0005.
-  it.fails('formato americano "1,000.5" não pode ser lido como 1.0005', () => {
+  it('formato americano "1,000.5" não pode ser lido como 1.0005', () => {
     expect(parseQty('1,000.5')).not.toBe(1.0005);
   });
 });

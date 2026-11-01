@@ -67,6 +67,11 @@ export class ShippingService {
   // Separação
   // ---------------------------------------------------------------------------------------------
 
+  /** Serializa operações concorrentes sobre a mesma tarefa (dois dispositivos do mesmo usuário, p. ex.). */
+  private lockTask(tx: Tx, id: string) {
+    return tx.$queryRaw`SELECT id FROM picking_tasks WHERE id = ${id} FOR UPDATE`;
+  }
+
   private async loadTask(tx: Tx | PrismaService, id: string) {
     const task = await tx.pickingTask.findUnique({ where: { id }, include: { items: true } });
     if (!task) throw new NotFoundException('Tarefa de separação não encontrada.');
@@ -90,6 +95,7 @@ export class ShippingService {
 
   async start(id: string, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
+      await this.lockTask(tx, id);
       const task = await this.loadTask(tx, id);
       await this.rbac.assertWarehouseAccess(user, task.warehouseId);
       if (task.status === 'EM_SEPARACAO' && task.pickedBy === user.userId) return { ...task, code: pad('SEP', task.seq) };
@@ -103,6 +109,7 @@ export class ShippingService {
 
   async scan(id: string, dto: ScanDto, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
+      await this.lockTask(tx, id);
       const task = await this.loadTask(tx, id);
       await this.rbac.assertWarehouseAccess(user, task.warehouseId);
       if (task.status !== 'EM_SEPARACAO') throw new ConflictException('A tarefa não está em separação.');
@@ -157,6 +164,7 @@ export class ShippingService {
 
   async complete(id: string, user: AuthenticatedUser) {
     return this.prisma.$transaction(async (tx) => {
+      await this.lockTask(tx, id);
       const task = await this.loadTask(tx, id);
       await this.rbac.assertWarehouseAccess(user, task.warehouseId);
       if (task.status !== 'EM_SEPARACAO') throw new ConflictException('A tarefa não está em separação.');

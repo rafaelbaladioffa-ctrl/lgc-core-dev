@@ -130,7 +130,7 @@ describe('Sprint 9 (bordas) — sincronização offline', () => {
   // Passos: 1) planejado 4; 2) dois dispositivos do mesmo usuário enviam scan de 3 ao mesmo tempo.
   // Esperado: só um scan aplicado (o segundo excede o restante de 1). Obtido: as duas APLICADA, com quantityPicked = 3
   // (uma das contagens se perde), ou seja, 6 separados fisicamente para 4 planejados e o registro mostra 3.
-  it.fails('dois dispositivos do mesmo usuário na mesma tarefa nunca passam do planejado (sem lost update)', async () => {
+  it('dois dispositivos do mesmo usuário na mesma tarefa nunca passam do planejado (sem lost update)', async () => {
     const { m, task, item } = await readyTask(4);
     await sync([op('picking.start', { id: task.id })]).expect(200);
     const rs = await Promise.all([
