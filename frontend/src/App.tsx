@@ -7,13 +7,17 @@ import { fmtDateTime, fmtQty, parseQty } from './lib/format';
 import { OfflineQueue, type OpType, type QueueOp } from './lib/queue';
 import { Catalog } from './screens/Catalog';
 import { Stock } from './screens/Stock';
+import { Receiving } from './screens/Receiving';
+import { Transfers } from './screens/Transfers';
 import { cameraSupported, startCamera } from './lib/scanner';
 
-type Tab = 'cat' | 'est' | 'sep' | 'arm' | 'inv' | 'sync';
+type Tab = 'cat' | 'est' | 'rec' | 'trf' | 'sep' | 'arm' | 'inv' | 'sync';
 /** Itens do menu lateral, com a permissão local que libera cada tela (mesmo padrão do shell do Axis). */
 const NAV_ITEMS: Array<{ key: Tab; label: string; icon: string; permission?: string }> = [
   { key: 'cat', label: 'Catálogo', icon: '◈', permission: 'material:read' },
   { key: 'est', label: 'Estoque', icon: '▦', permission: 'stock:read' },
+  { key: 'rec', label: 'Recebimento', icon: '⇩', permission: 'receipt:execute' },
+  { key: 'trf', label: 'Transferências', icon: '⇄', permission: 'transfer:request' },
   { key: 'sep', label: 'Separação', icon: '⚑', permission: 'picking:execute' },
   { key: 'arm', label: 'Armazenagem', icon: '▣', permission: 'receipt:execute' },
   { key: 'inv', label: 'Inventário', icon: '☆', permission: 'stockcount:count' },
@@ -216,6 +220,8 @@ export function App() {
           {msg && <p className="notice" role="status">{msg}</p>}
           {tab === 'cat' && <Catalog warehouseId={settings.warehouseId} />}
           {tab === 'est' && settings.warehouseId && <Stock warehouseId={settings.warehouseId} />}
+          {tab === 'rec' && <Receiving warehouseId={settings.warehouseId} />}
+          {tab === 'trf' && <Transfers warehouseId={settings.warehouseId} />}
           {!boot && (tab === 'sep' || tab === 'arm' || tab === 'inv') && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}
           {boot && tab === 'sep' && <Picking boot={boot} ops={ops} enqueue={enqueue} />}
           {boot && tab === 'arm' && <Putaway boot={boot} ops={ops} enqueue={enqueue} />}
@@ -224,7 +230,7 @@ export function App() {
         </main>
       </div>
       <nav className="tabs">
-        {NAV_ITEMS.filter((i) => i.key !== 'cat' && i.key !== 'est').map((i) => (
+        {NAV_ITEMS.filter((i) => !['cat', 'est', 'rec', 'trf'].includes(i.key)).map((i) => (
           <button key={i.key} className={tab === i.key ? 'tab active' : 'tab'} onClick={() => setTab(i.key)}>{i.label}</button>
         ))}
       </nav>
