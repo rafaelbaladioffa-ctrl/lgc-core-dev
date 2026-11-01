@@ -15,7 +15,7 @@ const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().s
 describe('Sprint 3 — disponibilidade, ordens de atendimento e reservas', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor']);
   const admin = tokenFor(['admin']);
   const A = (t: string) => ({ Authorization: `Bearer ${t}` });

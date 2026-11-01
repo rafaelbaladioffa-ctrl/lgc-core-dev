@@ -14,7 +14,7 @@ const sign = (body: string, secret = WH_SECRET) => 'sha256=' + createHmac('sha25
 describe('Sprint 2 — ledger, saldos, lotes, séries e webhook', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor']); // stock:post, stock:adjust, stock:reverse, lot:write, serial:write, access_all
   const admin = tokenFor(['admin']); // material:write
   const colab = tokenFor(['colaborador']);

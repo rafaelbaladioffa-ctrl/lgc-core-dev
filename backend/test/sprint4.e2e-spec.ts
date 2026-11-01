@@ -12,7 +12,7 @@ const tokenFor = (roles: string[], sub = 'u-' + roles.join('-')) => new JwtServi
 describe('Sprint 4 — separação, embalagem, expedição e entrega', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor']);
   const admin = tokenFor(['admin']);
   const picker = tokenFor(['tecnico'], `picker-${sfx}`);

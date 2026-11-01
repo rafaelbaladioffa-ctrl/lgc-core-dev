@@ -13,7 +13,7 @@ const tokenFor = (roles: string[], extra: Record<string, unknown> = {}, secret =
 describe('Sprint 1 — SSO + RBAC + catálogo', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const suffix = Date.now().toString(36).toUpperCase();
+  const suffix = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
 
   beforeAll(async () => {
     const mod = await Test.createTestingModule({ imports: [AppModule] }).compile();

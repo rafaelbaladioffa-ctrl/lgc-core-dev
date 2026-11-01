@@ -18,7 +18,7 @@ const tokenFor = (roles: unknown, extra: Record<string, unknown> = {}, secret = 
 describe('Sprint 1 — casos de borda', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const suffix = Date.now().toString(36).toUpperCase();
+  const suffix = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const admin = () => tokenFor(['admin']);
   const gestor = () => tokenFor(['gestor']);
   const colaborador = () => tokenFor(['colaborador']);

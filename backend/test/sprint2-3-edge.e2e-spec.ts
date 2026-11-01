@@ -20,7 +20,7 @@ const HOUR = 3_600_000;
 describe('Sprints 2 e 3 — casos de borda extras', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor']);
   const admin = tokenFor(['admin']);
   const tecnico = tokenFor(['tecnico'], 'u-edge23-tecnico');

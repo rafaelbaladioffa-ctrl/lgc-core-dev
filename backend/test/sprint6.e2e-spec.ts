@@ -12,7 +12,7 @@ const tokenFor = (roles: string[], sub: string) => new JwtService({ secret: SECR
 describe('Sprint 6 — devoluções, custódia, etiquetas e documentos', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor'], 'gestor-s6');
   const admin = tokenFor(['admin'], 'admin-s6');
   const rec = tokenFor(['tecnico'], `rec6-${sfx}`);

@@ -56,7 +56,6 @@ export class InventoryService {
         ...(dto.type === 'ROTATIVO_ABC' && { material: { criticality: scope.criticality } }),
       };
       let balances = await tx.stockBalance.findMany({ where, include: { material: { select: { averageCost: true, serialControlled: true } } }, orderBy: [{ locationId: 'asc' }, { materialId: 'asc' }] });
-      if (dto.type === 'AMOSTRAGEM') balances = [...balances].sort(() => Math.random() - 0.5).slice(0, scope.sampleSize);
       if (balances.length === 0) throw new UnprocessableEntityException('O escopo informado não possui saldo para inventariar.');
 
       // Um inventário ativo por endereço: evita contagens concorrentes sobre o mesmo saldo.
@@ -73,8 +72,10 @@ export class InventoryService {
           lines.push({ countId: count.id, materialId: b.materialId, locationId: b.locationId, lotId: b.lotId, condition: b.condition, ownership: b.ownership, systemQty: b.quantity, unitCost: b.material.averageCost });
         }
       }
-      await tx.stockCountLine.createMany({ data: lines });
-      return { ...count, code: countCode(count.seq), lines: lines.length };
+      // Amostragem limita LINHAS (não saldos): um saldo seriado gera uma linha por série.
+      const picked = dto.type === 'AMOSTRAGEM' ? [...lines].sort(() => Math.random() - 0.5).slice(0, scope.sampleSize) : lines;
+      await tx.stockCountLine.createMany({ data: picked });
+      return { ...count, code: countCode(count.seq), lines: picked.length };
     });
   }
 
@@ -213,7 +214,7 @@ export class InventoryService {
     return this.prisma.$transaction(async (tx) => {
       const c = await this.load(tx, id, user);
       if (c.status !== 'APURADA') throw new ConflictException(`O inventário está em ${c.status}; só inventários apurados podem ser ajustados.`);
-      const lines = await tx.stockCountLine.findMany({ where: { countId: id, status: 'DIVERGENTE' } });
+      const lines = await tx.stockCountLine.findMany({ where: { countId: id, status: 'DIVERGENTE' }, orderBy: [{ locationId: 'asc' }, { materialId: 'asc' }, { id: 'asc' }] });
       const given = new Map(dto.lines.map((l) => [l.lineId, l]));
       if (given.size !== dto.lines.length) throw new BadRequestException('Linhas repetidas.');
       const missing = lines.filter((l) => !given.has(l.id));

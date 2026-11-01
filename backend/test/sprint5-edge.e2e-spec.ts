@@ -15,7 +15,7 @@ const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().s
 describe('Sprint 5 — casos de borda', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor'], `gestor-s5e-${sfx}`);
   const admin = tokenFor(['admin'], `admin-s5e-${sfx}`);
   const rec = tokenFor(['tecnico'], `rec-s5e-${sfx}`);

@@ -12,7 +12,7 @@ const tokenFor = (roles: string[], sub: string) => new JwtService({ secret: SECR
 describe('Sprint 7 — inventário: contagem cega, recontagem e ajuste com aprovação', () => {
   let app: INestApplication;
   let prisma: PrismaService;
-  const sfx = Date.now().toString(36).toUpperCase();
+  const sfx = (Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).toUpperCase();
   const gestor = tokenFor(['gestor'], 'gestor-s7');
   const admin = tokenFor(['admin'], 'admin-s7');
   const c1 = tokenFor(['tecnico'], `cnt1-${sfx}`);
@@ -156,7 +156,7 @@ describe('Sprint 7 — inventário: contagem cega, recontagem e ajuste com aprov
     const mv = await prisma.stockMovement.findMany({ where: { correlationId: cnt.id }, orderBy: { seq: 'asc' } });
     expect(mv.map((x) => x.type)).toEqual(['AJUSTE_NEGATIVO', 'AJUSTE_NEGATIVO']);
     expect(mv.every((x) => x.axisApprovalRef === 'APR-S7' && x.logisticsDocumentRef === cnt.code)).toBe(true);
-    expect(mv[0].reason).toMatch(/PERDA — Quebra no manuseio/);
+    expect(mv.map((x) => x.reason).join('|')).toMatch(/PERDA — Quebra no manuseio/); // a ordem de aplicação entre linhas não é contrato
     await adj({ approvalRef: 'APR-S7', lines: [{ lineId: la.id, reason: 'PERDA' }, { lineId: l2.id, reason: 'PERDA' }] }).expect(409);
     await stockIn(a, 1, loc).expect(201); // descongelado
   });

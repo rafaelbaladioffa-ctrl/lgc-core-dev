@@ -26,6 +26,7 @@ function build(rbacWarehouses: string[] | 'ALL' = 'ALL') {
   const tx = {
     material: { findUnique: vi.fn() },
     location: { findMany: vi.fn().mockResolvedValue([]) },
+    stockCountLine: { count: vi.fn().mockResolvedValue(0) }, // congelamento por inventário
     lot: { findUnique: vi.fn() },
     serialNumber: { findUnique: vi.fn(), updateMany: vi.fn() },
     stockBalance: { updateMany: vi.fn().mockResolvedValue({ count: 1 }), upsert: vi.fn().mockResolvedValue({}) },
