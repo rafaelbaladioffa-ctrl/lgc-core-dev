@@ -37,6 +37,7 @@ import {
 } from './dto.js';
 import { extractFields, toSections } from '../request-processes/forms/form-schema.js';
 import { validateFormValues } from '../request-processes/forms/form-validator.js';
+import { evaluateCondition } from '../request-processes/forms/condition-evaluator.js';
 
 type Tx = Prisma.TransactionClient;
 const snapshotCalendar = {
@@ -868,6 +869,185 @@ export class RequestRuntimeService {
       };
     });
   }
+  // ─── P03: graph-aware workflow advancement ───────────────────────────────
+  private async concludeInstance(
+    tx: Tx,
+    ctx: { instanceId: string; requestId: string; now: Date },
+  ): Promise<{ status: string; nextActivityIds: string[]; gatewayEvents: Array<{ type: string; summary: Record<string, unknown> }> }> {
+    await tx.processInstance.update({ where: { id: ctx.instanceId }, data: { state: 'completed', completedAt: ctx.now } });
+    await tx.request.update({ where: { id: ctx.requestId }, data: { status: 'concluida', completedAt: ctx.now } });
+    await this.stopClocks(tx, ctx.requestId, ctx.now, 'resolution');
+    return { status: 'concluida', nextActivityIds: [], gatewayEvents: [] };
+  }
+
+  private async createHumanActivity(
+    tx: Tx,
+    node: { id: string; phase: string; queueId?: string },
+    ctx: { instanceId: string; requestId: string; cycle: number; requesterId: string; beneficiaryId: string },
+  ): Promise<string> {
+    const q = node.queueId
+      ? await tx.queue.findUnique({
+          where: { id: node.queueId },
+          include: {
+            bpmMembers: {
+              where: { active: true },
+              include: { collaborator: { include: { user: true } } },
+            },
+          },
+        })
+      : null;
+    const eligible =
+      q?.bpmMembers.filter(
+        (m: any) =>
+          m.role === 'member' &&
+          m.collaboratorId !== ctx.requesterId &&
+          m.collaboratorId !== ctx.beneficiaryId &&
+          m.collaborator.status === 'ativo' &&
+          m.collaborator.user?.status === 'active',
+      ) ?? [];
+    const activationKey = `${ctx.cycle}:${node.id}`;
+    const token = await tx.executionToken.create({
+      data: { instanceId: ctx.instanceId, nodeId: node.id, activationKey },
+    });
+    const activity = await tx.activityInstance.create({
+      data: {
+        instanceId: ctx.instanceId,
+        tokenId: token.id,
+        nodeId: node.id,
+        activationKey,
+        phase: node.phase as any,
+        queueId: q?.id,
+        candidates: {
+          create: eligible.map((m: any) => ({ collaboratorId: m.collaboratorId, sourceResolver: 'queueMembers' })),
+        },
+      },
+    });
+    if (!eligible.length)
+      await tx.requestRuntimeIncident.create({
+        data: {
+          requestId: ctx.requestId,
+          instanceId: ctx.instanceId,
+          activityId: activity.id,
+          type: 'NO_ELIGIBLE_ASSIGNEE',
+          safeDetails: { message: 'Aguardando definição de responsável' },
+        },
+      });
+    return activity.id;
+  }
+
+  private async enterNode(
+    tx: Tx,
+    nodeId: string,
+    fromNodeId: string,
+    fromPhase: string,
+    nodes: any[],
+    edges: any[],
+    fields: Record<string, unknown>,
+    ctx: { instanceId: string; requestId: string; cycle: number; requesterId: string; beneficiaryId: string; now: Date },
+    gatewayEvents: Array<{ type: string; summary: Record<string, unknown> }>,
+  ): Promise<{ status: string; nextActivityIds: string[]; gatewayEvents: Array<{ type: string; summary: Record<string, unknown> }> }> {
+    const node = nodes.find((n: any) => n.id === nodeId);
+    if (!node || node.type === 'end') {
+      const r = await this.concludeInstance(tx, ctx);
+      return { ...r, gatewayEvents };
+    }
+
+    if (node.type === 'human') {
+      const actId = await this.createHumanActivity(tx, node, ctx);
+      const status = (statusByPhase as any)[node.phase] ?? 'em_atendimento';
+      if (fromPhase === 'triage' && node.phase === 'execution') {
+        await this.stopClocks(tx, ctx.requestId, ctx.now, 'first_response');
+        await tx.request.update({
+          where: { id: ctx.requestId },
+          data: { status, queueId: node.queueId ?? null, assigneeId: null, firstResponseAt: ctx.now },
+        });
+      } else {
+        await tx.request.update({ where: { id: ctx.requestId }, data: { status } });
+      }
+      return { status, nextActivityIds: [actId], gatewayEvents };
+    }
+
+    if (node.type === 'gateway_and') {
+      const incoming = edges.filter((e: any) => e.to === nodeId);
+      if (incoming.length > 1) {
+        // JOIN: check if all incoming branches have completed
+        const branchNodeIds = incoming.map((e: any) => e.from);
+        const completedBranches = await tx.activityInstance.findMany({
+          where: { instanceId: ctx.instanceId, nodeId: { in: branchNodeIds }, state: 'completed' },
+          select: { nodeId: true },
+          distinct: ['nodeId'],
+        });
+        const doneSet = new Set(completedBranches.map((a: any) => a.nodeId));
+        doneSet.add(fromNodeId);
+        if (doneSet.size < branchNodeIds.length) {
+          await tx.request.update({ where: { id: ctx.requestId }, data: { status: 'em_atendimento' } });
+          return { status: 'em_atendimento', nextActivityIds: [], gatewayEvents };
+        }
+        gatewayEvents.push({ type: 'gateway.joined', summary: { nodeId } });
+        const joinOut = edges.filter((e: any) => e.from === nodeId);
+        if (!joinOut.length) {
+          const r = await this.concludeInstance(tx, ctx);
+          return { ...r, gatewayEvents };
+        }
+        return this.enterNode(tx, joinOut[0].to, nodeId, fromPhase, nodes, edges, fields, ctx, gatewayEvents);
+      }
+      // SPLIT: create parallel activities for each outgoing branch
+      const splitOut = edges.filter((e: any) => e.from === nodeId);
+      const actIds: string[] = [];
+      for (const be of splitOut) {
+        const branchNode = nodes.find((n: any) => n.id === be.to);
+        if (branchNode?.type === 'human')
+          actIds.push(await this.createHumanActivity(tx, branchNode, ctx));
+      }
+      gatewayEvents.push({ type: 'gateway.split', summary: { nodeId, branchCount: actIds.length } });
+      if (fromPhase === 'triage') {
+        await this.stopClocks(tx, ctx.requestId, ctx.now, 'first_response');
+        await tx.request.update({
+          where: { id: ctx.requestId },
+          data: { status: 'em_atendimento', assigneeId: null, firstResponseAt: ctx.now },
+        });
+      } else {
+        await tx.request.update({ where: { id: ctx.requestId }, data: { status: 'em_atendimento' } });
+      }
+      return { status: 'em_atendimento', nextActivityIds: actIds, gatewayEvents };
+    }
+
+    if (node.type === 'gateway_xor') {
+      const conditions = (node.conditions ?? []) as any[];
+      let chosenNodeId: string | null = null;
+      for (const cond of conditions) {
+        if (!cond.condition) { chosenNodeId = cond.targetNodeId; break; }
+        try {
+          if (evaluateCondition(cond.condition, { fields })) { chosenNodeId = cond.targetNodeId; break; }
+        } catch {}
+      }
+      if (!chosenNodeId) throw new BadRequestException('Gateway XOR: nenhuma condição correspondente');
+      gatewayEvents.push({ type: 'gateway.routed', summary: { nodeId, selectedNodeId: chosenNodeId } });
+      return this.enterNode(tx, chosenNodeId, nodeId, fromPhase, nodes, edges, fields, ctx, gatewayEvents);
+    }
+
+    const r = await this.concludeInstance(tx, ctx);
+    return { ...r, gatewayEvents };
+  }
+
+  private async advanceWorkflow(
+    tx: Tx,
+    fromNodeId: string,
+    fromPhase: string,
+    nodes: any[],
+    edges: any[],
+    fields: Record<string, unknown>,
+    ctx: { instanceId: string; requestId: string; cycle: number; requesterId: string; beneficiaryId: string; now: Date },
+  ): Promise<{ status: string; nextActivityIds: string[]; gatewayEvents: Array<{ type: string; summary: Record<string, unknown> }> }> {
+    const outEdges = edges.filter((e: any) => e.from === fromNodeId);
+    if (!outEdges.length) {
+      const r = await this.concludeInstance(tx, ctx);
+      return { ...r, gatewayEvents: [] };
+    }
+    return this.enterNode(tx, outEdges[0].to, fromNodeId, fromPhase, nodes, edges, fields, ctx, []);
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   async complete(
     id: string,
     dto: CompleteActivityDto,
@@ -910,84 +1090,19 @@ export class RequestRuntimeService {
         where: { activityId: id, endedAt: null },
         data: { endedAt: now },
       });
-      let status: string = 'concluida';
-      let nextId: string | undefined;
-      if (a.phase === 'triage') {
-        const d = this.definition(r.categoryVersion);
-        const node = d.nodes.find((n: any) => n.phase === 'execution');
-        const q = await tx.queue.findUnique({
-          where: { id: node.queueId },
-          include: {
-            bpmMembers: {
-              where: { active: true },
-              include: { collaborator: { include: { user: true } } },
-            },
-          },
-        });
-        const eligible =
-          q?.bpmMembers.filter(
-            (m) =>
-              m.role === 'member' &&
-              m.collaboratorId !== r.requesterId &&
-              m.collaboratorId !== r.beneficiaryId &&
-              m.collaborator.status === 'ativo' &&
-              m.collaborator.user?.status === 'active',
-          ) ?? [];
-        const token = await tx.executionToken.create({
-          data: {
-            instanceId: a.instanceId,
-            nodeId: 'execute',
-            activationKey: '1:execute',
-          },
-        });
-        const next = await tx.activityInstance.create({
-          data: {
-            instanceId: a.instanceId,
-            tokenId: token.id,
-            nodeId: 'execute',
-            activationKey: '1:execute',
-            phase: 'execution',
-            queueId: q?.id,
-            candidates: {
-              create: eligible.map((m) => ({
-                collaboratorId: m.collaboratorId,
-                sourceResolver: 'queueMembers',
-              })),
-            },
-          },
-        });
-        nextId = next.id;
-        status = 'em_atendimento';
-        await tx.request.update({
-          where: { id: r.id },
-          data: {
-            status: 'em_atendimento',
-            queueId: q?.id,
-            assigneeId: null,
-            firstResponseAt: now,
-          },
-        });
-        await this.stopClocks(tx, r.id, now, 'first_response');
-        if (!eligible.length)
-          await tx.requestRuntimeIncident.create({
-            data: {
-              requestId: r.id,
-              instanceId: a.instanceId,
-              activityId: next.id,
-              type: 'NO_ELIGIBLE_ASSIGNEE',
-              safeDetails: { message: 'Aguardando definiÃ§Ã£o de responsÃ¡vel' },
-            },
-          });
-      } else {
-        await tx.processInstance.update({
-          where: { id: a.instanceId },
-          data: { state: 'completed', completedAt: now },
-        });
-        await tx.request.update({
-          where: { id: r.id },
-          data: { status: 'concluida', completedAt: now },
-        });
-        await this.stopClocks(tx, r.id, now, 'resolution');
+      const def = a.instance.definitionSnapshot as Record<string, any>;
+      const { status, nextActivityIds, gatewayEvents } = await this.advanceWorkflow(
+        tx,
+        a.nodeId,
+        a.phase,
+        (def.nodes ?? []) as any[],
+        (def.edges ?? []) as any[],
+        (r.formData as Record<string, unknown>) ?? {},
+        { instanceId: a.instanceId, requestId: r.id, cycle: r.currentCycle, requesterId: r.requesterId, beneficiaryId: r.beneficiaryId, now },
+      );
+      const nextId = nextActivityIds[0];
+      for (const ge of gatewayEvents) {
+        await this.event(tx, r.id, a.instanceId, r.currentCycle, ge.type, user, dto.commandId, ge.summary);
       }
       const ev = await this.event(
         tx,
@@ -997,7 +1112,7 @@ export class RequestRuntimeService {
         'activity.completed',
         user,
         dto.commandId,
-        { activityId: id, nextActivityId: nextId },
+        { activityId: id, nextActivityId: nextId, nextActivityIds },
       );
       await tx.requestCommandReceipt.create({
         data: {

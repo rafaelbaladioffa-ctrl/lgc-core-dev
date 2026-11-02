@@ -670,52 +670,91 @@ export class RequestProcessesService {
         path: 'sla',
         message: 'Metas SLA devem estar entre 1 e 120000 minutos',
       });
-    const expectedNodes = {
-      start: 'start',
-      triage: 'human',
-      execute: 'human',
-      end: 'end',
-    };
-    if (
-      nodes.length !== 4 ||
-      nodes.some(
-        (n) =>
-          typeof n.id !== 'string' ||
-          expectedNodes[n.id as keyof typeof expectedNodes] !== n.type,
-      ) ||
-      Object.keys(expectedNodes).some((id) => !nodes.some((n) => n.id === id))
-    )
-      errors.push({
-        path: 'nodes',
-        message: 'P01 exige start, triage, execute e end',
-      });
-    if (
-      nodes
-        .filter((n) => n.type === 'human')
-        .map((n) => n.phase)
-        .sort()
-        .join(',') !== 'execution,triage'
-    )
-      errors.push({
-        path: 'nodes.phase',
-        message: 'P01 exige exatamente triage e execution',
-      });
-    const expectedEdges = [
-      ['start', 'triage'],
-      ['triage', 'execute'],
-      ['execute', 'end'],
-    ];
-    if (
-      edges.length !== 3 ||
-      edges.some(
-        (e, i) =>
-          e.from !== expectedEdges[i]?.[0] || e.to !== expectedEdges[i]?.[1],
+    const hasGateway = nodes.some(
+      (n) => n.type === 'gateway_and' || n.type === 'gateway_xor',
+    );
+    if (!hasGateway) {
+      // P01 strict: exactly start, triage, execute, end in that linear order
+      const expectedNodes = {
+        start: 'start',
+        triage: 'human',
+        execute: 'human',
+        end: 'end',
+      };
+      if (
+        nodes.length !== 4 ||
+        nodes.some(
+          (n) =>
+            typeof n.id !== 'string' ||
+            expectedNodes[n.id as keyof typeof expectedNodes] !== n.type,
+        ) ||
+        Object.keys(expectedNodes).some((id) => !nodes.some((n) => n.id === id))
       )
-    )
-      errors.push({
-        path: 'edges',
-        message: 'P01 exige três arestas lineares',
-      });
+        errors.push({
+          path: 'nodes',
+          message: 'P01 exige start, triage, execute e end',
+        });
+      if (
+        nodes
+          .filter((n) => n.type === 'human')
+          .map((n) => n.phase)
+          .sort()
+          .join(',') !== 'execution,triage'
+      )
+        errors.push({
+          path: 'nodes.phase',
+          message: 'P01 exige exatamente triage e execution',
+        });
+      const expectedEdges = [
+        ['start', 'triage'],
+        ['triage', 'execute'],
+        ['execute', 'end'],
+      ];
+      if (
+        edges.length !== 3 ||
+        edges.some(
+          (e, i) =>
+            e.from !== expectedEdges[i]?.[0] || e.to !== expectedEdges[i]?.[1],
+        )
+      )
+        errors.push({
+          path: 'edges',
+          message: 'P01 exige três arestas lineares',
+        });
+    } else {
+      // P03 relaxed: validate graph structure for gateway-enabled definitions
+      const VALID_TYPES = new Set(['start', 'end', 'human', 'gateway_and', 'gateway_xor']);
+      const nodeIds = new Set<string>();
+      for (const n of nodes) {
+        if (typeof n.id !== 'string' || !n.id)
+          errors.push({ path: 'nodes', message: 'Nó sem id' });
+        else if (nodeIds.has(n.id))
+          errors.push({ path: 'nodes', message: `Nó duplicado: ${n.id}` });
+        else nodeIds.add(n.id as string);
+        if (!VALID_TYPES.has(n.type as string))
+          errors.push({ path: 'nodes', message: `Tipo inválido: ${n.type}` });
+        if (n.type === 'human' && !['triage', 'execution'].includes(n.phase as string))
+          errors.push({ path: 'nodes.phase', message: `Fase inválida em ${n.id}: ${n.phase}` });
+        if ((n.type === 'human') && typeof n.queueId !== 'string')
+          errors.push({ path: 'nodes.queueId', message: `queueId obrigatório em ${n.id}` });
+        if (n.type === 'gateway_xor') {
+          if (!Array.isArray(n.conditions) || (n.conditions as any[]).length === 0)
+            errors.push({ path: 'nodes.conditions', message: `gateway_xor ${n.id} sem conditions` });
+        }
+      }
+      if (!nodes.some((n) => n.type === 'start'))
+        errors.push({ path: 'nodes', message: 'Definição sem nó start' });
+      if (!nodes.some((n) => n.type === 'end'))
+        errors.push({ path: 'nodes', message: 'Definição sem nó end' });
+      if (!nodes.some((n) => n.type === 'human' && n.phase === 'triage'))
+        errors.push({ path: 'nodes', message: 'Definição sem nó triage' });
+      for (const e of edges) {
+        if (typeof e.from !== 'string' || !nodeIds.has(e.from))
+          errors.push({ path: 'edges', message: `Aresta com from inválido: ${e.from}` });
+        if (typeof e.to !== 'string' || !nodeIds.has(e.to))
+          errors.push({ path: 'edges', message: `Aresta com to inválido: ${e.to}` });
+      }
+    }
     if (definition.form !== undefined) {
       const formErrors = validateFormSchema(definition.form, 200);
       for (const e of formErrors) errors.push(e);
