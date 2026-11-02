@@ -131,15 +131,19 @@ export function NewRequestPage() {
     () => [...new Set(purchaseCatalog.filter((item) => !purchaseCategory || item.category === purchaseCategory).map((item) => item.subcategory || 'Sem subcategoria'))].sort(),
     [purchaseCatalog, purchaseCategory],
   );
+  // Um item já adicionado some das três listas (busca, categoria/subcategoria/item): além de não
+  // ter sentido escolhê-lo de novo (vira no-op silencioso — addPurchaseRow ignora duplicata), ele
+  // já está visível na lista de itens adicionados logo abaixo, com seu campo de quantidade.
+  const addedMaterialIds = useMemo(() => new Set(purchaseRows.map((row) => row.materialId)), [purchaseRows]);
   const purchaseItems = useMemo(
-    () => purchaseCatalog.filter((item) => (!purchaseCategory || item.category === purchaseCategory) && (!purchaseSubcategory || (item.subcategory || 'Sem subcategoria') === purchaseSubcategory)),
-    [purchaseCatalog, purchaseCategory, purchaseSubcategory],
+    () => purchaseCatalog.filter((item) => !addedMaterialIds.has(item.id) && (!purchaseCategory || item.category === purchaseCategory) && (!purchaseSubcategory || (item.subcategory || 'Sem subcategoria') === purchaseSubcategory)),
+    [purchaseCatalog, purchaseCategory, purchaseSubcategory, addedMaterialIds],
   );
   const purchaseSearchResults = useMemo(() => {
     const query = purchaseSearch.trim().toLowerCase();
     if (!query) return [];
-    return purchaseCatalog.filter((item) => `${item.code} ${item.shortDescription} ${item.category} ${item.subcategory ?? ''}`.toLowerCase().includes(query)).slice(0, 20);
-  }, [purchaseCatalog, purchaseSearch]);
+    return purchaseCatalog.filter((item) => !addedMaterialIds.has(item.id) && `${item.code} ${item.shortDescription} ${item.category} ${item.subcategory ?? ''}`.toLowerCase().includes(query)).slice(0, 20);
+  }, [purchaseCatalog, purchaseSearch, addedMaterialIds]);
 
   function addPurchaseRow(materialId: string) {
     if (!materialId || purchaseRows.some((row) => row.materialId === materialId)) return;
@@ -283,8 +287,11 @@ export function NewRequestPage() {
               disabled={purchaseCatalog.length === 0}
               aria-label="Pesquisar item da Logística"
             />
+            {/* Não limpa purchaseSearch ao adicionar: a lista continua na tela com o mesmo termo,
+                pra dar pra escolher outro item sem redigitar a busca inteira de novo — o item
+                recém-adicionado já some da lista por addedMaterialIds. */}
             {purchaseSearch.trim() && (
-              <select value="" onChange={(e) => { addPurchaseRow(e.target.value); setPurchaseSearch(''); }} disabled={purchaseSearchResults.length === 0} aria-label="Resultado da pesquisa de item">
+              <select value="" onChange={(e) => addPurchaseRow(e.target.value)} disabled={purchaseSearchResults.length === 0} aria-label="Resultado da pesquisa de item">
                 <option value="">{purchaseSearchResults.length ? 'Selecione o item encontrado' : 'Nenhum item encontrado — use os filtros abaixo'}</option>
                 {purchaseSearchResults.map((item) => <option key={item.id} value={item.id}>{item.category} / {item.subcategory || 'Sem subcategoria'} / {item.shortDescription} — {formatBRL(item.unitPrice)} / {item.unit} — {stockLabel(item.id)}</option>)}
               </select>
