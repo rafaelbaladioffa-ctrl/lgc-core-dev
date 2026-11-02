@@ -1,0 +1,34 @@
+[
+  {
+    "path": "backend/src/request-runtime/request-runtime.service.ts",
+    "sha256": "20FC614FF4F4878ED4CF02A4100E8B7662C6C2756168247F59E2609A669E5005"
+  },
+  {
+    "path": "backend/src/request-runtime/request-runtime.controller.ts",
+    "sha256": "A41E2027382A351BF2A958E984BD23C425E4AFD1BE131F1F873FD561DBB72785"
+  },
+  {
+    "path": "backend/src/request-runtime/p01-regression.spec.ts",
+    "sha256": "020029FB4E879BD5AEDDD9ED5A1A62E2954885CBB56FD6D7AB9CE3A62CB7B03F"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/DynamicForm.tsx",
+    "sha256": "15E8B997B103F61F74CC6AC579CBCB321C64035DA1CF6203D36FE0A5086DDA80"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/BpmPages.tsx",
+    "sha256": "E698CDC6819BDB0386F55123B3F8DCD1C989871F2842362AD24DD9BE8563168F"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/api.ts",
+    "sha256": "008B024D126E1E532FECF1E29F003B8CCEB0E972FBAF34DECBC313697FE8E4F0"
+  },
+  {
+    "path": "frontend/tests/journey.contract.ts",
+    "sha256": "D7CB7BB2BB7CE0E9D3FC634890A6139F4C402C1F6E69FEB2074B5B7D83928581"
+  },
+  {
+    "path": "frontend/package.json",
+    "sha256": "43F7F372BF2562DBD6CA8714F811A65D56D53D3DA735EFF092632964B39AE39C"
+  }
+]

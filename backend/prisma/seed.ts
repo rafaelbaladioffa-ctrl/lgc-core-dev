@@ -156,6 +156,20 @@ const ROLES: Array<{ name: string; description: string; permissions: Array<[stri
     ],
   },
   {
+    name: 'analista_suprimentos',
+    description: 'Analista de Suprimentos — recebe e faz a triagem das requisições encaminhadas ao setor de Suprimentos',
+    permissions: [
+      ['sector', 'read'],
+      ['collaborator', 'read'],
+      ['request_category', 'read'],
+      ['request', 'create'],
+      ['request', 'read'],
+      ['request', 'update'],
+      ['request', 'assign'],
+      ['request', 'comment'],
+    ],
+  },
+  {
     name: 'colaborador',
     description: 'Colaborador padrão — acesso mínimo de leitura e abertura de requisições',
     permissions: [
@@ -286,6 +300,15 @@ async function main() {
     update: {},
     create: { userId: adminUser.id, roleId: adminRole.id },
   });
+
+  // Every sector must have a default service queue. Requests are routed to this
+  // queue before any individual analyst is assigned.
+  const sectors = await prisma.sector.findMany({ select: { id: true, name: true } });
+  for (const sector of sectors) {
+    let queue = await prisma.queue.findFirst({ where: { sectorId: sector.id }, orderBy: { createdAt: 'asc' } });
+    if (!queue) queue = await prisma.queue.create({ data: { sectorId: sector.id, name: `Fila - ${sector.name}` } });
+    await prisma.request.updateMany({ where: { sectorId: sector.id, queueId: null }, data: { queueId: queue.id } });
+  }
 
   if (!process.env.SEED_ADMIN_PASSWORD) {
     console.log('—————————————————————————————————————————');

@@ -88,6 +88,7 @@ model User {
   collaborator   Collaborator? @relation(fields: [collaboratorId], references: [id])
   refreshTokens  RefreshToken[]
   userRoles      UserRole[]
+  bpmGrants      ProcessConfigGrant[]
   auditLogs      AuditLog[]
   sensitiveAccessLogs SensitiveDataAccessLog[]
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -191,6 +192,8 @@ model CostCenter {
   subCostCenters     CostCenter[] @relation("CostCenterHierarchy")
   sectorId  String   @map("sector_id")
   sector    Sector   @relation(fields: [sectorId], references: [id])
+  responsibleCollaboratorId String? @map("responsible_collaborator_id")
+  responsibleCollaborator Collaborator? @relation("CostCenterResponsible", fields: [responsibleCollaboratorId], references: [id])
   projects  Project[]
   collaborators Collaborator[]
   requests  Request[]
@@ -305,6 +308,7 @@ model Collaborator {
 
   user                  User?
   sectorsResponsibleFor Sector[] @relation("SectorResponsible")
+  costCentersResponsibleFor CostCenter[] @relation("CostCenterResponsible")
   certifications        TechnicianCertification[]
   sensitiveAccessLogs   SensitiveDataAccessLog[]
   projectsResponsibleFor Project[]
@@ -314,6 +318,11 @@ model Collaborator {
   requestComments       RequestComment[]
   requestAttachmentsUploaded RequestAttachment[]
   requestApprovals      RequestApproval[] @relation("RequestApprover")
+  bpmQueueMemberships    RequestQueueMember[]
+  bpmCandidates          ActivityCandidate[]
+  bpmAssignments         ActivityInstance[] @relation("BpmAssignee")
+  bpmParticipants        RequestParticipant[]
+  bpmCommentsAuthored    BpmRequestComment[]
   delegationsGiven      Delegation[] @relation("DelegationDelegator")
   delegationsReceived   Delegation[] @relation("DelegationDelegate")
 
@@ -456,6 +465,60 @@ enum SlaMetric {
   solucao
 }
 
+enum RequestExecutionMode {
+  legacy
+  bpm_v1
+}
+enum BpmVersionStatus {
+  draft
+  published
+  retired
+}
+enum BpmQueueMemberRole {
+  member
+  manager
+}
+enum BpmGrantRole {
+  modeler
+  publisher
+  operator
+  auditor
+}
+enum BpmInstanceState {
+  draft
+  running
+  completed
+  closed
+  cancelled
+}
+enum BpmTokenState {
+  active
+  waiting
+  consumed
+  cancelled
+}
+enum BpmActivityKind {
+  human
+}
+enum BpmActivityPhase {
+  triage
+  execution
+}
+enum BpmActivityState {
+  available
+  claimed
+  completed
+  cancelled
+}
+enum BpmIncidentState {
+  open
+  resolved
+}
+enum BpmSlaMetric {
+  first_response
+  resolution
+}
+
 /// Categoria de requisição (REQUISICOES_SPEC.md §13.1 `request_categories`) — o catálogo em si;
 /// o formulário e o workflow ficam na versão publicada (CategoryVersion), nunca aqui.
 model RequestCategory {
@@ -475,7 +538,12 @@ model RequestCategory {
   // §9.2: em vez do workflowSchema fixo da versão, resolve a cadeia de aprovação pela matriz de
   // alçada por valor (ApprovalAuthorityRule) — ver RequestsService.triage.
   useDynamicAuthority Boolean             @default(false) @map("use_dynamic_authority")
+  runtimeEnabled Boolean                  @default(false) @map("runtime_enabled")
+  configRevision Int                      @default(0) @map("config_revision")
+  publishedBpmVersionId String?            @map("published_bpm_version_id")
+  publishedBpmVersion CategoryVersion?     @relation("BpmPublished", fields: [publishedBpmVersionId], references: [id], onDelete: Restrict)
   versions        CategoryVersion[]
+  bpmGrants       ProcessConfigGrant[]
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
 
@@ -498,9 +566,17 @@ model CategoryVersion {
   workflowSchema          Json             @map("workflow_schema")
   slaFirstResponseMinutes Int              @map("sla_first_response_minutes")
   slaResolutionMinutes    Int              @map("sla_resolution_minutes")
-  publishedAt             DateTime         @default(now()) @map("published_at")
+  publishedAt             DateTime?        @default(now()) @map("published_at")
   publishedBy             String?          @map("published_by")
+  bpmStatus               BpmVersionStatus? @map("bpm_status")
+  bpmDefinition           Json?            @map("bpm_definition")
+  bpmContentHash          String?          @map("bpm_content_hash")
+  bpmValidatedHash        String?          @map("bpm_validated_hash")
+  bpmRevision              Int              @default(0) @map("bpm_revision")
+  bpmCalendarSnapshot     Json?            @map("bpm_calendar_snapshot")
   requests                Request[]
+  bpmInstances            ProcessInstance[]
+  currentForCategories    RequestCategory[] @relation("BpmPublished")
   createdAt               DateTime         @default(now()) @map("created_at")
 
   @@unique([categoryId, version])
@@ -515,7 +591,11 @@ model Queue {
   sectorId  String    @map("sector_id")
   sector    Sector    @relation(fields: [sectorId], references: [id])
   name      String
+  active    Boolean   @default(true)
+  revision  Int       @default(0)
   requests  Request[]
+  bpmMembers RequestQueueMember[]
+  bpmActivities ActivityInstance[]
   createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([sectorId])
@@ -545,6 +625,11 @@ model Request {
   priority              RequestPriority         @default(normal)
   confidentiality       RequestConfidentiality  @default(interna)
   status                RequestStatus           @default(rascunho)
+  executionMode         RequestExecutionMode   @default(legacy) @map("execution_mode")
+  currentCycle          Int                   @default(0) @map("current_cycle")
+  requesterSectorId     String?               @map("requester_sector_id")
+  completedAt           DateTime?             @map("completed_at")
+  firstResponseAt       DateTime?             @map("first_response_at")
   neededBy              DateTime?               @map("needed_by")
   projectId             String?                 @map("project_id")
   project               Project?                @relation(fields: [projectId], references: [id])
@@ -579,6 +664,14 @@ model Request {
   slaClocks             SlaClock[]
   relationsAsSource     RequestRelation[] @relation("RequestRelationSource")
   relationsAsTarget     RequestRelation[] @relation("RequestRelationTarget")
+  bpmInstances          ProcessInstance[]
+  bpmComments           BpmRequestComment[]
+  bpmAttachments        BpmRequestAttachment[]
+  bpmEvents             RequestRuntimeEvent[]
+  bpmReceipts           RequestCommandReceipt[]
+  bpmIncidents          RequestRuntimeIncident[]
+  bpmSlaClocks          RequestSlaClock[]
+  bpmParticipants       RequestParticipant[]
   createdAt             DateTime                @default(now()) @map("created_at")
   updatedAt             DateTime                @updatedAt @map("updated_at")
 
@@ -588,6 +681,9 @@ model Request {
   @@index([status])
   @@index([requesterId])
   @@index([assigneeId])
+  @@index([executionMode, requesterId, createdAt, id])
+  @@index([executionMode, queueId, status, createdAt, id])
+  @@index([executionMode, categoryVersionId, status])
   @@map("requests")
 }
 
@@ -618,6 +714,7 @@ model RequestApproval {
   status         RequestApprovalStatus           @default(pendente)
   completionRule RequestApprovalCompletionRule   @default(todos) @map("completion_rule")
   requiredCount  Int?                            @map("required_count")
+  approvalSource String                          @default("hierarquia") @map("approval_source")
   decidedAt      DateTime?                       @map("decided_at")
   comment        String?
   createdAt      DateTime                        @default(now()) @map("created_at")
@@ -865,4 +962,291 @@ model AuditLog {
   @@index([actorUserId])
   @@index([resourceType, resourceId])
   @@map("audit_logs")
+}
+
+model RequestQueueMember {
+  id             String             @id @default(uuid())
+  queueId        String             @map("queue_id")
+  queue          Queue              @relation(fields: [queueId], references: [id], onDelete: Cascade)
+  collaboratorId String             @map("collaborator_id")
+  collaborator   Collaborator       @relation(fields: [collaboratorId], references: [id])
+  role           BpmQueueMemberRole
+  active         Boolean            @default(true)
+  startsAt       DateTime           @default(now()) @map("starts_at")
+  endsAt         DateTime?          @map("ends_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  @@unique([queueId, collaboratorId, role])
+  @@index([queueId, active])
+  @@index([collaboratorId, active])
+  @@map("request_queue_members")
+}
+
+model ProcessConfigGrant {
+  id              String          @id @default(uuid())
+  categoryId      String          @map("category_id")
+  category        RequestCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  userId          String          @map("user_id")
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role            BpmGrantRole
+  expiresAt       DateTime?       @map("expires_at")
+  restrictedRead  Boolean         @default(false) @map("restricted_read")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  @@unique([categoryId, userId, role])
+  @@index([userId, role])
+  @@map("process_config_grants")
+}
+
+model ProcessInstance {
+  id                 String           @id @default(uuid())
+  requestId          String           @map("request_id")
+  request            Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  cycle              Int
+  categoryVersionId  String           @map("category_version_id")
+  categoryVersion    CategoryVersion  @relation(fields: [categoryVersionId], references: [id])
+  state              BpmInstanceState @default(draft)
+  definitionSnapshot Json             @map("definition_snapshot")
+  startedAt          DateTime?        @map("started_at")
+  completedAt        DateTime?        @map("completed_at")
+  closedAt           DateTime?        @map("closed_at")
+  lastEventSequence  Int              @default(0) @map("last_event_sequence")
+  tokens             ExecutionToken[]
+  activities         ActivityInstance[]
+  events             RequestRuntimeEvent[]
+  incidents          RequestRuntimeIncident[]
+  slaClocks          RequestSlaClock[]
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
+  @@unique([requestId, cycle])
+  @@index([requestId, state])
+  @@map("bpm_process_instances")
+}
+
+model ExecutionToken {
+  id             String           @id @default(uuid())
+  instanceId     String           @map("instance_id")
+  instance       ProcessInstance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  nodeId         String           @map("node_id")
+  state          BpmTokenState    @default(active)
+  activationKey  String           @map("activation_key")
+  activities     ActivityInstance[]
+  createdAt      DateTime         @default(now()) @map("created_at")
+  @@unique([instanceId, activationKey])
+  @@index([instanceId, state])
+  @@map("bpm_execution_tokens")
+}
+
+model ActivityInstance {
+  id             String            @id @default(uuid())
+  instanceId     String            @map("instance_id")
+  instance       ProcessInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  nodeId         String            @map("node_id")
+  tokenId        String            @map("token_id")
+  token          ExecutionToken    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
+  activationKey  String            @map("activation_key")
+  kind           BpmActivityKind   @default(human)
+  phase          BpmActivityPhase
+  state          BpmActivityState  @default(available)
+  queueId        String?           @map("queue_id")
+  queue          Queue?            @relation(fields: [queueId], references: [id])
+  assigneeId     String?           @map("assignee_id")
+  assignee       Collaborator?     @relation("BpmAssignee", fields: [assigneeId], references: [id])
+  round          Int               @default(1)
+  inputRevision  Int               @default(0) @map("input_revision")
+  openedAt       DateTime          @default(now()) @map("opened_at")
+  claimedAt      DateTime?         @map("claimed_at")
+  completedAt    DateTime?         @map("completed_at")
+  outcome        String?
+  resolution     String?
+  candidates     ActivityCandidate[]
+  assignments    ActivityAssignment[]
+  participants   RequestParticipant[]
+  comments       BpmRequestComment[]
+  attachments    BpmRequestAttachment[]
+  slaClocks      RequestSlaClock[]
+  incidents      RequestRuntimeIncident[]
+  @@unique([instanceId, activationKey])
+  @@index([queueId, state, openedAt, id])
+  @@index([assigneeId, state, openedAt, id])
+  @@index([instanceId, state])
+  @@map("bpm_activity_instances")
+}
+
+model ActivityCandidate {
+  id             String           @id @default(uuid())
+  activityId     String           @map("activity_id")
+  activity       ActivityInstance @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  collaboratorId String           @map("collaborator_id")
+  collaborator   Collaborator     @relation(fields: [collaboratorId], references: [id])
+  sourceResolver String           @map("source_resolver")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  @@unique([activityId, collaboratorId, sourceResolver])
+  @@index([collaboratorId, activityId])
+  @@map("bpm_activity_candidates")
+}
+
+model ActivityAssignment {
+  id                  String           @id @default(uuid())
+  activityId          String           @map("activity_id")
+  activity            ActivityInstance @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  fromCollaboratorId  String?          @map("from_collaborator_id")
+  toCollaboratorId    String?          @map("to_collaborator_id")
+  byUserId            String           @map("by_user_id")
+  reason              String?
+  startedAt           DateTime         @default(now()) @map("started_at")
+  endedAt             DateTime?        @map("ended_at")
+  @@index([activityId, endedAt])
+  @@map("bpm_activity_assignments")
+}
+
+model RequestParticipant {
+  id                  String            @id @default(uuid())
+  requestId           String            @map("request_id")
+  request             Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  cycle               Int
+  collaboratorId      String            @map("collaborator_id")
+  collaborator        Collaborator      @relation(fields: [collaboratorId], references: [id])
+  kind                String
+  sourceActivityId    String?           @map("source_activity_id")
+  sourceActivity      ActivityInstance? @relation(fields: [sourceActivityId], references: [id])
+  fieldScope          Json?             @map("field_scope")
+  restrictedAllowed   Boolean           @default(false) @map("restricted_allowed")
+  startsAt            DateTime          @default(now()) @map("starts_at")
+  endsAt              DateTime?         @map("ends_at")
+  @@index([requestId, cycle])
+  @@index([collaboratorId, requestId])
+  @@map("bpm_request_participants")
+}
+
+model RequestRuntimeEvent {
+  id                  String           @id @default(uuid())
+  requestId           String           @map("request_id")
+  request             Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  instanceId          String?          @map("instance_id")
+  instance            ProcessInstance? @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  cycle               Int
+  sequence            Int
+  type                String
+  actorUserId         String?          @map("actor_user_id")
+  actorCollaboratorId String?          @map("actor_collaborator_id")
+  commandId           String           @map("command_id")
+  correlationId       String?          @map("correlation_id")
+  summary             Json
+  visibility          String           @default("participant")
+  occurredAt          DateTime         @default(now()) @map("occurred_at")
+  @@unique([requestId, sequence])
+  @@index([requestId, occurredAt])
+  @@map("bpm_runtime_events")
+}
+
+model RequestCommandReceipt {
+  id            String   @id @default(uuid())
+  commandId     String   @map("command_id")
+  actorUserId   String   @map("actor_user_id")
+  key           String
+  routeScope    String   @map("route_scope")
+  requestHash   String   @map("request_hash")
+  requestId     String?  @map("request_id")
+  request       Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  statusCode    Int      @map("status_code")
+  resultRef     Json     @map("result_ref")
+  completedAt   DateTime @default(now()) @map("completed_at")
+  @@unique([actorUserId, key])
+  @@index([requestId])
+  @@map("bpm_command_receipts")
+}
+
+model RequestRuntimeIncident {
+  id          String            @id @default(uuid())
+  requestId   String            @map("request_id")
+  request     Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  instanceId  String?           @map("instance_id")
+  instance    ProcessInstance?  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  activityId  String?           @map("activity_id")
+  activity    ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  type        String
+  state       BpmIncidentState  @default(open)
+  effectKey   String?           @map("effect_key")
+  safeDetails Json              @map("safe_details")
+  resolvedBy  String?           @map("resolved_by")
+  resolvedAt  DateTime?         @map("resolved_at")
+  resolution  String?
+  createdAt   DateTime          @default(now()) @map("created_at")
+  @@index([requestId, state])
+  @@index([type, state])
+  @@map("bpm_runtime_incidents")
+}
+
+model RequestSlaClock {
+  id               String            @id @default(uuid())
+  requestId        String            @map("request_id")
+  request          Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  instanceId       String            @map("instance_id")
+  instance         ProcessInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  activityId       String?           @map("activity_id")
+  activity         ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  metric           BpmSlaMetric
+  activationKey    String            @map("activation_key")
+  calendarSnapshot Json              @map("calendar_snapshot")
+  budgetSeconds    Int               @map("budget_seconds")
+  elapsedSeconds   Int               @default(0) @map("elapsed_seconds")
+  checkpointAt     DateTime          @default(now()) @map("checkpoint_at")
+  originalTargetAt DateTime          @map("original_target_at")
+  targetAt         DateTime?         @map("target_at")
+  stoppedAt        DateTime?         @map("stopped_at")
+  breachedAt       DateTime?         @map("breached_at")
+  intervals        RequestSlaInterval[]
+  @@unique([instanceId, metric, activationKey])
+  @@index([requestId, metric])
+  @@map("bpm_sla_clocks")
+}
+
+model RequestSlaInterval {
+  id          String          @id @default(uuid())
+  clockId     String          @map("clock_id")
+  clock       RequestSlaClock @relation(fields: [clockId], references: [id], onDelete: Cascade)
+  kind        String
+  startAt     DateTime        @map("start_at")
+  endAt       DateTime?       @map("end_at")
+  reason      String?
+  actorUserId String?         @map("actor_user_id")
+  @@index([clockId, endAt])
+  @@map("bpm_sla_intervals")
+}
+
+model BpmRequestComment {
+  id                  String            @id @default(uuid())
+  requestId           String            @map("request_id")
+  request             Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  activityId          String?           @map("activity_id")
+  activity            ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  authorUserId        String            @map("author_user_id")
+  authorCollaboratorId String?          @map("author_collaborator_id")
+  authorCollaborator  Collaborator?     @relation(fields: [authorCollaboratorId], references: [id])
+  body                String
+  visibility          RequestCommentVisibility @default(publico)
+  createdAt           DateTime          @default(now()) @map("created_at")
+  @@index([requestId, createdAt])
+  @@map("bpm_request_comments")
+}
+
+model BpmRequestAttachment {
+  id           String            @id @default(uuid())
+  requestId    String            @map("request_id")
+  request      Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  activityId   String?           @map("activity_id")
+  activity     ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  filename     String
+  safeFilename String            @map("safe_filename")
+  mimeType     String            @map("mime_type")
+  sizeBytes    Int               @map("size_bytes")
+  contentHash  String            @map("content_hash")
+  content      Bytes
+  fieldKey     String?           @map("field_key")
+  version      Int               @default(1)
+  previousId   String?           @map("previous_id")
+  uploadedBy   String            @map("uploaded_by")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  @@index([requestId])
+  @@map("bpm_request_attachments")
 }

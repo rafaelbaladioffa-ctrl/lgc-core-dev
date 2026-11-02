@@ -188,3 +188,56 @@ code {
 a {
   color: var(--accent);
 }
+
+.axis-app-main > * {
+  max-width: 100%;
+}
+
+.axis-mobile-nav-toggle {
+  display: none;
+}
+
+@media (max-width: 860px) {
+  .axis-app-sidebar:not(.axis-app-sidebar-open) {
+    display: none !important;
+  }
+
+  .axis-mobile-nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 30px;
+    flex: 0 0 32px;
+    color: var(--text-topbar);
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius);
+  }
+
+  .axis-app-topbar-spacer,
+  .axis-app-topbar-search {
+    display: none !important;
+  }
+
+  .axis-app-topbar {
+    padding: 0 8px !important;
+  }
+
+  .axis-app-topbar-identity > div:last-child {
+    display: none;
+  }
+
+  .axis-app-main {
+    min-width: 0;
+    overflow-x: auto !important;
+    padding: 12px !important;
+  }
+
+  .axis-app-main input,
+  .axis-app-main select,
+  .axis-app-main textarea,
+  .axis-app-main button {
+    max-width: 100%;
+  }
+}

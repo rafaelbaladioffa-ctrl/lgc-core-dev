@@ -56,6 +56,7 @@ export interface RequestApproval {
   status: RequestApprovalStatus;
   decidedAt: string | null;
   comment: string | null;
+  approvalSource?: string;
 }
 
 export interface RequestComment {
@@ -79,6 +80,27 @@ export interface RequestDetail extends AxisRequest {
   // Null unless a denúncia (§7.3) is marked anônima; "Anônimo" when the viewer lacks
   // request:view_whistleblower_identity (requesterId also comes back null in that case).
   requesterDisplay: string | null;
+  formData?: { purchaseItems?: PurchaseRequestItem[] } | Record<string, unknown> | null;
+  costCenter?: { id: string; code: string; name: string; responsibleCollaborator?: { id: string; fullName: string } | null } | null;
+}
+
+export interface PurchaseRequestItem {
+  materialId: string;
+  code?: string;
+  item: string;
+  category?: string;
+  subcategory?: string | null;
+  unit?: string;
+  quantity: number;
+  unitPrice: string | number;
+}
+
+export interface PurchaseAnalysisItem {
+  materialId: string;
+  stockStatus: 'disponivel' | 'parcial' | 'indisponivel';
+  availableQuantity: number;
+  notes?: string;
+  needsQuotation?: boolean;
 }
 
 export interface CreateRequestInput {
@@ -139,4 +161,8 @@ export const requestsApi = {
   reopen: (id: string, reason: string) => api.post<AxisRequest>(`/requests/${id}/reopen`, { reason }).then((r) => r.data),
   cancel: (id: string, reason: string) => api.post<AxisRequest>(`/requests/${id}/cancel`, { reason }).then((r) => r.data),
   comment: (id: string, body: string, visibility?: 'publico' | 'interno') => api.post(`/requests/${id}/comments`, { body, visibility }).then((r) => r.data),
+  purchaseAnalysis: (id: string, items: PurchaseAnalysisItem[], notes?: string) => api.post(`/requests/${id}/purchase-analysis`, { items, notes }).then((r) => r.data),
+  purchaseQuotation: (id: string, input: { quotationId?: string; supplier: string; quoteNumber?: string; totalValue: string; notes?: string; selected?: boolean; attachmentIds?: string[] }) => api.post(`/requests/${id}/purchase-quotation`, input).then((r) => r.data),
+  selectPurchaseQuotation: (id: string, quotationId: string) => api.post(`/requests/${id}/purchase-quotation-selection`, { quotationId }).then((r) => r.data),
+  attachment: (id: string, input: { filename: string; contentBase64: string }) => api.post<{ id: string }>(`/requests/${id}/attachments`, input).then((r) => r.data),
 };

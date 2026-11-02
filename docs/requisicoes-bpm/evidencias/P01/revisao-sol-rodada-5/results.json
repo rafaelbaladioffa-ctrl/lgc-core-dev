@@ -1,0 +1,65 @@
+{
+  "note": "Checkpoint-5 actual-method observations; no PostgreSQL/HTTP/browser execution.",
+  "findings": [
+    {
+      "id": "E01-title-save-preserves-and-masks",
+      "result": {
+        "storedFields": {
+          "private_value": "synthetic protected value",
+          "public_value": "old public value"
+        },
+        "responseFields": {
+          "public_value": "old public value"
+        }
+      }
+    },
+    {
+      "id": "E02-public-field-save-drops-protected-value",
+      "result": {
+        "storedFields": {
+          "public_value": "new public value"
+        },
+        "responseFields": {
+          "public_value": "new public value"
+        }
+      }
+    },
+    {
+      "id": "E03-manager-with-management-permission-can-cancel",
+      "result": {
+        "requestId": "request-R",
+        "status": "cancelada",
+        "currentVersion": 1
+      }
+    },
+    {
+      "id": "E04-manager-without-management-permission-also-cancels",
+      "result": {
+        "requestId": "request-R",
+        "status": "cancelada",
+        "currentVersion": 1
+      }
+    },
+    {
+      "id": "E05-breach-recorded-at-stop-instead-of-deadline",
+      "result": {
+        "elapsedSeconds": 7200,
+        "actualBreachedAt": "2026-11-02T13:00:00.000Z",
+        "expectedBreachedAt": "2026-11-02T12:00:00.000Z"
+      }
+    },
+    {
+      "id": "E06-screens-unchanged-from-checkpoint-4",
+      "result": {
+        "unchanged": true
+      }
+    },
+    {
+      "id": "E07-document-mask-now-matches-global-mask",
+      "result": {
+        "projectedFields": {},
+        "documentVisible": false
+      }
+    }
+  ]
+}

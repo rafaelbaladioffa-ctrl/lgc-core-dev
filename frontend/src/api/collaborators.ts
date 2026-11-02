@@ -107,6 +107,7 @@ export interface UpdateCollaboratorInput extends Partial<CreateCollaboratorInput
 
 export const collaboratorsApi = {
   list: () => api.get<CollaboratorSafe[]>('/collaborators').then((r) => r.data),
+  me: () => api.get<CollaboratorSafe | null>('/collaborators/me').then((r) => r.data),
   get: (id: string) => api.get<CollaboratorSafe>(`/collaborators/${id}`).then((r) => r.data),
   getSensitive: (id: string) => api.get<CollaboratorFull>(`/collaborators/${id}/sensitive`).then((r) => r.data),
   create: (input: CreateCollaboratorInput) => api.post<CollaboratorSafe>('/collaborators', input).then((r) => r.data),

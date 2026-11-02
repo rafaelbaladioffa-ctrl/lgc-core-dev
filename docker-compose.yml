@@ -39,6 +39,9 @@ services:
       - backend
     ports:
       - "5173:80"
+    networks:
+      - default
+      - logistica
 
   backup:
     image: postgres:16-alpine
@@ -65,3 +68,8 @@ services:
 volumes:
   axis_postgres_data:
   axis_backups:
+
+networks:
+  logistica:
+    external: true
+    name: lgc-dev-logistica_default

@@ -1,0 +1,42 @@
+[
+  {
+    "path": "backend/src/request-runtime/request-runtime.service.ts",
+    "sha256": "8491231340CF647DC61EC4200C4A4F08EF248440E2A1B8DD17B5CAABED9CD10F"
+  },
+  {
+    "path": "backend/src/request-runtime/request-runtime.controller.ts",
+    "sha256": "91814AEDFEAEAE535B12AB4E2509EC5A177A302452C5092F254DDB6EC666B669"
+  },
+  {
+    "path": "backend/src/request-runtime/dto.ts",
+    "sha256": "BAF5AFC6E4DCB9CEE5FDABC329B1C0652413CAEFFC8614A88FC0F22FC003CCA2"
+  },
+  {
+    "path": "backend/src/request-runtime/p01-regression.spec.ts",
+    "sha256": "F43CC1F4A03E2DE4477A0A83D089627EEC8F2BA219C7D5ABA06239D4121BC6B8"
+  },
+  {
+    "path": "backend/src/request-processes/request-processes.service.ts",
+    "sha256": "F696FF00F6278BFFDF42D0512296ECF3D5D5F213AA8F13541FFADCD01E527DD7"
+  },
+  {
+    "path": "backend/src/request-processes/request-processes.controller.ts",
+    "sha256": "19E03281EB71A8F0C23A70C49CBDFC1593FEA4675B3FC971FD522BCCB32FEA5C"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/BpmPages.tsx",
+    "sha256": "214DDE1E4DF15615009DE89BE06E8E4B833B503F1A4C5CD573E1CD83743EE05C"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/api.ts",
+    "sha256": "9433DD18D835EB06A1D84425201F9D70E8DCA5793CDBF124CA98228B95BE2A0B"
+  },
+  {
+    "path": "backend/prisma/schema.prisma",
+    "sha256": "4BA3F1C98A19906791429DDD77AF0AC1AC1488282C6E57366D8BFD3F61FB1CBE"
+  },
+  {
+    "path": "backend/prisma/migrations/20261101000000_request_bpm_p01/migration.sql",
+    "sha256": "58751F874509FF178E22C9DFDE8AF510A1F00284591CAA038BA0B9E88FD7C059"
+  }
+]

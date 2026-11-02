@@ -19,17 +19,18 @@ export class CostCentersService {
           name: dto.name,
           sectorId: dto.sectorId,
           parentCostCenterId: dto.parentCostCenterId,
+          responsibleCollaboratorId: dto.responsibleCollaboratorId,
         },
       });
     });
   }
 
   findAll() {
-    return this.prisma.costCenter.findMany({ orderBy: { code: 'asc' }, include: { sector: true } });
+    return this.prisma.costCenter.findMany({ orderBy: { code: 'asc' }, include: { sector: true, responsibleCollaborator: { select: { id: true, fullName: true } } } });
   }
 
   async findOne(id: string) {
-    const costCenter = await this.prisma.costCenter.findUnique({ where: { id }, include: { sector: true } });
+    const costCenter = await this.prisma.costCenter.findUnique({ where: { id }, include: { sector: true, responsibleCollaborator: { select: { id: true, fullName: true } } } });
     if (!costCenter) throw new NotFoundException('Cost center not found');
     return costCenter;
   }

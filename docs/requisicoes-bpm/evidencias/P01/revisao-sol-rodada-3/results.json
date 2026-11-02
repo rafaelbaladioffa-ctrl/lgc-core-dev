@@ -1,0 +1,86 @@
+{
+  "note": "Round-3 actual-method observations; no DB/HTTP integration.",
+  "findings": [
+    {
+      "id": "C01-default-generated-definition-fails-validator",
+      "result": {
+        "generatedPolicy": {
+          "internal": true
+        },
+        "validation": {
+          "valid": false,
+          "errors": [
+            {
+              "path": "policy",
+              "message": "Política P01 inválida"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "C02-publisher-directory-identity",
+      "result": {
+        "directorySelect": {
+          "id": true,
+          "fullName": true,
+          "sectorId": true
+        },
+        "returnedRow": {
+          "id": "collaborator-P",
+          "fullName": "Synthetic Person",
+          "sectorId": "sector-S"
+        },
+        "userIdAvailable": false,
+        "uiUsesCollaboratorIdForPublisher": true
+      }
+    },
+    {
+      "id": "C03-reassign-replay-hash-mismatch",
+      "result": {
+        "replayAccepted": false,
+        "error": "IDEMPOTENCY_KEY_REUSED"
+      }
+    },
+    {
+      "id": "C04-manager-can-assign-requester",
+      "result": {
+        "assignedToRequester": true
+      }
+    },
+    {
+      "id": "C05-sla-config-does-not-drive-clocks",
+      "result": {
+        "configuredMinutes": [
+          10,
+          20
+        ],
+        "actualClockMinutes": [
+          240,
+          2880
+        ]
+      }
+    },
+    {
+      "id": "C06-hidden-document-still-downloads",
+      "result": {
+        "hiddenDocumentDownloaded": true
+      }
+    },
+    {
+      "id": "C07-corrected-guards-and-calendar",
+      "result": {
+        "revokedReadDenied": true,
+        "endOfDayTarget": "2026-11-09T11:00:45.000Z"
+      }
+    },
+    {
+      "id": "C08-publishedAt-schema-migration-drift",
+      "result": {
+        "nullableInSchema": true,
+        "defaultNowInSchema": false,
+        "migrationChangesPublishedAt": false
+      }
+    }
+  ]
+}

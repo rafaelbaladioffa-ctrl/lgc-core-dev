@@ -1,0 +1,7 @@
+services:
+  backend:
+    environment:
+      REQUEST_BPM_ENABLED: "true"
+    # A migration is deployed explicitly before recreation. Never run the
+    # operational seed as a side effect of updating the P01 pilot.
+    command: ["node", "dist/main.js"]

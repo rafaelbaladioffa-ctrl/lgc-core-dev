@@ -1,0 +1,4 @@
+> frontend@0.0.0 test:journey
+> node ..\backend\node_modules\tsx\dist\cli.mjs tests\journey.contract.ts
+
+P01 DynamicForm journey contract: 7 assertions passed

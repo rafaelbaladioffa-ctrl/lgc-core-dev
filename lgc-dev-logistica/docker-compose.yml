@@ -27,6 +27,7 @@ services:
     environment:
       DATABASE_URL: postgresql://logistica:${LOGISTICA_DB_PASSWORD:-logistica}@logistica-postgres:5432/axis_logistica?schema=public
       SCHEDULER_ENABLED: "true" # exatamente UMA instância do backend com o agendador ligado
+      SEED_REVISED_CATALOG: "true" # ambiente de teste usa a planilha revisada da Logística
     depends_on:
       logistica-postgres:
         condition: service_healthy

@@ -1,0 +1,18 @@
+[
+  {
+    "Path": "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-core\\frontend\\src\\features\\requisicoes-bpm\\BpmDraftEditorPage.tsx",
+    "Hash": "969D0B210E4D453BD9D590282309EF89C5F40FFCF657945F356424341C25DC3F"
+  },
+  {
+    "Path": "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-core\\frontend\\src\\features\\requisicoes-bpm\\useDraftAutosave.ts",
+    "Hash": "B9E5881F8B155E944176E74AD88795C7D0B3D7DD249821B7FA434C0612A25E9D"
+  },
+  {
+    "Path": "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-core\\backend\\src\\request-runtime\\dto.ts",
+    "Hash": "5644718B9A4BAD935BE77C84683E4DAED243F91AFD802B1226343766FD171803"
+  },
+  {
+    "Path": "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-core\\backend\\src\\main.ts",
+    "Hash": "0F5ADA950DED33295B723D46EF62394D3F378C0BE4E1C8E263EDC69607FB033B"
+  }
+]

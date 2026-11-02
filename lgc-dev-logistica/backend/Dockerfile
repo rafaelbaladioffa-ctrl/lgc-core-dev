@@ -16,6 +16,7 @@ COPY prisma ./prisma
 RUN npm ci
 RUN npx prisma generate
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/src ./src
 ENV NODE_ENV=production
 EXPOSE 3100
 CMD ["node", "dist/main.js"]

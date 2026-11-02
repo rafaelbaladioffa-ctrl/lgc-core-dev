@@ -6,7 +6,10 @@ export interface Role {
   id: string;
   name: string;
   description: string | null;
+  rolePermissions?: { permission: Permission }[];
 }
+
+export interface Permission { id: string; resource: string; action: string; description: string | null }
 
 export interface LoginUser {
   id: string;
@@ -50,4 +53,7 @@ export const usersApi = {
 
 export const rolesApi = {
   list: () => api.get<Role[]>('/roles').then((r) => r.data),
+  permissions: () => api.get<Permission[]>('/roles/permissions').then((r) => r.data),
+  create: (input: { name: string; description?: string; permissionIds: string[] }) => api.post<Role>('/roles', input).then((r) => r.data),
+  update: (id: string, input: { name: string; description?: string; permissionIds: string[] }) => api.put<Role>(`/roles/${id}`, input).then((r) => r.data),
 };

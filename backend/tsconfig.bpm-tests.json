@@ -1,0 +1,1 @@
+{"extends":"./tsconfig.json","compilerOptions":{"rootDir":"..","noEmit":true,"incremental":false},"include":["test/bpm-journey.e2e-spec.ts","test/bpm-persistence.e2e-spec.ts"],"exclude":["node_modules","dist","prisma"]}

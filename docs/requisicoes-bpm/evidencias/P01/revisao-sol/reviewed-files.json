@@ -1,0 +1,54 @@
+[
+  {
+    "path": "backend/src/request-runtime/request-runtime.service.ts",
+    "sha256": "09BF4D7FA4770D102DE43DD69F949D9BE6973D9B5CC18CFC512D5462C3521FFD"
+  },
+  {
+    "path": "backend/src/request-runtime/request-runtime.controller.ts",
+    "sha256": "30B11D9BE41DBAE5D3B6A114C57B6C3C3CD648399124A91881D4FFE0879CBA91"
+  },
+  {
+    "path": "backend/src/request-runtime/dto.ts",
+    "sha256": "08E817849DA7E63332FEF08444B87C19C1260D5B6210C1FE8875A1038009E90B"
+  },
+  {
+    "path": "backend/src/request-processes/request-processes.service.ts",
+    "sha256": "1597521FFA6F0CD2232497B901DB1DCA9C257D73C82212A1345B5688BE8B57A2"
+  },
+  {
+    "path": "backend/src/request-processes/request-processes.controller.ts",
+    "sha256": "12DC2953D645BD1099222F6FD2BE6BECF650240309FB8C86C436CD1566F17AFA"
+  },
+  {
+    "path": "backend/src/request-processes/dto.ts",
+    "sha256": "6FF7313BA3E3FFE33A1494F0C608E3110F245D2C8C3D3C55DBB5FAB409280E89"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/BpmPages.tsx",
+    "sha256": "D66F9E572CD03A4ACC1C325B780CDAB333022DF8101425630F11058AD58A5DB4"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/api.ts",
+    "sha256": "5DFEB017DFC92119125149AB6E4B96605F136B14E57FB9DA2833D912E9A5581B"
+  },
+  {
+    "path": "backend/prisma/schema.prisma",
+    "sha256": "ADF7B65A68BFD37C56B8D6955B5F399FAF9B7810D0B8B1D0E4CF80BB7920A504"
+  },
+  {
+    "path": "backend/prisma/migrations/20261101000000_request_bpm_p01/migration.sql",
+    "sha256": "6805B3ED54D01B94A4EDCF6ADEB39349225D1AECCCD341E970704231313E802D"
+  },
+  {
+    "path": "backend/src/requests/requests.service.ts",
+    "sha256": "82231B37EF8DF3E3C6EA20A582CA5EA4F3FBBE562E4148FCCDB61A269AB93944"
+  },
+  {
+    "path": "backend/src/request-categories/request-categories.service.ts",
+    "sha256": "19BAA49E1B8220366591606A2596E8BB964395F0A5DC31A8625F65BAC499FCA5"
+  },
+  {
+    "path": "frontend/src/App.tsx",
+    "sha256": "05E134E845DC0CE2D25F8C9753B8DC273E50CD9F238283340C4DF433BF75516A"
+  }
+]

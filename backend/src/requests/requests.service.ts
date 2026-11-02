@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHash } from 'crypto';
 import { validateAttachment, generateSafeFilename, MAX_REQUEST_TOTAL_BYTES } from './attachment-security.js';
@@ -11,6 +11,9 @@ import { CreateRequestDto } from './dto/create-request.dto.js';
 import { UpdateRequestDto } from './dto/update-request.dto.js';
 import { TriageRequestDto } from './dto/triage-request.dto.js';
 import { AssignRequestDto } from './dto/assign-request.dto.js';
+import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
+import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
+import { PurchaseQuotationSelectionDto } from './dto/purchase-quotation-selection.dto.js';
 import { ApproveRequestDto, RejectRequestDto } from './dto/decision.dto.js';
 import { RequestInformationDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
 import { ManagementLevel, RequestApprovalCompletionRule, RequestStatus } from '@prisma/client';
@@ -50,6 +53,7 @@ interface ResolvedApproval {
   approverId: string;
   completionRule: RequestApprovalCompletionRule;
   requiredCount: number | null;
+  approvalSource?: string;
 }
 
 /** Requests still open after this many days past CONCLUIDA auto-close (§5.2 — simplified to
@@ -81,7 +85,7 @@ export class RequestsService {
   async create(requesterId: string, dto: CreateRequestDto) {
     const category = await this.prisma.requestCategory.findUnique({ where: { id: dto.categoryId } });
     if (!category || !category.active) throw new BadRequestException('Categoria de requisição não encontrada ou inativa');
-    const categoryVersion = await this.prisma.categoryVersion.findFirst({ where: { categoryId: dto.categoryId }, orderBy: { version: 'desc' } });
+    const categoryVersion = await this.prisma.categoryVersion.findFirst({ where: { categoryId: dto.categoryId, bpmStatus: null }, orderBy: { version: 'desc' } });
     if (!categoryVersion) throw new BadRequestException('Categoria sem versão publicada');
 
     const requester = await this.prisma.collaborator.findUnique({ where: { id: requesterId } });
@@ -92,7 +96,17 @@ export class RequestsService {
       if (!beneficiary) throw new BadRequestException('Beneficiário não encontrado');
     }
 
-    this.assertFormDataSatisfiesRequiredFields(categoryVersion.formSchema, dto.formData);
+    const isPurchaseRequest = category.code === 'SUP-COMPRA' || category.name.toLowerCase() === 'compra de material';
+    if (isPurchaseRequest) {
+      this.assertPurchaseItems(dto.formData);
+      if (!dto.costCenterId) throw new BadRequestException('Informe o centro de custo da compra.');
+      const costCenter = await this.prisma.costCenter.findUnique({ where: { id: dto.costCenterId } });
+      if (!costCenter) throw new BadRequestException('Centro de custo não encontrado.');
+    }
+    else {
+      if (!dto.title) throw new BadRequestException('Informe o título da requisição');
+      this.assertFormDataSatisfiesRequiredFields(categoryVersion.formSchema, dto.formData);
+    }
     // Denúncia/relato ético (§7.3): `anonimo=true` no formulário oculta a identidade do
     // solicitante de todo participante do fluxo (ver maskIdentityIfAnonymous), sem jamais apagar
     // o requesterId em si — a trilha de auditoria técnica precisa dele.
@@ -100,8 +114,17 @@ export class RequestsService {
     if (dto.parentRequestId) await this.getOrThrow(dto.parentRequestId);
 
     return this.prisma.$transaction(async (tx) => {
-      const queue = await tx.queue.findFirst({ where: { sectorId: category.sectorId } });
+      // A request always enters the sector's default queue. The seed repairs
+      // old records, but this fallback also keeps the routing correct when a
+      // new sector is created after the seed has already run.
+      let queue = await tx.queue.findFirst({ where: { sectorId: category.sectorId }, orderBy: { createdAt: 'asc' } });
+      if (!queue) {
+        const sector = await tx.sector.findUniqueOrThrow({ where: { id: category.sectorId }, select: { name: true } });
+        queue = await tx.queue.create({ data: { sectorId: category.sectorId, name: `Fila - ${sector.name}` } });
+      }
       const code = await this.nextRequestCode(tx);
+      const title = isPurchaseRequest ? await this.purchaseTitle(tx, requester.sectorId) : dto.title!;
+      const purchaseTotal = isPurchaseRequest ? this.purchaseTotal(dto.formData) : undefined;
 
       const request = await tx.request.create({
         data: {
@@ -111,7 +134,7 @@ export class RequestsService {
           queueId: queue?.id,
           requesterId,
           beneficiaryId,
-          title: dto.title,
+          title,
           description: dto.description,
           priority: dto.priority ?? 'normal',
           confidentiality: dto.confidentiality ?? category.confidentiality,
@@ -119,7 +142,7 @@ export class RequestsService {
           neededBy: dto.neededBy ? new Date(dto.neededBy) : undefined,
           projectId: dto.projectId,
           costCenterId: dto.costCenterId,
-          estimatedValue: dto.estimatedValue,
+          estimatedValue: purchaseTotal ?? dto.estimatedValue,
           formData: dto.formData as Prisma.InputJsonValue | undefined,
         },
       });
@@ -129,6 +152,29 @@ export class RequestsService {
       await this.audit(tx, { aggregateId: request.id, event: 'request.created', actorId: requesterId, after: { status: request.status, code: request.code, parentRequestId: dto.parentRequestId } });
       return request;
     });
+  }
+
+  private assertPurchaseItems(formData: Record<string, unknown> | undefined) {
+    const items = formData?.purchaseItems;
+    if (!Array.isArray(items) || items.length === 0) throw new BadRequestException('Inclua ao menos um item da Logística.');
+    for (const item of items) {
+      if (!item || typeof item !== 'object' || typeof (item as Record<string, unknown>).materialId !== 'string') throw new BadRequestException('Item de compra inválido.');
+      const quantity = Number((item as Record<string, unknown>).quantity);
+      const unitPrice = Number((item as Record<string, unknown>).unitPrice);
+      if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(unitPrice) || unitPrice < 0) throw new BadRequestException('Quantidade ou valor de item inválido.');
+    }
+  }
+
+  private purchaseTotal(formData: Record<string, unknown> | undefined): string {
+    const items = formData?.purchaseItems as Array<Record<string, unknown>>;
+    return items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0).toFixed(2);
+  }
+
+  private async purchaseTitle(tx: TxClient, sectorId: string): Promise<string> {
+    const sector = await tx.sector.findUnique({ where: { id: sectorId }, include: { parentSector: true } });
+    if (!sector) throw new BadRequestException('Setor do solicitante não encontrado');
+    const scope = sector.parentSector ? `${sector.parentSector.name}/${sector.name}` : sector.name;
+    return `Compra de Materiais - ${scope}`;
   }
 
   async update(id: string, actorId: string, dto: UpdateRequestDto) {
@@ -159,7 +205,12 @@ export class RequestsService {
     if (request.requesterId !== actorId) throw new ForbiddenException('Somente o solicitante pode enviar esta requisição');
 
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
-    this.assertFormDataSatisfiesRequiredFields(categoryVersion.formSchema, (request.formData as Record<string, unknown> | null) ?? undefined);
+    const requestData = (request.formData as Record<string, unknown> | null) ?? undefined;
+    // Compras usam a estrutura própria purchaseItems; não devem ser validadas pelos
+    // campos legados da categoria (itens/especificação, quantidade e valor).
+    if (!Array.isArray(requestData?.purchaseItems)) {
+      this.assertFormDataSatisfiesRequiredFields(categoryVersion.formSchema, requestData);
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.request.update({ where: { id }, data: { status: 'enviada', submittedAt: new Date() } });
@@ -171,9 +222,19 @@ export class RequestsService {
 
   /** Triagem do setor: aceitar inicia a resolução de aprovação; devolver pede ajuste ao
    * solicitante; recategorizar troca de categoria (nova versão de formulário, mesmo pedido). */
-  async triage(id: string, actorId: string, dto: TriageRequestDto) {
+  async triage(id: string, actorId: string, dto: TriageRequestDto, actorRoles: string[] = []) {
     const request = await this.getOrThrow(id);
     if (request.status !== 'enviada') throw new BadRequestException('A requisição não está aguardando triagem');
+
+    if (request.requesterId === actorId || request.beneficiaryId === actorId) {
+      throw new ForbiddenException('O solicitante não pode realizar a triagem da própria requisição.');
+    }
+
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    const isPurchaseRequest = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
+    if (isPurchaseRequest && !actorRoles.includes('analista_suprimentos') && !actorRoles.includes('admin')) {
+      throw new ForbiddenException('Somente o Suprimentos pode aceitar a triagem de uma compra.');
+    }
 
     if (dto.action === 'devolver') {
       if (!dto.reason) throw new BadRequestException('Motivo é obrigatório para devolver');
@@ -192,8 +253,14 @@ export class RequestsService {
     }
 
     // aceitar
-    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
     const requester = await this.prisma.collaborator.findUniqueOrThrow({ where: { id: request.requesterId } });
+    if (isPurchaseRequest) {
+      return this.prisma.$transaction(async (tx) => {
+        const updated = await tx.request.update({ where: { id }, data: { status: 'em_atendimento', assigneeId: actorId } });
+        await this.audit(tx, { aggregateId: id, event: 'request.purchase_triaged', actorId, after: { status: 'em_atendimento', assigneeId: actorId } });
+        return updated;
+      });
+    }
     const dynamicAuthority = categoryVersion.category.useDynamicAuthority ? await this.resolveDynamicAuthoritySteps(request) : null;
     const steps = dynamicAuthority
       ? dynamicAuthority.steps
@@ -212,7 +279,18 @@ export class RequestsService {
 
     return this.prisma.$transaction(async (tx) => {
       const resolved = await this.resolveApprovalChain(tx, requester.id, requester.managementLevel, steps, conflicted);
-      const emTriagem = await tx.request.update({ where: { id }, data: { status: 'em_triagem' } });
+      const isPurchaseRequest = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
+      if (isPurchaseRequest) {
+        if (!request.costCenterId) throw new BadRequestException('A compra precisa ter um centro de custo.');
+        const costCenter = await tx.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } });
+        if (!costCenter?.responsibleCollaboratorId) throw new BadRequestException('O centro de custo não possui responsável pela aprovação final.');
+        const finalStep = Math.max(0, ...resolved.map((step) => step.stepOrder)) + 1;
+        resolved.push({ stepOrder: finalStep, requiredLevel: null, approverId: costCenter.responsibleCollaboratorId, completionRule: 'todos', requiredCount: null, approvalSource: 'centro_custo' });
+      }
+      // Quem realiza a triagem passa a ser o responsável pela etapa. Isso evita
+      // que o solicitante permaneça como executor quando a requisição chega à
+      // fila de Suprimentos (ou de qualquer outro setor).
+      const emTriagem = await tx.request.update({ where: { id }, data: { status: 'em_triagem', assigneeId: actorId } });
       await this.audit(tx, { aggregateId: id, event: 'request.triaged', actorId, after: { status: 'em_triagem' } });
       if (dynamicAuthority?.fractionationDetected) {
         await this.audit(tx, {
@@ -235,6 +313,7 @@ export class RequestsService {
           approverId: s.approverId,
           completionRule: s.completionRule,
           requiredCount: s.requiredCount,
+          approvalSource: s.approvalSource ?? 'hierarquia',
         })),
       });
       const updated = await tx.request.update({ where: { id }, data: { status: 'aguardando_aprovacao' } });
@@ -251,6 +330,76 @@ export class RequestsService {
     return updated;
   }
 
+  async recordPurchaseAnalysis(id: string, actorId: string, dto: PurchaseAnalysisDto) {
+    const request = await this.getOrThrow(id);
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    const isPurchase = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
+    if (!isPurchase) throw new BadRequestException('Esta requisição não é de compras.');
+    if (!['enviada', 'em_triagem', 'aguardando_aprovacao', 'aprovada', 'em_atendimento'].includes(request.status)) throw new BadRequestException('A requisição não está em uma etapa de análise.');
+    const formData = (request.formData as Record<string, unknown> | null) ?? {};
+    const purchaseItems = Array.isArray(formData.purchaseItems) ? formData.purchaseItems as Array<Record<string, unknown>> : [];
+    if (dto.items.length !== purchaseItems.length || dto.items.some((row) => !purchaseItems.some((item) => item.materialId === row.materialId))) throw new BadRequestException('A análise deve conter todos os itens solicitados.');
+    const updatedFormData = { ...formData, procurementAnalysis: { analystId: actorId, analyzedAt: new Date().toISOString(), notes: dto.notes ?? '', items: dto.items } };
+    const updated = await this.prisma.request.update({ where: { id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue, assigneeId: actorId } });
+    await this.prisma.auditEvent.create({ data: { aggregateType: 'request', aggregateId: id, event: 'request.purchase_analysis_recorded', actorId, afterJson: { itemCount: dto.items.length } } });
+    return updated;
+  }
+
+  async recordPurchaseQuotation(id: string, actorId: string, dto: PurchaseQuotationDto) {
+    const request = await this.getOrThrow(id);
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    const isPurchase = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
+    if (!isPurchase) throw new BadRequestException('Esta requisição não é de compras.');
+    if (request.status !== 'em_atendimento') throw new BadRequestException('A cotação só pode ser registrada durante o atendimento do Suprimentos.');
+    const formData = (request.formData as Record<string, unknown> | null) ?? {};
+    if (!formData.procurementAnalysis) throw new BadRequestException('Registre a análise de estoque antes da cotação.');
+    const totalValue = Number(dto.totalValue);
+    if (!Number.isFinite(totalValue) || totalValue <= 0) throw new BadRequestException('Informe um valor total de cotação válido.');
+    if (!request.costCenterId) throw new BadRequestException('A compra não possui centro de custo.');
+    const costCenter = await this.prisma.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } });
+    const responsibleCollaboratorId = costCenter?.responsibleCollaboratorId;
+    if (!responsibleCollaboratorId) throw new BadRequestException('O centro de custo não possui responsável pela aprovação final.');
+    const legacyQuotation = formData.procurementQuotation && typeof formData.procurementQuotation === 'object' ? formData.procurementQuotation as Record<string, unknown> : null;
+    const existingQuotations = Array.isArray(formData.procurementQuotations) ? formData.procurementQuotations as Array<Record<string, unknown>> : legacyQuotation ? [{ ...legacyQuotation, quotationId: 'legacy-1' }] : [];
+    const quotationId = dto.quotationId?.trim() || `cotacao-${Date.now()}`;
+    const newQuotation = { quotationId, supplier: dto.supplier.trim(), quoteNumber: dto.quoteNumber?.trim() ?? '', totalValue: dto.totalValue, notes: dto.notes?.trim() ?? '', attachmentIds: dto.attachmentIds ?? [], selected: dto.selected ?? true, recordedBy: actorId, recordedAt: new Date().toISOString() };
+    const quotations = existingQuotations.some((quotation) => quotation.quotationId === quotationId)
+      ? existingQuotations.map((quotation) => quotation.quotationId === quotationId ? { ...quotation, ...newQuotation } : { ...quotation, selected: dto.selected ? false : quotation.selected })
+      : [...existingQuotations.map((quotation) => dto.selected === false ? quotation : { ...quotation, selected: false }), newQuotation];
+    const updatedFormData = { ...formData, procurementQuotations: quotations, procurementQuotation: newQuotation };
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const existingCostCenterApproval = await tx.requestApproval.findFirst({ where: { requestId: id, approvalSource: 'centro_custo' }, select: { status: true } });
+      const nextStatus = existingCostCenterApproval?.status === 'aprovado' ? request.status : 'aguardando_aprovacao';
+      const saved = await tx.request.update({ where: { id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue, estimatedValue: dto.totalValue, assigneeId: actorId, status: nextStatus } });
+      if (!existingCostCenterApproval) {
+        await tx.requestApproval.create({ data: { requestId: id, stepOrder: 1, approverId: responsibleCollaboratorId, completionRule: 'todos', approvalSource: 'centro_custo' } });
+      }
+      await this.audit(tx, { aggregateId: id, event: 'request.purchase_quotation_recorded', actorId, after: { supplier: dto.supplier, totalValue: dto.totalValue, status: nextStatus } });
+      return saved;
+    });
+    return updated;
+  }
+
+  async selectPurchaseQuotation(id: string, actorId: string, dto: PurchaseQuotationSelectionDto) {
+    const request = await this.getOrThrow(id);
+    const costCenter = request.costCenterId
+      ? await this.prisma.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } })
+      : null;
+    if (!costCenter?.responsibleCollaboratorId || costCenter.responsibleCollaboratorId !== actorId) {
+      throw new ForbiddenException('Somente o responsável pelo centro de custo pode escolher a cotação.');
+    }
+    const formData = (request.formData as Record<string, unknown> | null) ?? {};
+    const quotations = Array.isArray(formData.procurementQuotations) ? formData.procurementQuotations as Array<Record<string, unknown>> : [];
+    if (quotations.length === 0) throw new BadRequestException('Não existem cotações para selecionar.');
+    if (!quotations.some((quotation) => quotation.quotationId === dto.quotationId)) throw new BadRequestException('Cotação não encontrada nesta requisição.');
+    const updatedQuotations = quotations.map((quotation) => ({ ...quotation, selected: quotation.quotationId === dto.quotationId }));
+    const selected = quotations.find((quotation) => quotation.quotationId === dto.quotationId);
+    const updatedFormData = { ...formData, procurementQuotations: updatedQuotations, procurementQuotation: selected, selectedQuotationId: dto.quotationId };
+    const updated = await this.prisma.request.update({ where: { id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue } });
+    await this.prisma.auditEvent.create({ data: { aggregateType: 'request', aggregateId: id, event: 'request.purchase_quotation_selected', actorId, afterJson: { quotationId: dto.quotationId } } });
+    return updated;
+  }
+
   /** §9.1: a etapa ativa pode ter vários aprovadores em paralelo no mesmo stepOrder — `approve`
    * só avança pro próximo stepOrder (ou finaliza) quando a `completionRule` do nó for satisfeita
    * (todos aprovados / qualquer um / N de M); até lá, fica aguardando os demais do mesmo nó. */
@@ -258,6 +407,10 @@ export class RequestsService {
     const request = await this.getPendingApproval(id);
     const stepRows = this.activeStepRows(request.approvals);
     const { row: myRow, onBehalfOf } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
+    if (myRow.approvalSource === 'centro_custo') {
+      const formData = (request.formData as Record<string, unknown> | null) ?? {};
+      if (!formData.procurementAnalysis) throw new BadRequestException('A análise de estoque/cotação do Suprimentos precisa ser registrada antes da aprovação final.');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -535,10 +688,12 @@ export class RequestsService {
         approvals: { orderBy: { stepOrder: 'asc' }, include: { approver: { select: { id: true, fullName: true } } } },
         slaClocks: true,
         categoryVersion: { include: { category: true } },
+        costCenter: { include: { responsibleCollaborator: { select: { id: true, fullName: true } } } },
         relationsAsTarget: { where: { relationType: 'subtarefa_de' }, include: { source: { select: { id: true, code: true, title: true, status: true } } } },
       },
     });
     if (!request) throw new NotFoundException('Requisição não encontrada');
+    if (request.executionMode === 'bpm_v1') throw new ConflictException('WRONG_EXECUTOR');
 
     // Participante real desta requisição — nunca uma permissão genérica de papel (ter
     // `request:approve` não torna alguém aprovador desta requisição específica).
@@ -568,14 +723,21 @@ export class RequestsService {
 
   findMine(collaboratorId: string) {
     return this.prisma.request.findMany({
-      where: { OR: [{ requesterId: collaboratorId }, { beneficiaryId: collaboratorId }] },
+      where: { executionMode: 'legacy', OR: [{ requesterId: collaboratorId }, { beneficiaryId: collaboratorId }] },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  findQueue(filters: { sectorId?: string; queueId?: string; status?: RequestStatus }) {
+  async findQueue(filters: { sectorId?: string; queueId?: string; status?: RequestStatus }, user?: { roles: string[]; collaboratorId: string | null }) {
+    let sectorId = filters.sectorId;
+    if (user?.roles.includes('analista_suprimentos')) {
+      const collaborator = user.collaboratorId
+        ? await this.prisma.collaborator.findUnique({ where: { id: user.collaboratorId }, select: { sectorId: true } })
+        : null;
+      sectorId = collaborator?.sectorId;
+    }
     return this.prisma.request.findMany({
-      where: { sectorId: filters.sectorId, queueId: filters.queueId, status: filters.status },
+      where: { executionMode: 'legacy', sectorId, queueId: filters.queueId, status: filters.status },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -587,10 +749,10 @@ export class RequestsService {
   async dashboard() {
     const now = Date.now();
     const [byStatus, open, closedWithDuration, assigneeCounts, submittedCount, returnedCount, approvedCount, rejectedCount, completedCount, reopenedCount] = await Promise.all([
-      this.prisma.request.groupBy({ by: ['status'], _count: { _all: true } }),
-      this.prisma.request.findMany({ where: { status: { notIn: TERMINAL_STATUSES } }, select: { createdAt: true } }),
-      this.prisma.request.findMany({ where: { status: { in: ['concluida', 'encerrada'] } }, select: { createdAt: true, closedAt: true, updatedAt: true } }),
-      this.prisma.request.groupBy({ by: ['assigneeId'], where: { status: { notIn: TERMINAL_STATUSES }, assigneeId: { not: null } }, _count: { _all: true } }),
+      this.prisma.request.groupBy({ by: ['status'], where: { executionMode: 'legacy' }, _count: { _all: true } }),
+      this.prisma.request.findMany({ where: { executionMode: 'legacy', status: { notIn: TERMINAL_STATUSES } }, select: { createdAt: true } }),
+      this.prisma.request.findMany({ where: { executionMode: 'legacy', status: { in: ['concluida', 'encerrada'] } }, select: { createdAt: true, closedAt: true, updatedAt: true } }),
+      this.prisma.request.groupBy({ by: ['assigneeId'], where: { executionMode: 'legacy', status: { notIn: TERMINAL_STATUSES }, assigneeId: { not: null } }, _count: { _all: true } }),
       this.prisma.auditEvent.count({ where: { aggregateType: 'request', event: 'request.submitted' } }),
       this.prisma.auditEvent.count({ where: { aggregateType: 'request', event: 'request.returned' } }),
       this.prisma.auditEvent.count({ where: { aggregateType: 'request', event: 'request.approved' } }),
@@ -639,7 +801,11 @@ export class RequestsService {
 
   async myApprovals(collaboratorId: string, canViewWhistleblowerIdentity: boolean) {
     const mine = await this.prisma.requestApproval.findMany({
-      where: { approverId: collaboratorId, status: 'pendente' },
+      where: {
+        approverId: collaboratorId,
+        status: 'pendente',
+        request: { executionMode: 'legacy' },
+      },
       include: { request: { include: { categoryVersion: { include: { category: true } }, requester: { select: { id: true, fullName: true } } } } },
       orderBy: { createdAt: 'asc' },
     });
@@ -670,7 +836,7 @@ export class RequestsService {
   @Cron(CronExpression.EVERY_HOUR)
   async runAutoClose() {
     const cutoff = new Date(Date.now() - AUTO_CLOSE_AFTER_DAYS * 86_400_000);
-    const due = await this.prisma.request.findMany({ where: { status: 'concluida', updatedAt: { lt: cutoff } } });
+    const due = await this.prisma.request.findMany({ where: { executionMode: 'legacy', status: 'concluida', updatedAt: { lt: cutoff } } });
     for (const request of due) {
       try {
         await this.close(request.id, null);
@@ -699,7 +865,7 @@ export class RequestsService {
   async runSlaAlertsAndEscalation() {
     const now = new Date();
     const openClocks = await this.prisma.slaClock.findMany({
-      where: { stoppedAt: null, pausedAt: null },
+      where: { stoppedAt: null, pausedAt: null, request: { executionMode: 'legacy' } },
       include: { request: { select: { id: true, code: true, sectorId: true, status: true, escalationLevel: true, assigneeId: true } } },
     });
 
@@ -748,12 +914,14 @@ export class RequestsService {
   private async getOrThrow(id: string) {
     const request = await this.prisma.request.findUnique({ where: { id } });
     if (!request) throw new NotFoundException('Requisição não encontrada');
+    if (request.executionMode === 'bpm_v1') throw new ConflictException('WRONG_EXECUTOR');
     return request;
   }
 
   private async getPendingApproval(id: string) {
     const request = await this.prisma.request.findUnique({ where: { id }, include: { approvals: true } });
     if (!request) throw new NotFoundException('Requisição não encontrada');
+    if (request.executionMode === 'bpm_v1') throw new ConflictException('WRONG_EXECUTOR');
     if (request.status !== 'aguardando_aprovacao') throw new BadRequestException('A requisição não está aguardando aprovação');
     return request;
   }
@@ -970,6 +1138,7 @@ export class RequestsService {
     const recent = await this.prisma.request.findMany({
       where: {
         id: { not: request.id },
+        executionMode: 'legacy',
         requesterId: request.requesterId,
         createdAt: { gte: windowStart },
         status: { notIn: ['rascunho', 'cancelada', 'reprovada'] },

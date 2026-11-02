@@ -8,6 +8,8 @@ import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { clientsApi, type Client } from '../api/clients';
 import { costCentersApi, type CostCenter } from '../api/costCenters';
 import { jobTitlesApi, type JobTitle } from '../api/jobTitles';
+import { sectorsApi, type Sector } from '../api/sectors';
+import { logisticsCatalogApi, type LogisticsCatalogItem } from '../api/logisticsCatalog';
 import { translateApiError } from '../utils/apiError';
 
 interface OptionSourceData {
@@ -39,6 +41,8 @@ function isFieldEmpty(value: unknown): boolean {
 
 const emptyForm: Omit<CreateRequestInput, 'categoryId'> = { title: '', description: '', priority: 'normal' };
 
+interface PurchaseRow { materialId: string; quantity: number; }
+
 /** "Nova requisição" — simplificada em uma única página (categoria + dados + campos dinâmicos),
  * em vez do stepper Categoria → Dados → Revisão → Envio do §15.1.2: o `FormPage` compartilhado já
  * cobre autosave de rascunho? Não — Fase 1 cria o rascunho só ao enviar (ver nota de simplificação
@@ -48,6 +52,14 @@ export function NewRequestPage() {
   const [searchParams] = useSearchParams();
   const [categories, setCategories] = useState<RequestCategory[]>([]);
   const [optionData, setOptionData] = useState<OptionSourceData>({ projects: [], collaborators: [], clients: [], cost_centers: [], job_titles: [] });
+  const [requester, setRequester] = useState<CollaboratorSafe | null>(null);
+  const [sectors, setSectors] = useState<Sector[]>([]);
+  const [purchaseCatalog, setPurchaseCatalog] = useState<LogisticsCatalogItem[]>([]);
+  const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
+  const [purchaseSearch, setPurchaseSearch] = useState('');
+  const [purchaseCategory, setPurchaseCategory] = useState('');
+  const [purchaseSubcategory, setPurchaseSubcategory] = useState('');
+  const [purchaseItemSelection, setPurchaseItemSelection] = useState('');
   const [categoryId, setCategoryId] = useState(searchParams.get('categoryId') ?? '');
   const parentRequestId = searchParams.get('parentRequestId') ?? undefined;
   const [form, setForm] = useState(emptyForm);
@@ -55,20 +67,53 @@ export function NewRequestPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void Promise.all([requestCategoriesApi.list(), projectsApi.list(), collaboratorsApi.list(), clientsApi.list(), costCentersApi.list(), jobTitlesApi.list()]).then(
-      ([c, projects, collaborators, clients, costCenters, jobTitles]) => {
+    void Promise.all([requestCategoriesApi.list(), projectsApi.list(), collaboratorsApi.list(), clientsApi.list(), costCentersApi.list(), jobTitlesApi.list(), collaboratorsApi.me(), sectorsApi.list()]).then(
+      ([c, projects, collaborators, clients, costCenters, jobTitles, me, sectorList]) => {
         setCategories(c);
         setOptionData({ projects, collaborators, clients, cost_centers: costCenters, job_titles: jobTitles });
+        setRequester(me);
+        setSectors(sectorList);
       },
     );
   }, []);
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const customFields: RequestFormField[] = useMemo(() => selectedCategory?.currentVersion?.formSchema ?? [], [selectedCategory]);
+  const isPurchaseRequest = selectedCategory?.code === 'SUP-COMPRA' || selectedCategory?.name.toLowerCase() === 'compra de material';
+  const requesterSector = requester ? sectors.find((sector) => sector.id === requester.sectorId) : null;
+  const requesterParentSector = requesterSector?.parentSectorId ? sectors.find((sector) => sector.id === requesterSector.parentSectorId) : null;
+  const purchaseTitle = requesterSector ? `Compra de Materiais - ${requesterParentSector ? `${requesterParentSector.name}/${requesterSector.name}` : requesterSector.name}` : 'Compra de Materiais';
+
+  useEffect(() => {
+    if (!isPurchaseRequest) { setPurchaseCatalog([]); setPurchaseRows([]); return; }
+    void logisticsCatalogApi.list().then(setPurchaseCatalog).catch(() => setError('Não foi possível carregar o catálogo da Logística.'));
+  }, [isPurchaseRequest]);
 
   function pickCategory(id: string) {
     setCategoryId(id);
     setFormValues({});
+    setPurchaseRows([]);
+  }
+
+  const purchaseCategories = useMemo(() => [...new Set(purchaseCatalog.map((item) => item.category))].sort(), [purchaseCatalog]);
+  const purchaseSubcategories = useMemo(
+    () => [...new Set(purchaseCatalog.filter((item) => !purchaseCategory || item.category === purchaseCategory).map((item) => item.subcategory || 'Sem subcategoria'))].sort(),
+    [purchaseCatalog, purchaseCategory],
+  );
+  const purchaseItems = useMemo(
+    () => purchaseCatalog.filter((item) => (!purchaseCategory || item.category === purchaseCategory) && (!purchaseSubcategory || (item.subcategory || 'Sem subcategoria') === purchaseSubcategory)),
+    [purchaseCatalog, purchaseCategory, purchaseSubcategory],
+  );
+  const purchaseSearchResults = useMemo(() => {
+    const query = purchaseSearch.trim().toLowerCase();
+    if (!query) return [];
+    return purchaseCatalog.filter((item) => `${item.code} ${item.shortDescription} ${item.category} ${item.subcategory ?? ''}`.toLowerCase().includes(query)).slice(0, 20);
+  }, [purchaseCatalog, purchaseSearch]);
+
+  function addPurchaseRow(materialId: string) {
+    if (!materialId || purchaseRows.some((row) => row.materialId === materialId)) return;
+    setPurchaseRows((rows) => [...rows, { materialId, quantity: 1 }]);
+    setPurchaseItemSelection('');
   }
 
   function setFieldValue(key: string, value: unknown) {
@@ -83,7 +128,11 @@ export function NewRequestPage() {
       setError('Selecione uma categoria.');
       return;
     }
-    for (const field of customFields) {
+    if (isPurchaseRequest && purchaseRows.length === 0) {
+      setError('Selecione ao menos um item da Logística.');
+      return;
+    }
+    for (const field of isPurchaseRequest ? [] : customFields) {
       if (field.required && isFieldEmpty(formValues[field.key])) {
         setError(`Campo obrigatório: ${field.label}`);
         return;
@@ -91,7 +140,12 @@ export function NewRequestPage() {
     }
 
     try {
-      const created = await requestsApi.create({ ...form, categoryId, parentRequestId, formData: customFields.length > 0 ? formValues : undefined });
+      const items = purchaseRows.map((row) => {
+        const material = purchaseCatalog.find((item) => item.id === row.materialId)!;
+        return { materialId: material.id, code: material.code, item: material.shortDescription, category: material.category, subcategory: material.subcategory, unit: material.unit, quantity: row.quantity, unitPrice: material.unitPrice };
+      });
+      const purchaseTotal = items.reduce((total, item) => total + item.quantity * Number(item.unitPrice ?? 0), 0).toFixed(2);
+      const created = await requestsApi.create({ ...form, categoryId, title: isPurchaseRequest ? purchaseTitle : form.title, estimatedValue: isPurchaseRequest ? purchaseTotal : form.estimatedValue, parentRequestId, formData: isPurchaseRequest ? { purchaseItems: items } : customFields.length > 0 ? formValues : undefined });
       await requestsApi.submit(created.id);
       navigate(`/requests/${created.id}`);
     } catch (err) {
@@ -100,22 +154,24 @@ export function NewRequestPage() {
   };
 
   return (
-    <FormPage breadcrumb={['Axis', 'Requisições', 'Nova']} onSubmit={onSubmit} onCancel={() => navigate('/requests')} error={error} submitLabel="Enviar requisição" maxWidth={620}>
-      <FormSection title="Categoria">
-        <select value={categoryId} onChange={(e) => pickCategory(e.target.value)} required>
-          <option value="">Selecione a categoria</option>
-          {categories.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.code})
-            </option>
-          ))}
-        </select>
-      </FormSection>
+    <FormPage breadcrumb={['Axis', 'Requisições', 'Nova']} onSubmit={onSubmit} onCancel={() => navigate('/requests')} error={error} submitLabel="Enviar requisição">
+      {!categoryId && (
+        <FormSection title="Categoria">
+          <select value={categoryId} onChange={(e) => pickCategory(e.target.value)} required>
+            <option value="">Selecione a categoria</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name} ({c.code})
+              </option>
+            ))}
+          </select>
+        </FormSection>
+      )}
 
       {categoryId && (
         <FormSection title="Dados da requisição">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <input placeholder="Título (10-120 caracteres)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={10} maxLength={120} />
+            {isPurchaseRequest ? <input value={purchaseTitle} readOnly aria-label="Título da requisição" /> : <input placeholder="Título (10-120 caracteres)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={10} maxLength={120} />}
             <textarea placeholder="Descrição/justificativa" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} required />
             <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as CreateRequestInput['priority'] })}>
               <option value="baixa">Prioridade: Baixa</option>
@@ -125,11 +181,13 @@ export function NewRequestPage() {
             </select>
             <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>Data necessária</label>
             <input type="date" value={form.neededBy ?? ''} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} />
+            {isPurchaseRequest && <select value={form.costCenterId ?? ''} onChange={(e) => setForm({ ...form, costCenterId: e.target.value || undefined })} required><option value="">Selecione o centro de custo *</option>{optionData.cost_centers.map((cc) => <option key={cc.id} value={cc.id}>{cc.code} — {cc.name}</option>)}</select>}
           </div>
         </FormSection>
       )}
 
       {customFields.length > 0 && (
+        !isPurchaseRequest && (
         <FormSection title="Campos específicos da categoria">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {customFields.map((field) => (
@@ -141,6 +199,47 @@ export function NewRequestPage() {
                 {renderField(field, formValues[field.key], (value) => setFieldValue(field.key, value), optionData)}
               </div>
             ))}
+          </div>
+        </FormSection>)
+      )}
+
+      {isPurchaseRequest && (
+        <FormSection title="Itens da Logística">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <input
+              type="search"
+              placeholder="Pesquisar item por nome ou código"
+              value={purchaseSearch}
+              onChange={(e) => setPurchaseSearch(e.target.value)}
+              disabled={purchaseCatalog.length === 0}
+              aria-label="Pesquisar item da Logística"
+            />
+            {purchaseSearch.trim() && (
+              <select value="" onChange={(e) => { addPurchaseRow(e.target.value); setPurchaseSearch(''); }} disabled={purchaseSearchResults.length === 0} aria-label="Resultado da pesquisa de item">
+                <option value="">{purchaseSearchResults.length ? 'Selecione o item encontrado' : 'Nenhum item encontrado — use os filtros abaixo'}</option>
+                {purchaseSearchResults.map((item) => <option key={item.id} value={item.id}>{item.category} / {item.subcategory || 'Sem subcategoria'} / {item.shortDescription} — R$ {Number(item.unitPrice).toFixed(2)} / {item.unit}</option>)}
+              </select>
+            )}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto', gap: 10, alignItems: 'center' }}>
+              <select value={purchaseCategory} onChange={(e) => { setPurchaseCategory(e.target.value); setPurchaseSubcategory(''); setPurchaseItemSelection(''); }} disabled={purchaseCatalog.length === 0} aria-label="Categoria do item">
+                <option value="">Categoria</option>
+                {purchaseCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+              </select>
+              <select value={purchaseSubcategory} onChange={(e) => { setPurchaseSubcategory(e.target.value); setPurchaseItemSelection(''); }} disabled={!purchaseCategory || purchaseSubcategories.length === 0} aria-label="Subcategoria do item">
+                <option value="">Subcategoria</option>
+                {purchaseSubcategories.map((subcategory) => <option key={subcategory} value={subcategory}>{subcategory}</option>)}
+              </select>
+              <select value={purchaseItemSelection} onChange={(e) => setPurchaseItemSelection(e.target.value)} disabled={!purchaseSubcategory || purchaseItems.length === 0} aria-label="Item da Logística">
+                <option value="">{purchaseSubcategory ? 'Item' : 'Selecione categoria e subcategoria'}</option>
+                {purchaseItems.map((item) => <option key={item.id} value={item.id}>{item.shortDescription} — R$ {Number(item.unitPrice).toFixed(2)} / {item.unit}</option>)}
+              </select>
+              <button type="button" onClick={() => addPurchaseRow(purchaseItemSelection)} disabled={!purchaseItemSelection || purchaseRows.some((row) => row.materialId === purchaseItemSelection)}>Adicionar item</button>
+            </div>
+            <small style={{ color: 'var(--text-muted)' }}>{purchaseRows.length ? `${purchaseRows.length} item(ns) adicionado(s). Selecione outro item e clique em “Adicionar item”.` : 'Você pode adicionar vários itens diferentes na mesma requisição.'}</small>
+            {purchaseRows.map((row) => {
+              const item = purchaseCatalog.find((candidate) => candidate.id === row.materialId)!;
+              return <div key={row.materialId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px auto', gap: 8, alignItems: 'center' }}><span>{item.category} / {item.subcategory ?? '—'} / <strong>{item.shortDescription}</strong><br /><small>R$ {Number(item.unitPrice).toFixed(2)} por {item.unit}</small></span><input type="number" min="1" step="1" value={row.quantity} aria-label={`Quantidade de ${item.shortDescription}`} onChange={(e) => setPurchaseRows((rows) => rows.map((current) => current.materialId === row.materialId ? { ...current, quantity: Math.max(1, Number(e.target.value) || 1) } : current))} /><button type="button" onClick={() => setPurchaseRows((rows) => rows.filter((current) => current.materialId !== row.materialId))}>Remover</button></div>;
+            })}
           </div>
         </FormSection>
       )}

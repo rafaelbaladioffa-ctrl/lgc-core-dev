@@ -1,0 +1,141 @@
+{
+  "note": "Round-2 actual methods, explicit fixtures; no PostgreSQL/HTTP integration.",
+  "findings": [
+    {
+      "id": "T01-submit-replay-and-current-auth",
+      "result": {
+        "response": {
+          "replay": true,
+          "requestId": "r",
+          "currentVersion": 1,
+          "receiptId": "receipt"
+        },
+        "currentUserReads": 0,
+        "currentResourceVersion": 4,
+        "note": "Replay now reaches receipt, but no current-auth lookup and returned version is stale."
+      }
+    },
+    {
+      "id": "T02-author-save-requires-executor-permission",
+      "result": {
+        "allowed": false,
+        "currentPermissions": [
+          "request:create",
+          "request:read",
+          "request:comment"
+        ],
+        "error": "Permissão atual insuficiente"
+      }
+    },
+    {
+      "id": "T03-manager-reassign-requires-candidate",
+      "result": {
+        "allowed": false,
+        "requestScopeReached": false,
+        "error": "Você não é candidato desta atividade"
+      }
+    },
+    {
+      "id": "T04-receipt-does-not-bind-activity-id",
+      "result": {
+        "replayForDifferentActivityCanUseSameBody": true,
+        "activityIdReturned": "activity-A",
+        "note": "Callers add Request.id to body, but not route activity id."
+      }
+    },
+    {
+      "id": "T05-sla-seconds-cross-close",
+      "result": {
+        "start": "2026-11-06T20:59:45.000Z",
+        "minutes": 1,
+        "actual": "2026-11-06T21:00:45.000Z",
+        "expected": "2026-11-09T11:00:45.000Z"
+      }
+    },
+    {
+      "id": "T06-definition-unsupported-phase-capability-budget",
+      "result": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "T07-numeric-and-text-limits",
+      "result": [
+        {
+          "field": {
+            "key": "amount",
+            "type": "decimal"
+          },
+          "value": 0.123456789,
+          "accepted": true
+        },
+        {
+          "field": {
+            "key": "amount",
+            "type": "decimal"
+          },
+          "value": "12345678901234567890.1234",
+          "accepted": true
+        },
+        {
+          "field": {
+            "key": "count",
+            "type": "integer"
+          },
+          "value": 9007199254740992,
+          "accepted": true
+        },
+        {
+          "field": {
+            "key": "text",
+            "type": "text",
+            "maxLength": 3
+          },
+          "value": "much longer",
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "id": "T08-field-projection-and-note-fix",
+      "result": {
+        "fields": {
+          "private_field": "synthetic private value"
+        },
+        "internalNotesReturned": 0
+      }
+    },
+    {
+      "id": "T09-read-permission-not-revalidated-and-draft-list",
+      "result": {
+        "userReads": 0,
+        "beneficiaryBranch": {
+          "beneficiaryId": "author"
+        },
+        "paginationTake": null
+      }
+    },
+    {
+      "id": "T10-confirmed-corrections",
+      "result": {
+        "formChecks": [
+          {
+            "key": "name",
+            "rejected": true
+          },
+          {
+            "key": "when",
+            "rejected": true
+          },
+          {
+            "key": "amount",
+            "rejected": true
+          }
+        ],
+        "unsupportedNodeRejected": true,
+        "holidayTarget": "2026-11-10T12:30:00.000Z"
+      }
+    }
+  ]
+}

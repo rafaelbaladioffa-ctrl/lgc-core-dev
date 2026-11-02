@@ -13,4 +13,8 @@ export class CreateCostCenterDto {
   @IsOptional()
   @IsUUID()
   parentCostCenterId?: string;
+
+  @IsOptional()
+  @IsUUID()
+  responsibleCollaboratorId?: string;
 }

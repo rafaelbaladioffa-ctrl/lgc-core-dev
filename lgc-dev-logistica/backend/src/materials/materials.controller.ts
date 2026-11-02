@@ -22,6 +22,13 @@ export class MaterialsController {
     return MATERIAL_FAMILIES;
   }
 
+  /** Catálogo enxuto consumido pelo formulário de compra do Axis. */
+  @Get('purchase-catalog')
+  @RequirePermissions('material:read')
+  purchaseCatalog() {
+    return this.materials.purchaseCatalog();
+  }
+
   @Get(':id')
   @RequirePermissions('material:read')
   get(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {

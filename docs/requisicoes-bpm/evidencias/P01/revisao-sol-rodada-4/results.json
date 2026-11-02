@@ -1,0 +1,63 @@
+{
+  "note": "Checkpoint-4 current-method observations; synthetic persistence, no PostgreSQL/HTTP.",
+  "findings": [
+    {
+      "id": "D01-generated-definition-now-valid",
+      "result": {
+        "policy": {
+          "confidentiality": "interna",
+          "requiresAcceptance": false,
+          "allowRepresentation": false,
+          "beneficiaryCanRead": true,
+          "executorMayBeRequester": false,
+          "closure": {
+            "mode": "manual"
+          }
+        },
+        "validation": {
+          "valid": true,
+          "errors": []
+        }
+      }
+    },
+    {
+      "id": "D02-current-directory-separates-identities",
+      "result": [
+        {
+          "userId": "user-P",
+          "collaboratorId": "collaborator-P",
+          "fullName": "Synthetic Person",
+          "sectorId": "sector-S"
+        }
+      ]
+    },
+    {
+      "id": "D03-save-draft-bypasses-field-projection",
+      "result": {
+        "detailFieldProjection": {},
+        "saveDraftResponseFields": {
+          "private_value": "synthetic-secret"
+        }
+      }
+    },
+    {
+      "id": "D04-manager-cancel-requires-requester-permission",
+      "result": {
+        "allowed": false,
+        "permissions": [
+          "request:update",
+          "request:assign",
+          "request:read"
+        ],
+        "error": "Permissão atual insuficiente"
+      }
+    },
+    {
+      "id": "D05-document-mask-disagrees-with-field-mask",
+      "result": {
+        "projectedFields": {},
+        "documentVisible": true
+      }
+    }
+  ]
+}

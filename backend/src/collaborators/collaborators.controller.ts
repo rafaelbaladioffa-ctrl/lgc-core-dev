@@ -7,8 +7,8 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
 import { AuditAction } from '../audit/audit-action.decorator.js';
-import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
+import { CurrentUser } from '../auth/current-user.decorator.js';
 
 @Controller('collaborators')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -17,6 +17,13 @@ export class CollaboratorsController {
     private readonly collaboratorsService: CollaboratorsService,
     private readonly sensitiveAccessLog: SensitiveAccessLogService,
   ) {}
+
+  @Get('me')
+  @RequirePermissions('collaborator:read')
+  findMe(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.collaboratorId) return null;
+    return this.collaboratorsService.findOneSafe(user.collaboratorId);
+  }
 
   @Post()
   @RequirePermissions('collaborator:create')

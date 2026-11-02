@@ -35,8 +35,14 @@ export class RequestCategoriesService {
   /** Catalog for the portal/new-request screen: active categories with their latest version. */
   async findAllCatalog(sectorId?: string) {
     const categories = await this.prisma.requestCategory.findMany({
-      where: { active: true, sectorId },
-      include: { versions: { orderBy: { version: 'desc' }, take: 1 } },
+      where: { active: true, sectorId, versions: { some: { bpmStatus: null } } },
+      include: {
+        versions: {
+          where: { bpmStatus: null },
+          orderBy: { version: 'desc' },
+          take: 1,
+        },
+      },
       orderBy: { name: 'asc' },
     });
     return categories.map((c) => ({ ...c, currentVersion: c.versions[0] ?? null, versions: undefined }));
@@ -45,15 +51,21 @@ export class RequestCategoriesService {
   async findOne(id: string) {
     const category = await this.prisma.requestCategory.findUnique({
       where: { id },
-      include: { versions: { orderBy: { version: 'desc' } } },
+      include: {
+        versions: {
+          where: { bpmStatus: null },
+          orderBy: { version: 'desc' },
+        },
+      },
     });
-    if (!category) throw new NotFoundException('Categoria não encontrada');
+    if (!category || category.versions.length === 0)
+      throw new NotFoundException('Categoria não encontrada');
     return category;
   }
 
   async latestVersion(categoryId: string) {
     const version = await this.prisma.categoryVersion.findFirst({
-      where: { categoryId },
+      where: { categoryId, bpmStatus: null },
       orderBy: { version: 'desc' },
     });
     if (!version) throw new NotFoundException('Categoria sem versão publicada');

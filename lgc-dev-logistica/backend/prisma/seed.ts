@@ -1,6 +1,7 @@
 import { PrismaClient, UomDimension } from '@prisma/client';
 import { DEFAULT_AXIS_ROLE_MAP, PERMISSIONS, ROLES } from '../src/rbac/catalog.js';
 import { CATALOG } from './catalog-data.js';
+import { REVISED_CATALOG } from './revised-catalog.js';
 
 const prisma = new PrismaClient();
 
@@ -49,7 +50,33 @@ async function main() {
   }
 
   if (process.env.SEED_CATALOG !== 'false') await seedCatalog();
+  if (process.env.SEED_REVISED_CATALOG === 'true') await syncRevisedCatalog();
   if (process.env.SEED_DEV_DATA === 'true' && process.env.NODE_ENV !== 'production') await seedDevData();
+}
+
+/** Sincroniza o catálogo aprovado na planilha revisada para o ambiente de teste. */
+async function syncRevisedCatalog() {
+  const uoms = new Map((await prisma.unitOfMeasure.findMany()).map((u) => [u.code, u.id]));
+  for (const item of REVISED_CATALOG) {
+    const stockUomId = uoms.get(item.uom);
+    if (!stockUomId) throw new Error(`Unidade ${item.uom} do item ${item.code} não existe no cadastro de unidades.`);
+    await prisma.material.upsert({
+      where: { code: item.code },
+      update: {
+        shortDescription: item.description, category: item.category, subcategory: 'Geral',
+        type: item.type as never, stockUomId, manufacturer: item.manufacturer,
+        status: 'ATIVO', averageCost: item.price, lastCost: item.price,
+        technicalDescription: 'Item sincronizado do catálogo revisado da Logística.',
+      },
+      create: {
+        code: item.code, shortDescription: item.description, category: item.category, subcategory: 'Geral',
+        type: item.type as never, stockUomId, manufacturer: item.manufacturer, createdBy: 'revised-catalog',
+        status: 'ATIVO', averageCost: item.price, lastCost: item.price,
+        technicalDescription: 'Item sincronizado do catálogo revisado da Logística.',
+      },
+    });
+  }
+  console.log(`Catálogo revisado: ${REVISED_CATALOG.length} item(ns) ativo(s) para requisições.`);
 }
 
 /**

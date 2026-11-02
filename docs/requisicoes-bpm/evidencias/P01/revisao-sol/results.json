@@ -1,0 +1,81 @@
+{
+  "note": "Isolated read-only checks; no DB or HTTP integration executed.",
+  "findings": [
+    {
+      "id": "S01-submit-common-fields",
+      "result": {
+        "accepted": false,
+        "error": "{\"title\":\"Campo desconhecido\",\"description\":\"Campo desconhecido\"}"
+      }
+    },
+    {
+      "id": "S02-malformed-graph",
+      "result": {
+        "valid": true,
+        "errors": []
+      }
+    },
+    {
+      "id": "S03-internal-note-visible-to-author",
+      "result": {
+        "returnedInternalNotes": 1
+      }
+    },
+    {
+      "id": "S04-submit-replay-precondition",
+      "result": {
+        "receiptReached": false,
+        "error": "Somente rascunho do autor pode ser enviado"
+      }
+    },
+    {
+      "id": "S05-sla-holiday",
+      "result": {
+        "fixtureHoliday": "2026-11-09",
+        "actual": "2026-11-09T12:30:00.000Z",
+        "expectedWithPublishedHoliday": "2026-11-10T12:30:00.000Z"
+      }
+    },
+    {
+      "id": "S06-field-validation",
+      "result": [
+        {
+          "field": "date",
+          "accepted": true
+        },
+        {
+          "field": "amount",
+          "accepted": true
+        },
+        {
+          "field": "text",
+          "accepted": true
+        },
+        {
+          "field": "proof",
+          "accepted": true
+        }
+      ]
+    },
+    {
+      "id": "S07-global-modeler-can-patch-without-process-grant",
+      "result": {
+        "updatedWithoutAnyGrantLookup": true
+      }
+    },
+    {
+      "id": "S08-receipt-ignores-route-and-target",
+      "result": {
+        "requestedRoute": "claim",
+        "returnedRoute": "submit",
+        "returnedRequest": "request-A"
+      }
+    },
+    {
+      "id": "S09-beneficiary-can-read-private-draft",
+      "result": {
+        "granted": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+import React from 'react';
+import { coerceBpmValue, mergeDraftFields, DynamicForm, type BpmField } from '../src/features/requisicoes-bpm/DynamicForm';
+import { renderToStaticMarkup } from 'react-dom/server';
+const assert = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
+const field = (type: BpmField['type']): BpmField => ({ key: type, label: type, type });
+assert(coerceBpmValue(field('boolean'), false) === false, 'false must remain false');
+assert(coerceBpmValue(field('integer'), '0') === 0, 'zero must be numeric zero');
+assert(coerceBpmValue(field('decimal'), '0.10') === '0.10', 'decimal must remain a string');
+assert(coerceBpmValue(field('date'), '2026-11-02') === '2026-11-02', 'date must remain ISO text');
+assert(coerceBpmValue(field('select'), 'option-id') === 'option-id', 'select must use id');
+assert(JSON.stringify(mergeDraftFields({ hidden: 'keep', visible: 'old' }, { visible: 'new' }, new Set(['visible']))) === JSON.stringify({ hidden: 'keep', visible: 'new' }), 'draft merge must preserve hidden values');
+let blocked = false; try { mergeDraftFields({ hidden: 'keep' }, { hidden: 'changed' }, new Set()); } catch { blocked = true; } assert(blocked, 'protected field write must be rejected');
+const markup = renderToStaticMarkup(<DynamicForm fields={[field('boolean'), field('integer'), field('decimal'), field('date'), { key: 'kind', label: 'Kind', type: 'select', options: [{ id: 'id-1', label: 'Option' }] }, field('attachment')]} values={{ boolean: false, integer: 0, decimal: '0.10', date: '2026-11-02', kind: 'id-1' }} onChange={() => undefined} onUpload={() => undefined} />);
+assert(markup.includes('type="checkbox"') && markup.includes('type="number"') && markup.includes('type="date"') && markup.includes('type="file"'), 'DynamicForm must render typed controls');
+assert(markup.includes('value="id-1"'), 'select must render stable option id');
+console.log('P01 DynamicForm component/contract journey: 9 assertions passed');

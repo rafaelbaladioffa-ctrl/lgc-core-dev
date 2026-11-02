@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { FormPage, FormSection } from '../components/layout/FormPage';
 import { costCentersApi, type CostCenter, type CreateCostCenterInput } from '../api/costCenters';
 import { sectorsApi, type Sector } from '../api/sectors';
+import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { translateApiError } from '../utils/apiError';
 
 const emptyForm: CreateCostCenterInput = { name: '', sectorId: '' };
@@ -14,21 +15,23 @@ export function CostCenterFormPage() {
 
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
+  const [collaborators, setCollaborators] = useState<CollaboratorSafe[]>([]);
   const [form, setForm] = useState<CreateCostCenterInput>(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(isEdit);
 
   useEffect(() => {
-    void Promise.all([costCentersApi.list(), sectorsApi.list()]).then(([cc, secs]) => {
+    void Promise.all([costCentersApi.list(), sectorsApi.list(), collaboratorsApi.list()]).then(([cc, secs, cols]) => {
       setCostCenters(cc);
       setSectors(secs);
+      setCollaborators(cols);
     });
   }, []);
 
   useEffect(() => {
     if (!id) return;
     void costCentersApi.get(id).then((c) => {
-      setForm({ name: c.name, sectorId: c.sectorId, parentCostCenterId: c.parentCostCenterId ?? undefined });
+      setForm({ name: c.name, sectorId: c.sectorId, parentCostCenterId: c.parentCostCenterId ?? undefined, responsibleCollaboratorId: c.responsibleCollaboratorId ?? undefined });
       setLoading(false);
     });
   }, [id]);
@@ -38,7 +41,7 @@ export function CostCenterFormPage() {
     setError(null);
     try {
       if (isEdit && id) {
-        await costCentersApi.update(id, { name: form.name, sectorId: form.sectorId });
+        await costCentersApi.update(id, { name: form.name, sectorId: form.sectorId, responsibleCollaboratorId: form.responsibleCollaboratorId });
       } else {
         await costCentersApi.create(form);
       }
@@ -81,6 +84,10 @@ export function CostCenterFormPage() {
               ))}
             </select>
           )}
+          <select value={form.responsibleCollaboratorId ?? ''} onChange={(e) => setForm({ ...form, responsibleCollaboratorId: e.target.value || undefined })}>
+            <option value="">Responsável pela aprovação final (opcional)</option>
+            {collaborators.filter((c) => !form.sectorId || c.sectorId === form.sectorId).map((c) => <option key={c.id} value={c.id}>{c.fullName} ({c.matricula})</option>)}
+          </select>
         </div>
       </FormSection>
     </FormPage>

@@ -1,0 +1,62 @@
+[
+  {
+    "path": "backend/src/request-runtime/request-runtime.service.ts",
+    "sha256": "00E929A6F47ED67112032E0E3F644AAAE8F36ED78B57B187124B99A0B8B4EF51"
+  },
+  {
+    "path": "backend/src/request-runtime/request-runtime.controller.ts",
+    "sha256": "91814AEDFEAEAE535B12AB4E2509EC5A177A302452C5092F254DDB6EC666B669"
+  },
+  {
+    "path": "backend/src/request-runtime/dto.ts",
+    "sha256": "BAF5AFC6E4DCB9CEE5FDABC329B1C0652413CAEFFC8614A88FC0F22FC003CCA2"
+  },
+  {
+    "path": "backend/src/request-runtime/p01-regression.spec.ts",
+    "sha256": "E12EB764F27E56C70E7F50B80F99B81344253EDCE927BDDF8335AD86A0B92D45"
+  },
+  {
+    "path": "backend/test/support/bpm-test-database.ts",
+    "sha256": "46E75576C5145A1680F5811D7841B9A42F089B3949D4288576B56BE5833BB29E"
+  },
+  {
+    "path": "backend/src/request-processes/request-processes.service.ts",
+    "sha256": "5B33B5C84EF4F3C21C19C32EEAE03A0B37A3DD35803F85405293A8E89DDE0C16"
+  },
+  {
+    "path": "backend/src/request-processes/request-processes.controller.ts",
+    "sha256": "3A403A3B3DB21A7A57A2F3737FACAEFAB7234DDFE47F88081C439D4964467523"
+  },
+  {
+    "path": "backend/src/request-processes/dto.ts",
+    "sha256": "44DAFAFE563422B393971DC4FB4E29C819DAA5148D783D1817352E2BAA790473"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/BpmPages.tsx",
+    "sha256": "D58B58EC3C44AE69DF8C041F743BAE7FB591B3313CF1E44F0E544D11B30E67FF"
+  },
+  {
+    "path": "frontend/src/features/requisicoes-bpm/api.ts",
+    "sha256": "E2B38CF0E1DE1D8C48844A67E095C0553525E1F50313C8A7B4BFB6A75A91FB47"
+  },
+  {
+    "path": "backend/prisma/schema.prisma",
+    "sha256": "ADF7B65A68BFD37C56B8D6955B5F399FAF9B7810D0B8B1D0E4CF80BB7920A504"
+  },
+  {
+    "path": "backend/prisma/migrations/20261101000000_request_bpm_p01/migration.sql",
+    "sha256": "6805B3ED54D01B94A4EDCF6ADEB39349225D1AECCCD341E970704231313E802D"
+  },
+  {
+    "path": "backend/src/requests/requests.service.ts",
+    "sha256": "80D479949D4FD40E76968A4B38881391D6ED152EA861F92984B1025F8006BD63"
+  },
+  {
+    "path": "backend/src/request-categories/request-categories.service.ts",
+    "sha256": "8E999A5EE6FE93BF6795A16B66FE58C027BBAC85FABD2AF1ED1D44D1B51F2EAA"
+  },
+  {
+    "path": "frontend/src/App.tsx",
+    "sha256": "606F76A566CD6243F3F326782832684462C0D4D7A8B0F44F202129109F655174"
+  }
+]

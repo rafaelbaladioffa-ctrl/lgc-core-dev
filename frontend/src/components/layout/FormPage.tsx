@@ -37,7 +37,7 @@ interface FormPageProps {
   submitLabel?: string;
   loading?: boolean;
   children: ReactNode;
-  maxWidth?: number;
+  maxWidth?: number | string;
 }
 
 export function FormPage({
@@ -48,7 +48,7 @@ export function FormPage({
   submitLabel = 'Salvar',
   loading,
   children,
-  maxWidth = 880,
+  maxWidth = '100%',
 }: FormPageProps) {
   // Double-submit protection (PLANNING.md 1.1): disable the submit/cancel row while onSubmit's
   // promise is in flight, regardless of which module's form this is — every form goes through
@@ -100,7 +100,7 @@ export function FormPage({
           onChange={() => {
             dirtyRef.current = true;
           }}
-          style={{ maxWidth }}
+          style={{ width: '100%', maxWidth }}
         >
           {children}
 

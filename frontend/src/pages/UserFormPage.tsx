@@ -5,6 +5,10 @@ import { usersApi, rolesApi, type Role, type CreatedUser } from '../api/users';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { translateApiError } from '../utils/apiError';
 
+const ROLE_LABELS: Record<string, string> = {
+  analista_suprimentos: 'Analista de Suprimentos',
+};
+
 export function UserFormPage() {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
@@ -144,7 +148,7 @@ export function UserFormPage() {
           {roles.map((role) => (
             <label key={role.id} style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
               <input type="checkbox" checked={roleIds.includes(role.id)} onChange={() => toggleRole(role.id)} />
-              {role.name}
+              {ROLE_LABELS[role.name] ?? role.name}
               {role.description && <span style={{ color: 'var(--text-muted)' }}> — {role.description}</span>}
             </label>
           ))}

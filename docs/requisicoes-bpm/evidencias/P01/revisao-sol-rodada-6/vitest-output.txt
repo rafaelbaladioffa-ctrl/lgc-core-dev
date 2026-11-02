@@ -1,0 +1,21 @@
+RUN  v4.1.12 C:/Users/servidor/Documents/orca-dev/lgc-dev-core/backend
+
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > keeps title/description outside the dynamic form schema 1ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects whitespace required fields, impossible dates, and excess decimal scale 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects decimal scale individually 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects decimal precision individually 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects unsafe integer individually 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects text maxLength individually 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > counts holidays and weekends in the business calendar 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects a non-linear or malformed P01 graph 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > accepts the canonical definition generated for a new process 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > keeps publisher userId distinct from collaboratorId in the directory contract 1ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > configures a process atomically with a publisher User id 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > merges draft fields and preserves omitted protected values 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > records SLA breach at the configured deadline, not the stop time 0ms
+ ✓ src/request-runtime/p01-regression.spec.ts > BPM P01 regressions > rejects unsupported phase, capability, policy, and SLA metadata 0ms
+
+ Test Files  1 passed (1)
+      Tests  14 passed (14)
+   Start at  00:38:15
+   Duration  578ms (transform 72ms, setup 0ms, import 424ms, tests 6ms, environment 0ms)

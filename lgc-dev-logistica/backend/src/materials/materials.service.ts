@@ -35,10 +35,12 @@ export class MaterialsService {
   async list(query: ListMaterialsQuery, user: AuthenticatedUser) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
+    const useRevisedCatalog = process.env.SEED_REVISED_CATALOG === 'true';
     const where: Prisma.MaterialWhereInput = {
       ...(query.type && { type: query.type }),
       ...(query.category && { category: query.category }),
       status: query.status ?? 'ATIVO',
+      ...(useRevisedCatalog ? { code: { startsWith: 'REV-' } } : {}),
       ...(query.q && {
         OR: [
           { code: { contains: query.q, mode: 'insensitive' } },
@@ -53,6 +55,35 @@ export class MaterialsService {
       this.prisma.material.findMany({ where, orderBy: { code: 'asc' }, skip: (page - 1) * pageSize, take: pageSize, include: { stockUom: { select: { code: true, name: true } } } }),
     ]);
     return { total, page, pageSize, items: items.map((m) => this.present(m, user)) };
+  }
+
+  async purchaseCatalog() {
+    const useRevisedCatalog = process.env.SEED_REVISED_CATALOG === 'true';
+    const items = await this.prisma.material.findMany({
+      where: {
+        status: 'ATIVO',
+        ...(useRevisedCatalog ? { code: { startsWith: 'REV-' } } : {}),
+      },
+      orderBy: [{ category: 'asc' }, { subcategory: 'asc' }, { shortDescription: 'asc' }],
+      select: {
+        id: true, code: true, shortDescription: true, technicalDescription: true,
+        category: true, subcategory: true,
+        stockUom: { select: { code: true, name: true } },
+        averageCost: true, lastCost: true,
+      },
+    });
+    // O preço exibido para compra é sempre o último custo cadastrado; quando ainda não
+    // existe, usa o custo médio. Nunca devolve materiais sem valor cadastrado.
+    return items.map((item) => ({
+      id: item.id,
+      code: item.code,
+      shortDescription: item.shortDescription,
+      technicalDescription: item.technicalDescription,
+      category: item.category,
+      subcategory: item.subcategory,
+      unit: item.stockUom.code,
+      unitPrice: item.lastCost?.toString() ?? item.averageCost?.toString() ?? null,
+    })).filter((item) => item.unitPrice !== null);
   }
 
   async get(id: string, user: AuthenticatedUser) {

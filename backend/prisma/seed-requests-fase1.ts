@@ -123,9 +123,7 @@ const CATEGORIES: CategorySeed[] = [
     sectorName: 'Suprimentos',
     workflow: CADEIA_CUSTO,
     fields: [
-      { key: 'itens', label: 'Itens/especificação', type: 'textarea', required: true },
-      { key: 'quantidade', label: 'Quantidade', type: 'number', required: true },
-      { key: 'valor_estimado', label: 'Valor estimado (R$)', type: 'number', required: true },
+      { key: 'purchaseItems', label: 'Itens selecionados no catálogo da Logística', type: 'text', required: true },
     ],
   },
   {

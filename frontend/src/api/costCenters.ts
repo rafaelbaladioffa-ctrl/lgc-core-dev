@@ -6,17 +6,21 @@ export interface CostCenter {
   name: string;
   sectorId: string;
   parentCostCenterId: string | null;
+  responsibleCollaboratorId: string | null;
+  responsibleCollaborator?: { id: string; fullName: string } | null;
 }
 
 export interface CreateCostCenterInput {
   name: string;
   sectorId: string;
   parentCostCenterId?: string;
+  responsibleCollaboratorId?: string;
 }
 
 export interface UpdateCostCenterInput {
   name?: string;
   sectorId?: string;
+  responsibleCollaboratorId?: string;
 }
 
 export const costCentersApi = {

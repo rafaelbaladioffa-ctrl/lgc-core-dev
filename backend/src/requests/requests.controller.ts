@@ -9,6 +9,9 @@ import { ApproveRequestDto, RejectRequestDto } from './dto/decision.dto.js';
 import { RequestInformationDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
 import { CreateRequestCommentDto } from './dto/create-comment.dto.js';
 import { CreateRequestAttachmentDto } from './dto/create-attachment.dto.js';
+import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
+import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
+import { PurchaseQuotationSelectionDto } from './dto/purchase-quotation-selection.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
@@ -20,6 +23,13 @@ import type { RequestStatus } from '@prisma/client';
 function requireCollaboratorId(user: AuthenticatedUser): string {
   if (!user.collaboratorId) throw new ForbiddenException('Este usuário não está vinculado a um colaborador');
   return user.collaboratorId;
+}
+
+function requireProcurementRole(user: AuthenticatedUser): string {
+  if (!user.roles.includes('analista_suprimentos') && !user.roles.includes('admin')) {
+    throw new ForbiddenException('Somente o Analista de Suprimentos pode registrar análise e cotação.');
+  }
+  return requireCollaboratorId(user);
 }
 
 @Controller('requests')
@@ -42,8 +52,8 @@ export class RequestsController {
 
   @Get('queue')
   @RequirePermissions('request:read')
-  findQueue(@Query('sectorId') sectorId?: string, @Query('queueId') queueId?: string, @Query('status') status?: RequestStatus) {
-    return this.requestsService.findQueue({ sectorId, queueId, status });
+  findQueue(@Query('sectorId') sectorId?: string, @Query('queueId') queueId?: string, @Query('status') status?: RequestStatus, @CurrentUser() user?: AuthenticatedUser) {
+    return this.requestsService.findQueue({ sectorId, queueId, status }, user);
   }
 
   @Get('dashboard')
@@ -82,7 +92,7 @@ export class RequestsController {
   @RequirePermissions('request:update')
   @AuditAction({ action: 'triage_request', resourceType: 'request', resourceIdParam: 'id' })
   triage(@Param('id') id: string, @Body() dto: TriageRequestDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.triage(id, requireCollaboratorId(user), dto);
+    return this.requestsService.triage(id, requireCollaboratorId(user), dto, user.roles);
   }
 
   @Post(':id/assign')
@@ -90,6 +100,27 @@ export class RequestsController {
   @AuditAction({ action: 'assign_request', resourceType: 'request', resourceIdParam: 'id' })
   assign(@Param('id') id: string, @Body() dto: AssignRequestDto, @CurrentUser() user: AuthenticatedUser) {
     return this.requestsService.assign(id, requireCollaboratorId(user), dto);
+  }
+
+  @Post(':id/purchase-analysis')
+  @RequirePermissions('request:update')
+  @AuditAction({ action: 'record_purchase_analysis', resourceType: 'request', resourceIdParam: 'id' })
+  purchaseAnalysis(@Param('id') id: string, @Body() dto: PurchaseAnalysisDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.recordPurchaseAnalysis(id, requireProcurementRole(user), dto);
+  }
+
+  @Post(':id/purchase-quotation')
+  @RequirePermissions('request:update')
+  @AuditAction({ action: 'record_purchase_quotation', resourceType: 'request', resourceIdParam: 'id' })
+  purchaseQuotation(@Param('id') id: string, @Body() dto: PurchaseQuotationDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.recordPurchaseQuotation(id, requireProcurementRole(user), dto);
+  }
+
+  @Post(':id/purchase-quotation-selection')
+  @RequirePermissions('request:read')
+  @AuditAction({ action: 'select_purchase_quotation', resourceType: 'request', resourceIdParam: 'id' })
+  purchaseQuotationSelection(@Param('id') id: string, @Body() dto: PurchaseQuotationSelectionDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.selectPurchaseQuotation(id, requireCollaboratorId(user), dto);
   }
 
   @Post(':id/approve')

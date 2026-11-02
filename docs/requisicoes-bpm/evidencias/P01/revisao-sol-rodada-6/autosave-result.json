@@ -1,0 +1,29 @@
+{
+  "note": "Actual hook scheduling with controlled primitives/timers; no DOM, network or writes.",
+  "observedBeforeResponse": {
+    "calls": [
+      {
+        "fields": {
+          "details": "first edit"
+        },
+        "version": 0
+      },
+      {
+        "fields": {
+          "details": "second edit while first request is pending"
+        },
+        "version": 0
+      }
+    ],
+    "maximumConcurrentSaves": 2,
+    "expectedMaximum": 1
+  },
+  "stateTransitions": [
+    "pending",
+    "saving",
+    "pending",
+    "saving",
+    "saved",
+    "saved"
+  ]
+}

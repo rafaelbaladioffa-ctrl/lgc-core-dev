@@ -5,14 +5,17 @@ import { DataTable, StatusBadge, type ColumnDef } from '../components/DataTable'
 import { requestsApi, type AxisRequest } from '../api/requests';
 import { sectorsApi, type Sector } from '../api/sectors';
 import { formatDate } from '../utils/formatDate';
+import { useAuth } from '../context/AuthContext';
 
 /** Fila do setor (§15.1.5) — visão tabela das requisições por setor; distribuição/kanban
  * avançado fica para a Fase 2. */
 export function RequestsQueuePage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [requests, setRequests] = useState<AxisRequest[]>([]);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [sectorId, setSectorId] = useState('');
+  const isSupplyAnalyst = user?.roles.includes('analista_suprimentos') ?? false;
 
   useEffect(() => {
     void sectorsApi.list().then(setSectors);
@@ -47,6 +50,8 @@ export function RequestsQueuePage() {
   return (
     <AppLayout breadcrumb={['Axis', 'Requisições', 'Fila do setor']}>
       <div style={{ marginBottom: 12 }}>
+        {isSupplyAnalyst && <p style={{ margin: '0 0 8px', color: 'var(--text-muted)' }}>Exibindo as requisições encaminhadas ao seu setor de Suprimentos.</p>}
+        {!isSupplyAnalyst && (
         <select value={sectorId} onChange={(e) => setSectorId(e.target.value)} style={{ width: 260 }}>
           <option value="">Todos os setores</option>
           {sectors.map((s) => (
@@ -55,6 +60,7 @@ export function RequestsQueuePage() {
             </option>
           ))}
         </select>
+        )}
       </div>
       <DataTable columns={columns} rows={requests} rowKey={(r) => r.id} />
     </AppLayout>
