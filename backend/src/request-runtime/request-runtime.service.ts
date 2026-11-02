@@ -1772,6 +1772,8 @@ export class RequestRuntimeService {
         lockVersion: true,
         currentCycle: true,
         createdAt: true,
+        slaDueFirstResponseAt: true,
+        slaDueResolutionAt: true,
         categoryVersion: {
           select: {
             category: { select: { id: true, name: true, code: true } },

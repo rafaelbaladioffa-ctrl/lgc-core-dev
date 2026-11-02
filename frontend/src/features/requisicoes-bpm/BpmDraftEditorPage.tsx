@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AppLayout } from "../../components/layout/AppLayout";
 import { bpmApi, type BpmRequest } from "./api";
+import { statusLabel, SlaBar } from "./BpmPages";
 import {
   DynamicForm,
   SectionedDynamicForm,
@@ -416,9 +417,12 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
   return (
     <section style={{ maxWidth: 760, width: "100%" }}>
       <h1>
-        {record.code} — versão {record.version}
+        {record.code} — {record.title || "rascunho"}
       </h1>
-      <p>Status: {record.status}</p>
+      <p>
+        <strong>{statusLabel[record.status] ?? record.status}</strong>
+        {" · "}{record.category?.name}{" · "}v{record.version}
+      </p>
       <div ref={feedbackRef} tabIndex={-1}>
         {error && <p role="alert">{error}</p>}
         {transitionConflict && (
@@ -785,24 +789,22 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
       >
         Comentar
       </button>
-      <h2>Timeline</h2>
-      <h2>SLA</h2>
-      {(record as any).sla?.map(
-        (clock: {
-          metric: string;
-          targetAt: string;
-          elapsedSeconds: number;
-          breachedAt: string | null;
-        }) => (
-          <p key={clock.metric}>
-            {clock.metric}: {clock.elapsedSeconds}s consumidos · prazo{" "}
-            {clock.targetAt}
-            {clock.breachedAt ? " · prazo violado" : ""}
-          </p>
-        ),
+      {record.sla && record.sla.length > 0 && (
+        <div>
+          <h2>SLA</h2>
+          <SlaBar sla={record.sla} />
+          <Link to="/requests/bpm/sla" style={{ fontSize: 13 }}>Dashboard SLA</Link>
+        </div>
       )}
+      <h2>Timeline</h2>
       {timeline.map((e) => (
-        <p key={e.id}>{e.type}</p>
+        <p key={e.id} style={{ fontSize: 13 }}>
+          <span style={{ color: "var(--text-muted)" }}>
+            {new Date(e.occurredAt).toLocaleString("pt-BR")}
+          </span>
+          {" · "}
+          {e.type.replace("activity.", "").replace("request.", "").replace(/_/g, " ")}
+        </p>
       ))}
       <Link to="/requests/bpm">Voltar</Link>
     </section>

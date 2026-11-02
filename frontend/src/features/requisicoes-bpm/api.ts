@@ -68,6 +68,12 @@ export interface BpmVersion {
   bpmValidatedHash?: string | null;
   bpmContentHash?: string | null;
 }
+export interface BpmSlaEntry {
+  metric: string;
+  targetAt: string | null;
+  elapsedSeconds: number;
+  breachedAt: string | null;
+}
 export interface BpmRequest {
   id: string;
   code: string;
@@ -81,6 +87,10 @@ export interface BpmRequest {
   cycle: number;
   category: { id: string; code: string; name: string };
   version: number;
+  // list-only SLA fields (ISO strings)
+  slaDueFirstResponseAt?: string | null;
+  slaDueResolutionAt?: string | null;
+  createdAt?: string;
   activities?: Array<{
     id: string;
     phase: string;
@@ -88,15 +98,19 @@ export interface BpmRequest {
     assigneeId?: string;
     queueId?: string;
     resolution?: string;
+    question?: string | null;
+    correctionFieldKeys?: string[] | null;
     allowedActions: string[];
   }>;
   attachments?: Array<{
     id: string;
     filename: string;
+    fieldKey?: string | null;
     mimeType: string;
     sizeBytes: number;
     version: number;
   }>;
+  sla?: BpmSlaEntry[];
   allowedActions?: string[];
 }
 export const bpmApi = {

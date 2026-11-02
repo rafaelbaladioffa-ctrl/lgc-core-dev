@@ -38,6 +38,7 @@ import { RolesPage } from "./pages/RolesPage";
 import {
   BpmNewRequestPage,
   BpmPortalPage,
+  BpmSlaPage,
 } from "./features/requisicoes-bpm/BpmPages";
 import { BpmDraftEditorPage } from "./features/requisicoes-bpm/BpmDraftEditorPage";
 
@@ -338,6 +339,14 @@ function AppRoutes() {
         element={
           <PrivateRoute permission="request:create">
             <BpmNewRequestPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/requests/bpm/sla"
+        element={
+          <PrivateRoute permission="request:read">
+            <BpmSlaPage />
           </PrivateRoute>
         }
       />

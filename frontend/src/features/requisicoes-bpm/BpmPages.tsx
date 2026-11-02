@@ -23,6 +23,19 @@ const box: React.CSSProperties = {
   padding: 16,
   marginBottom: 12,
 };
+const CLOSED_STATUSES = new Set(["encerrada", "cancelada", "concluida"]);
+export const statusLabel: Record<string, string> = {
+  rascunho: "Rascunho",
+  enviada: "Enviada",
+  em_triagem: "Em triagem",
+  em_atendimento: "Em atendimento",
+  aguardando_correcao: "Aguardando correção",
+  aguardando_informacao: "Aguardando informação",
+  aguardando_solicitante: "Aguardando solicitante",
+  concluida: "Concluída",
+  encerrada: "Encerrada",
+  cancelada: "Cancelada",
+};
 const ErrorText = ({ error }: { error: unknown }) => {
   if (!error) return null;
   const response = error && typeof error === "object" && "response" in error
@@ -172,6 +185,7 @@ export function BpmPortalPage() {
         <>
           <p>
             <Link to="/requests/bpm/new">Abrir processo</Link> ·{" "}
+            <Link to="/requests/bpm/sla">Dashboard SLA</Link> ·{" "}
             <Link to="/requests/bpm/admin">Administração</Link>
           </p>
           <button aria-pressed={view === "mine"} onClick={() => setView("mine")}>
@@ -183,14 +197,45 @@ export function BpmPortalPage() {
           {!loading && !error && items.length === 0 && (
             <p role="status">Nenhuma requisição nesta visão.</p>
           )}
-          {!loading && items.map((r) => (
-            <div style={box} key={r.id}>
-              <Link to={`/requests/bpm/${r.id}`}>
-                {r.code} — {r.title || "(rascunho)"}
-              </Link>
-              <div>{r.status}</div>
-            </div>
-          ))}
+          {!loading && (() => {
+            const pendingCount = items.filter(
+              (r) => r.status === "aguardando_correcao" || r.status === "aguardando_informacao"
+            ).length;
+            return (
+              <>
+                {view === "mine" && pendingCount > 0 && (
+                  <div style={{ ...box, background: "var(--color-warning-bg, #fffbeb)", borderColor: "var(--color-warning, #d97706)", marginBottom: 8 }}>
+                    <strong>⚠ {pendingCount} {pendingCount === 1 ? "requisição precisa" : "requisições precisam"} de sua atenção</strong>
+                    {" "}(correção ou resposta pendente)
+                  </div>
+                )}
+                {items.map((r) => {
+                  const needsAction = r.status === "aguardando_correcao" || r.status === "aguardando_informacao";
+                  return (
+                    <div style={{ ...box, ...(needsAction ? { borderColor: "var(--color-warning, #d97706)", borderWidth: 2 } : {}) }} key={r.id}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <Link to={`/requests/bpm/${r.id}`}>
+                          {r.code} — {r.title || "(rascunho)"}
+                        </Link>
+                        <span style={{ fontSize: 12, color: needsAction ? "var(--color-warning, #d97706)" : "var(--text-muted)" }}>
+                          {statusLabel[r.status] ?? r.status}
+                        </span>
+                      </div>
+                      {r.slaDueResolutionAt && !CLOSED_STATUSES.has(r.status) && (() => {
+                        const due = new Date(r.slaDueResolutionAt!);
+                        const overdue = due <= new Date();
+                        return (
+                          <div style={{ fontSize: 12, color: overdue ? "#e53e3e" : "var(--text-muted)", marginTop: 4 }}>
+                            {overdue ? "⚠ SLA vencido" : `SLA: ${due.toLocaleDateString("pt-BR")}`}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
           {nextCursor && !loading && (
             <button
               onClick={() =>
@@ -941,106 +986,131 @@ export function BpmNewRequestPage() {
   );
 }
 
-export function BpmDetailPage() {
-  const { id } = useParams();
-  const [r, setR] = useState<BpmRequest>();
-  const [error, setError] = useState<unknown>();
-  const [resolution, setResolution] = useState("");
-  const [commands] = useState(() => ({
-    submit: uid(),
-    claim: uid(),
-    complete: uid(),
-  }));
-  const load = () => {
-    if (id) void bpmApi.request(id).then(setR).catch(setError);
-  };
-  useEffect(() => {
-    load();
-  }, [id]);
-  if (!r)
-    return (
-      <AppLayout breadcrumb={["Requisições", "Detalhe"]}>
-        <ErrorText error={error} />
-        <p>Carregando…</p>
-      </AppLayout>
-    );
-  const run = async (fn: () => Promise<unknown>) => {
-    try {
-      await fn();
-      load();
-    } catch (e) {
-      setError(e);
-    }
-  };
-  const a = r.activities?.find((x) => x.allowedActions.length);
+export function SlaBar({ sla }: { sla: NonNullable<BpmRequest["sla"]> }) {
+  const res = sla.find((s) => s.metric === "resolution");
+  if (!res?.targetAt) return null;
+  const target = new Date(res.targetAt);
+  const now = new Date();
+  const isBreached = res.breachedAt != null || target <= now;
+  const elapsed = res.elapsedSeconds;
+  const total = (target.getTime() - (now.getTime() - elapsed * 1000)) / 1000;
+  const pct = total > 0 ? Math.min(100, Math.round((elapsed / total) * 100)) : 100;
+  const color = isBreached ? "var(--color-danger, #e53e3e)" : pct > 80 ? "var(--color-warning, #d97706)" : "var(--color-success, #38a169)";
   return (
-    <AppLayout breadcrumb={["Requisições", r.code]}>
-      <h1>
-        {r.code} — {r.title || "(rascunho)"}
-      </h1>
-      <ErrorText error={error} />
-      <div style={box}>
-        <p>
-          Status: {r.status} · revisão {r.currentVersion}
-        </p>
-        {r.status === "rascunho" && (
-          <button
-            onClick={() =>
-              void run(() =>
-                bpmApi.submit(r.id, {
-                  expectedVersion: r.currentVersion,
-                  commandKey: `submit-${r.id}`,
-                  commandId: commands.submit,
-                }),
-              )
-            }
-          >
-            Enviar
-          </button>
-        )}
-        {a?.allowedActions.includes("claim") && (
-          <button
-            onClick={() =>
-              void run(() =>
-                bpmApi.claim(a.id, {
-                  expectedVersion: r.currentVersion,
-                  commandKey: `claim-${a.id}`,
-                  commandId: commands.claim,
-                }),
-              )
-            }
-          >
-            Assumir
-          </button>
-        )}
-        {a?.allowedActions.includes("complete") && (
-          <>
-            <textarea
-              value={resolution}
-              onChange={(e) => setResolution(e.target.value)}
-            />
-            <button
-              onClick={() =>
-                void run(() =>
-                  bpmApi.complete(a.id, {
-                    expectedVersion: r.currentVersion,
-                    resolution,
-                    commandKey: `complete-${a.id}`,
-                    commandId: commands.complete,
-                  }),
-                )
-              }
-            >
-              Concluir
-            </button>
-          </>
-        )}
+    <div style={{ marginTop: 8 }}>
+      <div style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 4 }}>
+        SLA resolução: {isBreached ? "⚠ Vencido" : `${pct}% usado · vence ${target.toLocaleString("pt-BR")}`}
       </div>
-      {r.activities?.map((x) => (
-        <div style={box} key={x.id}>
-          {x.phase} — {x.state}
-        </div>
-      ))}
+      <div style={{ height: 6, background: "var(--border)", borderRadius: 3 }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 3, transition: "width 0.3s" }} />
+      </div>
+    </div>
+  );
+}
+
+
+export function BpmSlaPage() {
+  const [items, setItems] = useState<BpmRequest[]>([]);
+  const [error, setError] = useState<unknown>();
+  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    let active = true;
+    const fetchAll = async () => {
+      const all: BpmRequest[] = [];
+      let cursor: string | null | undefined;
+      do {
+        const page = await bpmApi.requestsPage("queue", cursor ?? undefined);
+        all.push(...page.items);
+        cursor = page.nextCursor;
+      } while (cursor);
+      if (active) setItems(all);
+    };
+    setLoading(true);
+    fetchAll().catch(setError).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  const now = new Date();
+
+  const open = items.filter((r) => !CLOSED_STATUSES.has(r.status));
+
+  const categorize = (r: BpmRequest) => {
+    if (!r.slaDueResolutionAt) return "sem_sla";
+    const due = new Date(r.slaDueResolutionAt);
+    if (due <= now) return "vencido";
+    const msLeft = due.getTime() - now.getTime();
+    const msTotal = due.getTime() - new Date(r.createdAt ?? 0).getTime();
+    return msTotal > 0 && msLeft / msTotal < 0.2 ? "risco" : "ok";
+  };
+
+  const groups = {
+    vencido: open.filter((r) => categorize(r) === "vencido"),
+    risco: open.filter((r) => categorize(r) === "risco"),
+    ok: open.filter((r) => categorize(r) === "ok"),
+    sem_sla: open.filter((r) => categorize(r) === "sem_sla"),
+  };
+
+  const groupConfig = [
+    { key: "vencido", label: "Vencido", color: "#e53e3e" },
+    { key: "risco", label: "Em risco (<20% do prazo)", color: "#d97706" },
+    { key: "ok", label: "No prazo", color: "#38a169" },
+    { key: "sem_sla", label: "Sem SLA definido", color: "var(--text-muted)" },
+  ] as const;
+
+  return (
+    <AppLayout breadcrumb={["Requisições", "Dashboard SLA"]}>
+      <h1>Dashboard de SLA</h1>
+      <ErrorText error={error} />
+      {loading && <p>Carregando…</p>}
+      {!loading && (
+        <>
+          {/* Summary badges */}
+          <div style={{ display: "flex", gap: 12, marginBottom: 20, flexWrap: "wrap" }}>
+            {groupConfig.map(({ key, label, color }) => (
+              <div key={key} style={{ ...box, margin: 0, minWidth: 120, textAlign: "center" }}>
+                <div style={{ fontSize: 32, fontWeight: 700, color }}>{groups[key].length}</div>
+                <div style={{ fontSize: 13 }}>{label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Per-group lists */}
+          {groupConfig.map(({ key, label, color }) =>
+            groups[key].length > 0 ? (
+              <div key={key}>
+                <h3 style={{ color }}>{label} ({groups[key].length})</h3>
+                {groups[key].map((r) => {
+                  const due = r.slaDueResolutionAt ? new Date(r.slaDueResolutionAt) : null;
+                  return (
+                    <div
+                      key={r.id}
+                      style={{ ...box, cursor: "pointer", borderLeft: `4px solid ${color}` }}
+                      onClick={() => navigate(`/requests/bpm/${r.id}`)}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>
+                          <strong>{r.code}</strong> — {r.title || "(sem título)"}
+                        </span>
+                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          {statusLabel[r.status] ?? r.status}
+                        </span>
+                      </div>
+                      {due && (
+                        <div style={{ fontSize: 12, color, marginTop: 4 }}>
+                          {due <= now ? "Venceu" : "Vence"} {due.toLocaleString("pt-BR")}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null
+          )}
+          {open.length === 0 && <p>Nenhuma requisição ativa na fila.</p>}
+        </>
+      )}
     </AppLayout>
   );
 }
