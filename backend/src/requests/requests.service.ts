@@ -690,6 +690,7 @@ export class RequestsService {
           orderBy: { createdAt: 'asc' },
         },
         approvals: { orderBy: { stepOrder: 'asc' }, include: { approver: { select: { id: true, fullName: true } } } },
+        requester: { select: { id: true, fullName: true } },
         slaClocks: true,
         categoryVersion: { include: { category: true } },
         costCenter: { include: { responsibleCollaborator: { select: { id: true, fullName: true } } } },
@@ -717,12 +718,14 @@ export class RequestsService {
   /** §7.3: `requesterId` nunca é apagado (auditoria), mas é ocultado de todo mundo que não seja o
    * próprio solicitante nem tenha `request:view_whistleblower_identity` — devolvido como `null`
    * pra quem não pode ver, com `requesterDisplay: "Anônimo"` no lugar de um nome. */
-  private maskIdentityIfAnonymous<T extends { requesterId: string; anonymous: boolean }>(request: T, viewerCollaboratorId: string | null, canView: boolean): T & { requesterDisplay: string | null } {
+  private maskIdentityIfAnonymous<T extends { requesterId: string; anonymous: boolean; requester?: { id: string; fullName: string } }>(request: T, viewerCollaboratorId: string | null, canView: boolean): T & { requesterDisplay: string | null } {
     const isSelf = viewerCollaboratorId !== null && viewerCollaboratorId === request.requesterId;
     if (!request.anonymous || canView || isSelf) {
       return { ...request, requesterDisplay: null };
     }
-    return { ...request, requesterId: null as unknown as string, requesterDisplay: 'Anônimo' };
+    // `requester` (nome, carregado por findOne — ver include) precisa sumir junto com
+    // requesterId, senão o nome vaza mesmo com o id mascarado.
+    return { ...request, requesterId: null as unknown as string, requester: undefined, requesterDisplay: 'Anônimo' };
   }
 
   findMine(collaboratorId: string) {

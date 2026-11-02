@@ -167,12 +167,9 @@ export function RequestDetailPage() {
           <div style={{ color: 'var(--text-muted)' }}>{request.description}</div>
           <div>
             <span style={{ color: 'var(--text-muted)' }}>Prioridade:</span> {request.priority} · <span style={{ color: 'var(--text-muted)' }}>Confidencialidade:</span> {request.confidentiality}
-            {request.anonymous && (
-              <>
-                {' · '}
-                <span style={{ color: 'var(--text-muted)' }}>Solicitante:</span> {request.requesterDisplay ?? 'Anônimo'}
-              </>
-            )}
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-muted)' }}>Solicitante:</span> {request.requester?.fullName ?? request.requesterDisplay ?? '—'}
           </div>
           <div>
             <span style={{ color: 'var(--text-muted)' }}>Criada em:</span> {formatDateTime(request.createdAt)}

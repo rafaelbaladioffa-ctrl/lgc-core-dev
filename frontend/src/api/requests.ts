@@ -80,6 +80,8 @@ export interface RequestDetail extends AxisRequest {
   // Null unless a denúncia (§7.3) is marked anônima; "Anônimo" when the viewer lacks
   // request:view_whistleblower_identity (requesterId also comes back null in that case).
   requesterDisplay: string | null;
+  // Ausente (não null) quando mascarado por denúncia anônima — ver requesterDisplay acima.
+  requester?: { id: string; fullName: string };
   formData?: { purchaseItems?: PurchaseRequestItem[] } | Record<string, unknown> | null;
   costCenter?: { id: string; code: string; name: string; responsibleCollaborator?: { id: string; fullName: string } | null } | null;
 }
