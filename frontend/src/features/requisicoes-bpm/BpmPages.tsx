@@ -13,6 +13,7 @@ import {
   type BpmRequest,
 } from "./api";
 import { DynamicForm, SectionedDynamicForm, applyFormAccess } from "./DynamicForm";
+import { ProcessDesigner, type DesignerState } from "./ProcessDesigner";
 import { useAuth } from "../../context/AuthContext";
 
 const box: React.CSSProperties = {
@@ -131,7 +132,10 @@ function QueueEditor({
 }
 
 export function BpmPortalPage() {
-  const [view, setView] = useState<"mine" | "queue">("mine");
+  const [search, setSearch] = useSearchParams();
+  const workspaceView = (search.get("workspace") ?? "activities") as "activities" | "inbox" | "alert" | "late" | "opened" | "managed";
+  const apiView: "mine" | "queue" = workspaceView === "inbox" || workspaceView === "managed" ? "queue" : "mine";
+  const [layout, setLayout] = useState<"list" | "grid">("list");
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [cap, setCap] = useState<BpmCapabilities>();
   const [items, setItems] = useState<BpmRequest[]>([]);
@@ -147,7 +151,7 @@ export function BpmPortalPage() {
         if (active) setCap(value);
       }),
       bpmApi
-        .requestsPage(view)
+        .requestsPage(apiView)
         .then((page) => {
           if (active) {
             setItems(page.items);
@@ -163,95 +167,55 @@ export function BpmPortalPage() {
     return () => {
       active = false;
     };
-  }, [view, reloadToken]);
+  }, [apiView, reloadToken]);
+  const activeItems = items.filter((r) => !CLOSED_STATUSES.has(r.status));
+  const now = new Date();
+  const dueDate = (r: BpmRequest) => r.slaDueResolutionAt ? new Date(r.slaDueResolutionAt) : null;
+  const overdue = (r: BpmRequest) => { const due = dueDate(r); return !!due && due <= now; };
+  const risk = (r: BpmRequest) => { const due = dueDate(r); return !!due && !overdue(r) && due.getTime() - now.getTime() < 24 * 60 * 60 * 1000; };
+  const visibleItems = workspaceView === "late" ? activeItems.filter(overdue)
+    : workspaceView === "alert" ? activeItems.filter(risk)
+    : activeItems;
+  const counts = {
+    activities: activeItems.length,
+    onTime: activeItems.filter((r) => !overdue(r) && !risk(r)).length,
+    alert: activeItems.filter(risk).length,
+    late: activeItems.filter(overdue).length,
+  };
+  const workspaceLabel = workspaceView === "activities" ? "Minhas atividades" : workspaceView === "inbox" ? "Caixa de entrada" : workspaceView === "alert" ? "Em alerta" : workspaceView === "late" ? "Em atraso" : workspaceView === "opened" ? "Abertos por mim" : "Geridos por mim";
+  const groups = [...visibleItems.reduce((map, request) => {
+    const key = request.category?.name ?? "Processo sem categoria";
+    const group = map.get(key) ?? { name: key, version: request.version, items: [] as BpmRequest[] };
+    group.items.push(request);
+    map.set(key, group);
+    return map;
+  }, new Map<string, { name: string; version: number; items: BpmRequest[] }>()).values()];
+  const tone = (request: BpmRequest) => overdue(request) ? { bg: "#fca08f", text: "#7f1d1d", label: "Atrasado" } : risk(request) ? { bg: "#ffe47d", text: "#735b00", label: "Em alerta" } : { bg: "#a9d9f2", text: "#075985", label: "No prazo" };
   return (
     <AppLayout breadcrumb={["Requisições", "Processos piloto"]}>
-      <h1>Processos piloto</h1>
-      <ErrorText error={error} />
-      {error != null && (
-        <button onClick={() => setReloadToken((value) => value + 1)}>
-          Tentar novamente
-        </button>
-      )}
-      {loading && (
-        <p role="status" aria-live="polite">
-          Carregando requisições…
-        </p>
-      )}
-      {cap && !cap.enabled ? (
-        <div style={box}>Piloto desabilitado.</div>
-      ) : (
-        <>
-          <p>
-            <Link to="/requests/bpm/new">Abrir processo</Link> ·{" "}
-            <Link to="/requests/bpm/sla">Dashboard SLA</Link> ·{" "}
-            <Link to="/requests/bpm/admin">Administração</Link>
-          </p>
-          <button aria-pressed={view === "mine"} onClick={() => setView("mine")}>
-            Minhas requisições
-          </button>
-          <button aria-pressed={view === "queue"} onClick={() => setView("queue")}>
-            Inbox e fila de atendimento
-          </button>
-          {!loading && !error && items.length === 0 && (
-            <p role="status">Nenhuma requisição nesta visão.</p>
-          )}
-          {!loading && (() => {
-            const pendingCount = items.filter(
-              (r) => r.status === "aguardando_correcao" || r.status === "aguardando_informacao"
-            ).length;
-            return (
-              <>
-                {view === "mine" && pendingCount > 0 && (
-                  <div style={{ ...box, background: "var(--color-warning-bg, #fffbeb)", borderColor: "var(--color-warning, #d97706)", marginBottom: 8 }}>
-                    <strong>⚠ {pendingCount} {pendingCount === 1 ? "requisição precisa" : "requisições precisam"} de sua atenção</strong>
-                    {" "}(correção ou resposta pendente)
-                  </div>
-                )}
-                {items.map((r) => {
-                  const needsAction = r.status === "aguardando_correcao" || r.status === "aguardando_informacao";
-                  return (
-                    <div style={{ ...box, ...(needsAction ? { borderColor: "var(--color-warning, #d97706)", borderWidth: 2 } : {}) }} key={r.id}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                        <Link to={`/requests/bpm/${r.id}`}>
-                          {r.code} — {r.title || "(rascunho)"}
-                        </Link>
-                        <span style={{ fontSize: 12, color: needsAction ? "var(--color-warning, #d97706)" : "var(--text-muted)" }}>
-                          {statusLabel[r.status] ?? r.status}
-                        </span>
-                      </div>
-                      {r.slaDueResolutionAt && !CLOSED_STATUSES.has(r.status) && (() => {
-                        const due = new Date(r.slaDueResolutionAt!);
-                        const overdue = due <= new Date();
-                        return (
-                          <div style={{ fontSize: 12, color: overdue ? "#e53e3e" : "var(--text-muted)", marginTop: 4 }}>
-                            {overdue ? "⚠ SLA vencido" : `SLA: ${due.toLocaleDateString("pt-BR")}`}
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  );
-                })}
-              </>
-            );
-          })()}
-          {nextCursor && !loading && (
-            <button
-              onClick={() =>
-                void bpmApi
-                  .requestsPage(view, nextCursor)
-                  .then((page) => {
-                    setItems((old) => [...old, ...page.items]);
-                    setNextCursor(page.nextCursor);
-                  })
-                  .catch(setError)
-              }
-            >
-              Carregar mais
-            </button>
-          )}
-        </>
-      )}
+      <div className="lecom-portal-page" style={{ padding: "30px 34px", minHeight: "calc(100svh - 94px)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h1 style={{ fontSize: 25 }}>{workspaceLabel}</h1>
+          <button aria-label="Atualizar" onClick={() => setReloadToken((value) => value + 1)} style={{ border: 0, background: "transparent", fontSize: 20 }}>↻</button>
+        </div>
+        <ErrorText error={error} />
+        {error != null && <button onClick={() => setReloadToken((value) => value + 1)} style={{ marginBottom: 16 }}>Tentar novamente</button>}
+        {cap && !cap.enabled ? <div style={box}>Piloto desabilitado.</div> : <>
+          <div style={{ background: "#fff", borderBottom: "1px solid #ddd", padding: "12px 0", display: "flex", gap: 18, alignItems: "center", margin: "0 -34px 20px", paddingLeft: 34 }}>
+            <span style={{ color: "#777", fontSize: 16 }}>☷</span><input aria-label="Filtrar processo ou filtro salvo" placeholder="Filtrar processo ou filtro salvo" style={{ border: 0, background: "transparent", width: 350 }} />
+            <Link to="/requests/bpm/new" style={{ marginLeft: "auto", marginRight: 34, color: "#0755a6", fontWeight: 700 }}>+ Abrir processo</Link>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(150px, 1fr))", gap: 16, marginBottom: 26 }}>
+            {[{ label: "Atividades", value: counts.activities, color: "#fff", text: "#111" }, { label: "No prazo", value: counts.onTime, color: "#a9d9f2", text: "#075985" }, { label: "Em alerta", value: counts.alert, color: "#ffe47d", text: "#735b00" }, { label: "Atrasado", value: counts.late, color: "#fca08f", text: "#7f1d1d" }].map((card) => <button key={card.label} onClick={() => card.label === "Em alerta" ? setSearch({ workspace: "alert" }) : card.label === "Atrasado" ? setSearch({ workspace: "late" }) : undefined} style={{ textAlign: "left", border: "1px solid #d7d7d7", borderRadius: 8, background: card.color, color: card.text, padding: "18px 20px", minHeight: 126, boxShadow: "0 1px 2px rgba(0,0,0,.08)" }}><div style={{ fontSize: 17, fontWeight: 700 }}>{card.label}</div><div style={{ fontSize: 48, lineHeight: 1.1, fontWeight: 300, marginTop: 13 }}>{card.value}</div></button>)}
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}><h2 style={{ fontSize: 18 }}>Por processo {workspaceView !== "activities" && <span style={{ fontWeight: 400, color: "#555" }}>› {workspaceLabel}</span>}</h2><div><button aria-pressed={layout === "list"} onClick={() => setLayout("list")} style={{ border: 0, background: layout === "list" ? "#dbe9fb" : "transparent", padding: 8 }}>☷</button><button aria-pressed={layout === "grid"} onClick={() => setLayout("grid")} style={{ border: 0, background: layout === "grid" ? "#dbe9fb" : "transparent", padding: 8 }}>▦</button></div></div>
+          {loading && <p role="status">Carregando requisições…</p>}
+          {!loading && visibleItems.length === 0 && <p role="status">Nenhuma atividade nesta visão.</p>}
+          {!loading && layout === "list" && (workspaceView === "activities" || workspaceView === "opened" || workspaceView === "managed") && <div style={{ display: "grid", gap: 8 }}>{groups.map((group) => { const worst = group.items.find(overdue) ?? group.items.find(risk) ?? group.items[0]; const badge = tone(worst); return <Link key={group.name} to={`/requests/bpm/${worst.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.5fr) 110px 160px 150px", alignItems: "center", gap: 18, background: "#fff", border: "1px solid #d9d9d9", borderRadius: 8, padding: "13px 18px", color: "#111", textDecoration: "none" }}><strong>{group.name}</strong><span>Versão {group.version}</span><span style={{ border: "1px solid #ddd", borderRadius: 5, padding: "5px 12px", textAlign: "center" }}>{group.items.length} {group.items.length === 1 ? "atividade" : "atividades"}</span><span style={{ background: badge.bg, color: badge.text, borderRadius: 5, padding: "5px 10px", textAlign: "center" }}>{group.items.length} {badge.label.toLowerCase()}</span></Link>; })}</div>}
+          {!loading && (layout === "grid" || !["activities", "opened", "managed"].includes(workspaceView)) && <div style={{ display: layout === "grid" ? "grid" : "block", gridTemplateColumns: layout === "grid" ? "repeat(4, minmax(190px, 1fr))" : undefined, gap: 12 }}>{visibleItems.map((request) => { const badge = tone(request); return <Link key={request.id} to={`/requests/bpm/${request.id}`} style={{ display: layout === "grid" ? "block" : "grid", gridTemplateColumns: layout === "grid" ? undefined : "80px 1.2fr 1.5fr 1fr 1fr", background: "#fff", border: "1px solid #ddd", borderRadius: 8, padding: layout === "grid" ? 17 : "11px 16px", marginBottom: layout === "grid" ? 0 : 0, color: "#111", textDecoration: "none" }}><small style={{ color: "#555" }}>Versão {request.version}</small><strong style={{ color: "#0755a6", marginTop: layout === "grid" ? 22 : 0 }}>{request.title || request.code}</strong>{layout === "list" && <><span>{request.category?.name}</span><span>{request.createdAt ? new Date(request.createdAt).toLocaleString("pt-BR") : "—"}</span></>}<span style={{ marginTop: layout === "grid" ? 26 : 0, background: badge.bg, color: badge.text, borderRadius: 5, padding: "5px 10px", textAlign: "center" }}>{badge.label}</span></Link>; })}</div>}
+          {nextCursor && !loading && <button onClick={() => void bpmApi.requestsPage(apiView, nextCursor).then((page) => { setItems((old) => [...old, ...page.items]); setNextCursor(page.nextCursor); }).catch(setError)} style={{ marginTop: 18 }}>Carregar mais</button>}
+        </>}
+      </div>
     </AppLayout>
   );
 }
@@ -576,32 +540,42 @@ function GrantEditor({
 export function BpmVersionPage() {
   const { id } = useParams();
   const [v, setV] = useState<any>();
-  const [fields, setFields] = useState<any[]>([]);
-  const [error, setError] = useState<unknown>();
-  const [sla, setSla] = useState({
-    firstResponseMinutes: 240,
-    resolutionMinutes: 2880,
+  const [queues, setQueues] = useState<{ id: string; name: string }[]>([]);
+  const [designer, setDesigner] = useState<DesignerState>({
+    bpmNodes: [],
+    bpmEdges: [],
+    nodePositions: {},
+    fields: [],
+    sla: { firstResponseMinutes: 240, resolutionMinutes: 2880 },
   });
+  const [error, setError] = useState<unknown>();
   const [preview, setPreview] = useState<Record<string, unknown>>({});
   const [report, setReport] = useState<
     Array<{ path: string; message: string }>
   >([]);
   const navigate = useNavigate();
   const load = () => {
-    if (id)
-      void bpmApi
-        .version(id)
-        .then((x) => {
-          setV(x);
-          setFields(x.bpmDefinition?.form ?? []);
-          setSla(
-            x.bpmDefinition?.sla ?? {
-              firstResponseMinutes: 240,
-              resolutionMinutes: 2880,
-            },
-          );
-        })
-        .catch(setError);
+    if (!id) return;
+    void Promise.all([
+      bpmApi.version(id).then((x) => {
+        setV(x);
+        setDesigner({
+          bpmNodes: x.bpmDefinition?.nodes ?? [],
+          bpmEdges: x.bpmDefinition?.edges ?? [],
+          nodePositions: x.bpmDefinition?._nodePositions ?? {},
+          fields: x.bpmDefinition?.form ?? [],
+          sla: x.bpmDefinition?.sla ?? {
+            firstResponseMinutes: 240,
+            resolutionMinutes: 2880,
+          },
+        });
+      }),
+      bpmApi
+        .queues()
+        .then((qs: any[]) =>
+          setQueues(qs.map((q) => ({ id: q.id, name: q.name }))),
+        ),
+    ]).catch(setError);
   };
   useEffect(() => {
     load();
@@ -613,13 +587,18 @@ export function BpmVersionPage() {
         <p>Carregando…</p>
       </AppLayout>
     );
-  const update = (i: number, value: any) =>
-    setFields(fields.map((f, n) => (n === i ? { ...f, ...value } : f)));
   const save = () =>
     void bpmApi
       .patchVersion(v.id, {
         expectedVersion: v.bpmRevision,
-        definition: { ...v.bpmDefinition, form: fields, sla },
+        definition: {
+          ...v.bpmDefinition,
+          nodes: designer.bpmNodes,
+          edges: designer.bpmEdges,
+          form: designer.fields,
+          sla: designer.sla,
+          _nodePositions: designer.nodePositions,
+        },
       })
       .then(load)
       .catch(setError);
@@ -632,195 +611,20 @@ export function BpmVersionPage() {
           {entry.path}: {entry.message}
         </p>
       ))}
-      <fieldset disabled={v.bpmStatus !== "draft"}>
-        <legend>Formulário e metas</legend>
-        <label>
-          Primeira resposta (minutos)
-          <input
-            type="number"
-            min={1}
-            max={120000}
-            value={sla.firstResponseMinutes}
-            onChange={(e) =>
-              setSla({ ...sla, firstResponseMinutes: Number(e.target.value) })
-            }
-          />
-        </label>
-        <label>
-          Resolução (minutos)
-          <input
-            type="number"
-            min={1}
-            max={120000}
-            value={sla.resolutionMinutes}
-            onChange={(e) =>
-              setSla({ ...sla, resolutionMinutes: Number(e.target.value) })
-            }
-          />
-        </label>
-        {fields.map((f, i) => (
-          <div style={box} key={i}>
-            <input
-              placeholder="Chave"
-              value={f.key ?? ""}
-              onChange={(e) => update(i, { key: e.target.value })}
-            />
-            <input
-              placeholder="Rótulo"
-              value={f.label ?? ""}
-              onChange={(e) => update(i, { label: e.target.value })}
-            />
-            <Select
-              label="Tipo"
-              value={f.type ?? "text"}
-              onChange={(type: string) => update(i, { type, options: undefined, currency: undefined, columns: undefined })}
-            >
-              <option>text</option>
-              <option>textarea</option>
-              <option>integer</option>
-              <option>decimal</option>
-              <option>date</option>
-              <option>select</option>
-              <option>boolean</option>
-              <option>attachment</option>
-              <option>money</option>
-              <option>reference</option>
-              <option>repeatable_table</option>
-            </Select>
-            <label>
-              <input
-                type="checkbox"
-                checked={!!f.required}
-                onChange={(e) => update(i, { required: e.target.checked })}
-              />{" "}
-              obrigatório
-            </label>
-            {(f.type === "text" || f.type === "textarea") && (
-              <label>
-                Máximo de caracteres
-                <input
-                  type="number"
-                  min={1}
-                  max={10000}
-                  value={f.maxLength ?? 1000}
-                  onChange={(e) =>
-                    update(i, { maxLength: Number(e.target.value) })
-                  }
-                />
-              </label>
-            )}
-            {f.type === "select" && (
-              <label>
-                Opções (id=rótulo, uma por linha)
-                <textarea
-                  value={(f.options ?? [])
-                    .map((o: any) =>
-                      typeof o === "string"
-                        ? `${o}=${o}`
-                        : `${o.id}=${o.label}`,
-                    )
-                    .join("\n")}
-                  onChange={(e) =>
-                    update(i, {
-                      options: e.target.value
-                        .split("\n")
-                        .filter(Boolean)
-                        .map((line) => {
-                          const [id, ...label] = line.split("=");
-                          return { id, label: label.join("=") || id };
-                        }),
-                    })
-                  }
-                />
-              </label>
-            )}
-            {f.type === "money" && (
-              <label>
-                Moeda
-                <input
-                  value={f.currency ?? "BRL"}
-                  onChange={(e) => update(i, { currency: e.target.value })}
-                  style={{ width: 80 }}
-                />
-              </label>
-            )}
-            {f.type === "reference" && (
-              <label>
-                Rótulo da referência
-                <input
-                  placeholder="ex: Projeto, Cliente…"
-                  value={f.refLabel ?? ""}
-                  onChange={(e) => update(i, { refLabel: e.target.value })}
-                />
-              </label>
-            )}
-            {f.type === "repeatable_table" && (
-              <div>
-                <b>Colunas da tabela</b>
-                {(f.columns ?? []).map((col: any, ci: number) => (
-                  <div key={ci} style={{ display: "flex", gap: 4, marginTop: 4 }}>
-                    <input
-                      placeholder="chave"
-                      value={col.key ?? ""}
-                      onChange={(e) => {
-                        const cols = [...(f.columns ?? [])];
-                        cols[ci] = { ...cols[ci], key: e.target.value };
-                        update(i, { columns: cols });
-                      }}
-                    />
-                    <input
-                      placeholder="rótulo"
-                      value={col.label ?? ""}
-                      onChange={(e) => {
-                        const cols = [...(f.columns ?? [])];
-                        cols[ci] = { ...cols[ci], label: e.target.value };
-                        update(i, { columns: cols });
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        update(i, { columns: (f.columns ?? []).filter((_: any, n: number) => n !== ci) })
-                      }
-                    >
-                      –
-                    </button>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() =>
-                    update(i, { columns: [...(f.columns ?? []), { key: "", label: "", type: "text" }] })
-                  }
-                >
-                  + coluna
-                </button>
-              </div>
-            )}
-            <button onClick={() => setFields(fields.filter((_, n) => n !== i))}>
-              Remover
-            </button>
-          </div>
-        ))}
-        <button
-          disabled={v.bpmStatus !== "draft"}
-          onClick={() =>
-            setFields([
-              ...fields,
-              {
-                key: `campo_${fields.length + 1}`,
-                label: "Novo campo",
-                type: "text",
-              },
-            ])
-          }
-        >
-          Adicionar campo
-        </button>
-      </fieldset>
-      <h2>Prévia</h2>
+      <ProcessDesigner
+        key={v.bpmRevision}
+        bpmNodes={designer.bpmNodes}
+        bpmEdges={designer.bpmEdges}
+        nodePositions={designer.nodePositions}
+        fields={designer.fields}
+        sla={designer.sla}
+        disabled={v.bpmStatus !== "draft"}
+        queues={queues}
+        onChange={setDesigner}
+      />
+      <h2>Prévia do formulário</h2>
       <DynamicForm
-        fields={fields}
+        fields={designer.fields as any}
         values={preview}
         onChange={(key, value) => setPreview({ ...preview, [key]: value })}
       />
@@ -936,10 +740,11 @@ export function BpmNewRequestPage() {
   };
   return (
     <AppLayout breadcrumb={["Requisições", "Novo processo"]}>
-      <h1>Nova requisição BPM</h1>
+      <div className="lecom-new-request-page">
+      <h1 className="lecom-new-request-title">Nova requisição BPM</h1>
       <ErrorText error={error} />
-      <fieldset disabled={creating || !!attempt.current}>
-        <label>
+      <fieldset className="lecom-new-request-form" disabled={creating || !!attempt.current}>
+        <label className="lecom-new-process-field">
           Processo
           <select
             aria-label="Processo"
@@ -966,13 +771,13 @@ export function BpmNewRequestPage() {
           values={fields}
           onChange={(key, value) => setFields({ ...fields, [key]: value })}
         />
-        <p>Salve o rascunho para adicionar ou substituir anexos.</p>
-        <input
+        <p className="lecom-new-request-note">Salve o rascunho para adicionar ou substituir anexos.</p>
+        <input className="lecom-new-request-title-field"
           placeholder="Título"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
         />
-        <textarea
+        <textarea className="lecom-new-request-description-field"
           placeholder="Descrição"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
@@ -981,6 +786,7 @@ export function BpmNewRequestPage() {
       <button disabled={!versionId || creating} onClick={() => void create()}>
         Salvar rascunho
       </button>
+      </div>
     </AppLayout>
   );
 }
