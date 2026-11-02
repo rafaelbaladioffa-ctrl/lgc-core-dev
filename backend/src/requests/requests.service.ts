@@ -831,6 +831,107 @@ export class RequestsService {
       }));
   }
 
+  /** "Minhas atividades" (tela inicial do módulo): tudo que precisa de uma ação da pessoa
+   * logada, numa lista só — sem duplicar fila/aprovações/minhas requisições, que continuam
+   * existindo como telas próprias pra quem quer o filtro completo.
+   *
+   * Quatro origens: (1) requisições próprias (ou em nome de quem é beneficiário) num status que
+   * espera uma ação do solicitante — rascunho, devolvida para ajuste, aguardando resposta; (2) a
+   * fila de triagem do setor do colaborador, só pra quem tem `request:update` (mesma permissão
+   * exigida por `triage()`) — o setor "meu" aqui é o do colaborador, igual ao atalho já existente
+   * pra analista_suprimentos em `findQueue`, não uma associação explícita de fila por usuário,
+   * que o modelo legado não tem; (3) aprovações pendentes (reaproveita `myApprovals` tal qual,
+   * sem duplicar a lógica de etapa ativa/paralela); (4) requisições já aprovadas atribuídas ao
+   * colaborador como executor.
+   *
+   * O prazo (`dueAt`) e o balde de urgência (`bucket`) vêm do `SlaClock` de métrica `solucao`
+   * ainda aberto, igual a `runSlaAlertsAndEscalation` (mesmos 80% de `SLA_ALERT_THRESHOLDS`) —
+   * nunca de `request.slaDueResolutionAt` direto, que não reflete a extensão de um relógio
+   * pausado e reaberto (ver `resume()`). Antes da aprovação (triagem/aprovação pendente) esse
+   * relógio ainda não existe — `finalizeApproval` é quem cria os dois relógios —, então esses
+   * itens sempre voltam "no prazo" aqui: não haveria base pra dizer que estão atrasados.
+   */
+  async myActivities(user: { collaboratorId: string; permissions: string[] }) {
+    const include = { categoryVersion: { include: { category: true } }, slaClocks: true } satisfies Prisma.RequestInclude;
+    const canTriage = user.permissions.includes('request:update');
+    const collaborator = canTriage
+      ? await this.prisma.collaborator.findUnique({ where: { id: user.collaboratorId }, select: { sectorId: true } })
+      : null;
+
+    const [mine, triagePool, approvals, executing] = await Promise.all([
+      this.prisma.request.findMany({
+        where: {
+          executionMode: 'legacy',
+          status: { in: ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante'] },
+          OR: [{ requesterId: user.collaboratorId }, { beneficiaryId: user.collaboratorId }],
+        },
+        include,
+        orderBy: { createdAt: 'desc' },
+      }),
+      collaborator?.sectorId
+        ? this.prisma.request.findMany({
+            where: { executionMode: 'legacy', status: 'enviada', sectorId: collaborator.sectorId },
+            include,
+            orderBy: { createdAt: 'desc' },
+          })
+        : Promise.resolve([]),
+      this.myApprovals(user.collaboratorId, user.permissions.includes('request:view_whistleblower_identity')),
+      this.prisma.request.findMany({
+        where: { executionMode: 'legacy', status: { in: ['aprovada', 'planejada', 'em_atendimento'] }, assigneeId: user.collaboratorId },
+        include,
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    type WithInclude = Prisma.RequestGetPayload<{ include: typeof include }>;
+    type ActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao';
+    const toItem = (kind: ActivityKind, r: WithInclude) => {
+      const clock = r.slaClocks.find((c) => c.metric === 'solucao' && c.stoppedAt === null);
+      return {
+        kind,
+        requestId: r.id,
+        code: r.code,
+        title: r.title,
+        status: r.status,
+        categoryId: r.categoryVersion.categoryId,
+        categoryName: r.categoryVersion.category.name,
+        categoryVersionNumber: r.categoryVersion.version,
+        dueAt: clock && !clock.pausedAt ? clock.targetAt : null,
+        bucket: this.slaBucket(r.slaClocks),
+        createdAt: r.createdAt,
+      };
+    };
+
+    const approvalRequestIds = [...new Set(approvals.map((a) => a.requestId))];
+    const approvalRequests = approvalRequestIds.length
+      ? await this.prisma.request.findMany({ where: { id: { in: approvalRequestIds } }, include })
+      : [];
+    const approvalRequestById = new Map(approvalRequests.map((r) => [r.id, r]));
+
+    return [
+      ...mine.map((r) => toItem('minha_requisicao', r)),
+      ...triagePool.map((r) => toItem('triagem', r)),
+      ...approvals.flatMap((a) => {
+        const r = approvalRequestById.get(a.requestId);
+        return r ? [{ ...toItem('aprovacao' as const, r), approvalId: a.approvalId }] : [];
+      }),
+      ...executing.map((r) => toItem('execucao', r)),
+    ];
+  }
+
+  /** Mesmo critério de `runSlaAlertsAndEscalation`: fração decorrida do relógio de `solucao`
+   * ainda aberto e não pausado, contra os mesmos 80%/100% de `SLA_ALERT_THRESHOLDS`. */
+  private slaBucket(clocks: Array<{ metric: string; stoppedAt: Date | null; pausedAt: Date | null; startedAt: Date; targetAt: Date }>): 'no_prazo' | 'em_alerta' | 'atrasado' {
+    const clock = clocks.find((c) => c.metric === 'solucao' && c.stoppedAt === null);
+    if (!clock || clock.pausedAt) return 'no_prazo';
+    const totalMs = clock.targetAt.getTime() - clock.startedAt.getTime();
+    if (totalMs <= 0) return 'no_prazo';
+    const fraction = ((Date.now() - clock.startedAt.getTime()) / totalMs) * 100;
+    if (fraction >= 100) return 'atrasado';
+    if (fraction >= SLA_ALERT_THRESHOLDS[1]) return 'em_alerta';
+    return 'no_prazo';
+  }
+
   /** Auto-closes CONCLUIDA requests past the no-contestation window (§5.2, simplified to
    * calendar days — see class-level comment). */
   @Cron(CronExpression.EVERY_HOUR)

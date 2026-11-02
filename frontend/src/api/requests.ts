@@ -139,12 +139,35 @@ export interface RequestsDashboard {
   loadByAssignee: Array<{ assigneeId: string; count: number }>;
 }
 
+export type MyActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao';
+export type MyActivityBucket = 'no_prazo' | 'em_alerta' | 'atrasado';
+
+/** Um item da tela "Minhas atividades" (§15.1, tela inicial do módulo) — uma requisição que
+ * precisa de alguma ação da pessoa logada, venha ela de onde vier (própria, triagem, aprovação
+ * ou execução). `dueAt`/`bucket` só existem de verdade quando o relógio de SLA de solução já
+ * está rodando (depois da aprovação) — antes disso `bucket` sempre vem `no_prazo`. */
+export interface MyActivity {
+  kind: MyActivityKind;
+  requestId: string;
+  code: string;
+  title: string;
+  status: RequestStatus;
+  categoryId: string;
+  categoryName: string;
+  categoryVersionNumber: number;
+  dueAt: string | null;
+  bucket: MyActivityBucket;
+  createdAt: string;
+  approvalId?: string;
+}
+
 export const requestsApi = {
   create: (input: CreateRequestInput) => api.post<AxisRequest>('/requests', input).then((r) => r.data),
   mine: () => api.get<AxisRequest[]>('/requests/mine').then((r) => r.data),
   queue: (params?: { sectorId?: string; status?: RequestStatus }) => api.get<AxisRequest[]>('/requests/queue', { params }).then((r) => r.data),
   dashboard: () => api.get<RequestsDashboard>('/requests/dashboard').then((r) => r.data),
   myApprovals: () => api.get<MyApproval[]>('/requests/my-approvals').then((r) => r.data),
+  myActivities: () => api.get<MyActivity[]>('/requests/my-activities').then((r) => r.data),
   get: (id: string) => api.get<RequestDetail>(`/requests/${id}`).then((r) => r.data),
   submit: (id: string) => api.post<AxisRequest>(`/requests/${id}/submit`).then((r) => r.data),
   triage: (id: string, action: 'aceitar' | 'devolver' | 'recategorizar', reason?: string, newCategoryId?: string) =>

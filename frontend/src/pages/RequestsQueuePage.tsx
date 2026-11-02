@@ -48,7 +48,7 @@ export function RequestsQueuePage() {
   ];
 
   return (
-    <AppLayout breadcrumb={['Axis', 'Requisições', 'Fila do setor']}>
+    <AppLayout breadcrumb={['Axis', 'Requisições', 'Minha fila']}>
       <div style={{ marginBottom: 12 }}>
         {isSupplyAnalyst && <p style={{ margin: '0 0 8px', color: 'var(--text-muted)' }}>Exibindo as requisições encaminhadas ao seu setor de Suprimentos.</p>}
         {!isSupplyAnalyst && (

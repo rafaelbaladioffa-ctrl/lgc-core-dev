@@ -68,6 +68,12 @@ export class RequestsController {
     return this.requestsService.myApprovals(requireCollaboratorId(user), user.permissions.includes('request:view_whistleblower_identity'));
   }
 
+  @Get('my-activities')
+  @RequirePermissions('request:read')
+  myActivities(@CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.myActivities({ collaboratorId: requireCollaboratorId(user), permissions: user.permissions });
+  }
+
   @Get(':id')
   @RequirePermissions('request:read')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {

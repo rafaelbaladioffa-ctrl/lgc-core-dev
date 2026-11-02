@@ -18,7 +18,7 @@ import { ClientsPage } from "./pages/ClientsPage";
 import { ClientFormPage } from "./pages/ClientFormPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { ProjectFormPage } from "./pages/ProjectFormPage";
-import { RequestsPortalPage } from "./pages/RequestsPortalPage";
+import { MyActivitiesPage } from "./pages/MyActivitiesPage";
 import { NewRequestPage } from "./pages/NewRequestPage";
 import { MyRequestsPage } from "./pages/MyRequestsPage";
 import { RequestsQueuePage } from "./pages/RequestsQueuePage";
@@ -255,7 +255,7 @@ function AppRoutes() {
         path="/requests"
         element={
           <PrivateRoute permission="request:read">
-            <RequestsPortalPage />
+            <MyActivitiesPage />
           </PrivateRoute>
         }
       />
