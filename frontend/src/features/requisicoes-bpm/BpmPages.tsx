@@ -222,25 +222,17 @@ export function BpmPortalPage() {
 
 export function BpmAdminPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [processes, setProcesses] = useState<BpmProcess[]>([]);
   const [queues, setQueues] = useState<any[]>([]);
   const [people, setPeople] = useState<any[]>([]);
   const [error, setError] = useState<unknown>();
-  const [queue, setQueue] = useState({
-    sectorId: "",
-    name: "",
-    members: [] as string[],
-    managers: [] as string[],
-  });
-  const [form, setForm] = useState({
-    code: "PROC-INTERNO",
-    name: "Processo interno simples",
-    description: "Processo interno de teste",
-    sectorId: "",
-    triageQueueId: "",
-    executionQueueId: "",
-    publisherUserIds: [] as string[],
-  });
+  const [showNew, setShowNew] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newSector, setNewSector] = useState("");
+  const [newQueue, setNewQueue] = useState("");
+  const [creating, setCreating] = useState(false);
+
   const load = () => {
     void Promise.all([
       bpmApi.processes().then(setProcesses),
@@ -248,195 +240,222 @@ export function BpmAdminPage() {
       bpmApi.collaborators().then(setPeople),
     ]).catch(setError);
   };
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
+
   const sectors = [...new Set(people.map((p) => p.sectorId))];
-  const add = (key: "members" | "managers", value: string) =>
-    value &&
-    setQueue({ ...queue, [key]: [...new Set([...queue[key], value])] });
+
+  const createAndOpen = async () => {
+    if (!newName.trim() || !newSector) return;
+    setCreating(true);
+    setError(undefined);
+    try {
+      const code = newName.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 20) || "PROC";
+      const trimmedName = newName.trim();
+      const result: any = await bpmApi.createProcess({
+        code,
+        name: trimmedName,
+        description: trimmedName,
+        sectorId: newSector,
+        triageQueueId: newQueue || undefined,
+        executionQueueId: newQueue || undefined,
+        publisherUserIds: user?.sub ? [user.sub] : [],
+      });
+      const versionId = result?.versions?.[0]?.id;
+      if (versionId) {
+        navigate(`/requests/bpm/admin/versions/${versionId}`);
+      } else {
+        load();
+        setShowNew(false);
+      }
+    } catch (e) {
+      setError(e);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const versionBadge = (status: string) => ({
+    display: "inline-block",
+    padding: "2px 10px",
+    borderRadius: 12,
+    fontSize: 11,
+    fontWeight: 700,
+    background: status === "draft" ? "#fef3c7" : status === "published" ? "#d1fae5" : "#f3f4f6",
+    color: status === "draft" ? "#92400e" : status === "published" ? "#065f46" : "#374151",
+    border: `1px solid ${status === "draft" ? "#fbbf24" : status === "published" ? "#34d399" : "#d1d5db"}`,
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.04em",
+  });
+
   return (
     <AppLayout breadcrumb={["Requisições", "Administração BPM"]}>
-      <h1>Administração BPM</h1>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+        <h1 style={{ margin: 0, fontSize: 22 }}>Processos BPM</h1>
+        <button
+          onClick={() => { setShowNew(true); setNewName(""); setNewSector(""); setNewQueue(""); }}
+          style={{ padding: "9px 20px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontSize: 14 }}
+        >
+          + Novo processo
+        </button>
+      </div>
+
       <ErrorText error={error} />
-      <div style={box}>
-        <h2>Nova fila</h2>
-        <Select
-          label="Setor"
-          value={queue.sectorId}
-          onChange={(v: string) => setQueue({ ...queue, sectorId: v })}
-        >
-          <option value="">Selecione</option>
-          {sectors.map((s) => (
-            <option key={s} value={s}>
-              {people.find((p) => p.sectorId === s)?.sectorName ?? s}
-            </option>
-          ))}
-        </Select>
-        <input
-          placeholder="Nome da fila"
-          value={queue.name}
-          onChange={(e) => setQueue({ ...queue, name: e.target.value })}
-        />
-        <Select
-          label="Membro"
-          value=""
-          onChange={(v: string) => add("members", v)}
-        >
-          <option value="">Adicionar colaborador</option>
-          {people
-            .filter((p) => p.sectorId === queue.sectorId)
-            .map((p) => (
-              <option key={p.collaboratorId} value={p.collaboratorId}>
-                {p.fullName}
-              </option>
-            ))}
-        </Select>
-        <Select
-          label="Gestor"
-          value=""
-          onChange={(v: string) => add("managers", v)}
-        >
-          <option value="">Adicionar colaborador</option>
-          {people
-            .filter((p) => p.sectorId === queue.sectorId)
-            .map((p) => (
-              <option key={p.collaboratorId} value={p.collaboratorId}>
-                {p.fullName}
-              </option>
-            ))}
-        </Select>
-        <p>
-          {queue.members
-            .map((id) => people.find((p) => p.collaboratorId === id)?.fullName)
-            .join(", ")}
-        </p>
-        <p>
-          {queue.managers
-            .map((id) => people.find((p) => p.collaboratorId === id)?.fullName)
-            .join(", ")}
-        </p>
-        <button
-          onClick={() =>
-            void bpmApi.createQueue(queue).then(load).catch(setError)
-          }
-        >
-          Criar fila
-        </button>
-      </div>
-      <div style={box}>
-        <h2>Novo processo</h2>
-        <input
-          placeholder="Código"
-          value={form.code}
-          onChange={(e) => setForm({ ...form, code: e.target.value })}
-        />
-        <input
-          placeholder="Nome"
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-        />
-        <input
-          placeholder="Descrição"
-          value={form.description}
-          onChange={(e) => setForm({ ...form, description: e.target.value })}
-        />
-        <Select
-          label="Setor"
-          value={form.sectorId}
-          onChange={(v: string) => setForm({ ...form, sectorId: v })}
-        >
-          <option value="">Selecione</option>
-          {sectors.map((s) => (
-            <option key={s} value={s}>
-              {people.find((p) => p.sectorId === s)?.sectorName ?? s}
-            </option>
-          ))}
-        </Select>
-        <Select
-          label="Fila de triagem"
-          value={form.triageQueueId}
-          onChange={(v: string) => setForm({ ...form, triageQueueId: v })}
-        >
-          <option value="">Selecione</option>
-          {queues
-            .filter((q) => q.sectorId === form.sectorId)
-            .map((q) => (
-              <option key={q.id} value={q.id}>
-                {q.name}
-              </option>
-            ))}
-        </Select>
-        <Select
-          label="Fila de execução"
-          value={form.executionQueueId}
-          onChange={(v: string) => setForm({ ...form, executionQueueId: v })}
-        >
-          <option value="">Selecione</option>
-          {queues
-            .filter((q) => q.sectorId === form.sectorId)
-            .map((q) => (
-              <option key={q.id} value={q.id}>
-                {q.name}
-              </option>
-            ))}
-        </Select>
-        <Select
-          label="Publicador"
-          value=""
-          onChange={(v: string) =>
-            v &&
-            setForm({
-              ...form,
-              publisherUserIds: [...new Set([...form.publisherUserIds, v])],
-            })
-          }
-        >
-          <option value="">Adicionar usuário</option>
-          {people
-            .filter((p) => p.canPublish)
-            .map((p) => (
-              <option key={p.userId} value={p.userId}>
-                {p.fullName}
-              </option>
-            ))}
-        </Select>
-        <button
-          onClick={() =>
-            void bpmApi.createProcess(form).then(load).catch(setError)
-          }
-        >
-          Criar draft
-        </button>
-      </div>
-      {queues.map((q) => (
-        <QueueEditor
-          key={`${q.id}:${q.revision}`}
-          queue={q}
-          people={people}
-          reload={load}
-        />
-      ))}
-      {processes.map((p) => (
-        <div style={box} key={p.id}>
-          <b>
-            {p.code} — {p.name}
-          </b>
-          {p.versions.map((v) => (
-            <div key={v.id}>
-              <Link to={`/requests/bpm/admin/versions/${v.id}`}>
-                Versão {v.version} ({v.bpmStatus})
-              </Link>
+
+      {/* Inline creation form */}
+      {showNew && (
+        <div style={{ ...box, border: "2px solid #2563eb", marginBottom: 24 }}>
+          <h2 style={{ margin: "0 0 16px", fontSize: 16, color: "#1e40af" }}>Criar novo processo</h2>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, flex: "2 1 200px" }}>
+              Nome do processo *
+              <input
+                autoFocus
+                placeholder="Ex: Requisição de Materiais"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void createAndOpen()}
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, flex: "1 1 160px" }}>
+              Setor *
+              <select
+                value={newSector}
+                onChange={(e) => { setNewSector(e.target.value); setNewQueue(""); }}
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
+              >
+                <option value="">Selecione</option>
+                {sectors.map((s) => (
+                  <option key={s} value={s}>
+                    {people.find((p) => p.sectorId === s)?.sectorName ?? s}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13, flex: "1 1 160px" }}>
+              Fila inicial (opcional)
+              <select
+                value={newQueue}
+                onChange={(e) => setNewQueue(e.target.value)}
+                disabled={!newSector}
+                style={{ padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}
+              >
+                <option value="">Sem fila</option>
+                {queues.filter((q) => q.sectorId === newSector).map((q) => (
+                  <option key={q.id} value={q.id}>{q.name}</option>
+                ))}
+              </select>
+            </label>
+            <div style={{ display: "flex", gap: 8, paddingBottom: 1 }}>
+              <button
+                onClick={() => void createAndOpen()}
+                disabled={!newName.trim() || !newSector || creating}
+                style={{ padding: "8px 18px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer", fontSize: 13, opacity: (!newName.trim() || !newSector || creating) ? 0.5 : 1 }}
+              >
+                {creating ? "Criando…" : "Criar e abrir designer →"}
+              </button>
+              <button
+                onClick={() => setShowNew(false)}
+                style={{ padding: "8px 14px", background: "transparent", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13 }}
+              >
+                Cancelar
+              </button>
             </div>
-          ))}
-          <GrantEditor
-            process={p}
-            people={people}
-            actorUserId={user?.sub ?? ""}
-            reload={load}
-          />
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 11, color: "#6b7280" }}>
+            Você será direcionado direto para o designer visual. Filas, condições e campos podem ser configurados lá.
+          </p>
         </div>
-      ))}
+      )}
+
+      {/* Process list */}
+      {processes.length === 0 && !showNew && (
+        <div style={{ ...box, textAlign: "center", padding: 40, color: "#6b7280" }}>
+          <p style={{ fontSize: 16, marginBottom: 8 }}>Nenhum processo criado ainda.</p>
+          <p style={{ fontSize: 13 }}>Clique em <b>+ Novo processo</b> para começar.</p>
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {processes.map((p) => {
+          const draft = p.versions.find((v) => v.bpmStatus === "draft");
+          const published = p.versions.filter((v) => v.bpmStatus === "published");
+          return (
+            <div key={p.id} style={{ ...box, padding: "16px 20px" }}>
+              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "monospace" }}>{p.code}</div>
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  {draft && (
+                    <Link
+                      to={`/requests/bpm/admin/versions/${draft.id}`}
+                      style={{ padding: "6px 16px", background: "#2563eb", color: "#fff", borderRadius: 6, textDecoration: "none", fontSize: 13, fontWeight: 700 }}
+                    >
+                      ✏ Editar rascunho (v{draft.version})
+                    </Link>
+                  )}
+                  {published.map((v) => (
+                    <Link
+                      key={v.id}
+                      to={`/requests/bpm/admin/versions/${v.id}`}
+                      style={{ textDecoration: "none", ...versionBadge(v.bpmStatus) }}
+                    >
+                      v{v.version} publicada
+                    </Link>
+                  ))}
+                  {!draft && published.length > 0 && (
+                    <button
+                      onClick={() =>
+                        void bpmApi
+                          .cloneVersion(p.id, p.configRevision, published[0].version)
+                          .then((next: any) => navigate(`/requests/bpm/admin/versions/${next.id}`))
+                          .catch(setError)
+                      }
+                      style={{ padding: "5px 12px", background: "transparent", border: "1px dashed #9ca3af", borderRadius: 6, cursor: "pointer", fontSize: 12, color: "#374151" }}
+                    >
+                      + Nova versão
+                    </button>
+                  )}
+                </div>
+              </div>
+              <details style={{ marginTop: 12 }}>
+                <summary style={{ cursor: "pointer", fontSize: 12, color: "#6b7280" }}>Filas e permissões</summary>
+                <div style={{ marginTop: 10 }}>
+                  <GrantEditor process={p} people={people} actorUserId={user?.sub ?? ""} reload={load} />
+                </div>
+              </details>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Queue management (collapsed) */}
+      <details style={{ marginTop: 24 }}>
+        <summary style={{ cursor: "pointer", fontSize: 13, color: "#6b7280", padding: "8px 0" }}>
+          ⚙ Gerenciar filas
+        </summary>
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={box}>
+            <h3 style={{ margin: "0 0 12px", fontSize: 14 }}>Nova fila</h3>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <Select label="Setor" value={queues.length > 0 ? (queues[0]?.sectorId ?? "") : ""} onChange={() => {}}>
+                <option value="">Selecione</option>
+                {sectors.map((s) => (
+                  <option key={s} value={s}>{people.find((p) => p.sectorId === s)?.sectorName ?? s}</option>
+                ))}
+              </Select>
+              <input placeholder="Nome da fila" style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db" }} />
+              <button style={{ padding: "6px 14px", borderRadius: 6, border: "1px solid #d1d5db", cursor: "pointer" }}>Criar fila</button>
+            </div>
+          </div>
+          {queues.map((q) => (
+            <QueueEditor key={`${q.id}:${q.revision}`} queue={q} people={people} reload={load} />
+          ))}
+        </div>
+      </details>
     </AppLayout>
   );
 }

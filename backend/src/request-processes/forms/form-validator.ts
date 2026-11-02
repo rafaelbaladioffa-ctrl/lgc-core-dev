@@ -234,8 +234,7 @@ function validateField(f: Record<string, unknown>, path: string): SchemaError[] 
         if (
           typeof c.type !== 'string' ||
           !FIELD_TYPES.has(c.type) ||
-          c.type === 'repeatable_table' ||
-          c.type === 'attachment'
+          c.type === 'repeatable_table'
         )
           errors.push({ path: `${path}.columns[${ci}].type`, message: 'Tipo de coluna inválido' });
       }

@@ -505,6 +505,8 @@ enum BpmActivityKind {
 enum BpmActivityPhase {
   triage
   execution
+  approval
+  confirmation
 }
 enum BpmActivityState {
   available

@@ -29,8 +29,8 @@ export class CreateBpmProcessDto {
   @IsString() @MinLength(2) @MaxLength(120) name!: string;
   @IsString() @MinLength(2) @MaxLength(500) description!: string;
   @IsUUID() sectorId!: string;
-  @IsUUID() triageQueueId!: string;
-  @IsUUID() executionQueueId!: string;
+  @IsOptional() @IsUUID() triageQueueId?: string;
+  @IsOptional() @IsUUID() executionQueueId?: string;
   @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true })

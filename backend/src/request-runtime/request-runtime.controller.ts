@@ -57,6 +57,13 @@ export class RequestRuntimeController {
   ) {
     return this.service.list(u, query);
   }
+  @Get('logistics/items') @RequirePermissions('request:read') logisticsItems(
+    @Query('q') q?: string,
+    @Query('limit') limit?: string,
+    @Headers('authorization') authorization?: string,
+  ) {
+    return this.service.logisticsItems({ q, limit: Number(limit ?? 20), authorization });
+  }
   @Get('requests/:id') @RequirePermissions('request:read') detail(
     @Param('id') id: string,
     @CurrentUser() u: AuthenticatedUser,

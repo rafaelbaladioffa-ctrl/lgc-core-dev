@@ -24,12 +24,16 @@ services:
       - ./backend/.env
     environment:
       DATABASE_URL: postgresql://axis:axis@postgres:5432/axis?schema=public
+      AXIS_LOGISTICA_URL: http://lgc-dev-logistica-logistica-backend-1:3100
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "3000:3000"
     command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/main.js"
+    networks:
+      - default
+      - logistica
 
   frontend:
     build:

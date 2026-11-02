@@ -56,6 +56,8 @@ const snapshotCalendar = {
 const statusByPhase = {
   triage: 'em_triagem',
   execution: 'em_atendimento',
+  approval: 'em_atendimento',
+  confirmation: 'em_atendimento',
 } as const;
 function hash(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -70,6 +72,46 @@ export class RequestRuntimeService {
   private assertEnabled() {
     if (this.config.get<string>('REQUEST_BPM_ENABLED', 'false') !== 'true')
       throw new ForbiddenException('Piloto BPM desabilitado pelo servidor');
+  }
+  async logisticsItems(query: { q?: string; limit?: number; authorization?: string }) {
+    const limit = Math.min(Math.max(Number(query.limit ?? 20) || 20, 1), 50);
+    const q = String(query.q ?? '').trim();
+    const baseUrl = this.config.get<string>('AXIS_LOGISTICA_URL');
+    if (!baseUrl) return { items: [] };
+    try {
+      const url = new URL('/api/v1/materials', baseUrl);
+      url.searchParams.set('q', q);
+      url.searchParams.set('page', '1');
+      url.searchParams.set('pageSize', String(limit));
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(2500),
+        headers: query.authorization ? { Authorization: query.authorization } : undefined,
+      });
+      if (!response.ok) return { items: [] };
+      const body = (await response.json()) as {
+        items?: Array<{
+          id: string;
+          code: string;
+          shortDescription: string;
+          stockUom?: { code?: string };
+          referenceUnitValue?: number | string | null;
+          lastCost?: number | string | null;
+        }>;
+      };
+      return {
+        items: Array.isArray(body.items)
+          ? body.items.slice(0, limit).map((item) => ({
+              id: item.id,
+              code: item.code,
+              name: item.shortDescription,
+              unit: item.stockUom?.code,
+              unitPrice: Number(item.referenceUnitValue ?? item.lastCost ?? 0),
+            }))
+          : [],
+      };
+    } catch {
+      return { items: [], unavailable: true };
+    }
   }
   private async hasCurrentPermission(
     user: AuthenticatedUser,
@@ -195,6 +237,7 @@ export class RequestRuntimeService {
       },
       user.collaboratorId,
       key,
+      (r.formData as Record<string, unknown> | null) ?? {},
     );
   }
   private attachmentVisible(
@@ -229,7 +272,7 @@ export class RequestRuntimeService {
         queue: { include: { bpmMembers: { where: { active: true } } } },
         bpmInstances: {
           include: {
-            activities: { include: { candidates: true } },
+            activities: { include: { candidates: true, assignee: { select: { fullName: true } } } },
             slaClocks: true,
           },
           orderBy: { cycle: 'desc' },
@@ -352,11 +395,23 @@ export class RequestRuntimeService {
     const form = definition.form;
     const fieldList = form ? extractFields(form) : [];
     for (const field of fieldList) {
-      if (field.type !== 'attachment') continue;
       const value = fields[field.key];
-      if (Array.isArray(value))
+      if (field.type === 'attachment' && Array.isArray(value)) {
         for (const id of value)
           if (typeof id === 'string') attachmentIds.add(id);
+      }
+      if (field.type === 'repeatable_table' && Array.isArray(value)) {
+        for (const row of value) {
+          if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+          for (const column of field.columns ?? []) {
+            if (column.type !== 'attachment') continue;
+            const cell = (row as Record<string, unknown>)[column.key];
+            if (Array.isArray(cell))
+              for (const id of cell)
+                if (typeof id === 'string') attachmentIds.add(id);
+          }
+        }
+      }
     }
     if (!attachmentIds.size) return;
     const owned = await this.prisma.bpmRequestAttachment.findMany({
@@ -579,26 +634,29 @@ export class RequestRuntimeService {
           description: 'DescriÃ§Ã£o obrigatÃ³ria',
         },
       });
-    const triageNode = d.nodes.find((n: any) => n.phase === 'triage');
-    const triageQueue = await this.prisma.queue.findUnique({
-      where: { id: triageNode?.queueId },
+    const triageNode = d.nodes.find((n: any) => n.phase === 'triage')
+      ?? d.nodes.find((n: any) => n.type === 'human' && (d.edges ?? []).some((e: any) => e.from === 'start' && e.to === n.id));
+    if (!triageNode?.id || triageNode.type !== 'human')
+      throw new BadRequestException('Nó de triagem não configurado');
+    const triageQueue = triageNode.queueId ? await this.prisma.queue.findUnique({
+      where: { id: triageNode.queueId },
       include: {
         bpmMembers: {
           where: { active: true },
           include: { collaborator: { include: { user: true } } },
         },
       },
-    });
-    if (!triageQueue)
+    }) : null;
+    if (!triageQueue && !triageNode.assigneeRule)
       throw new BadRequestException('Fila de triagem nÃ£o configurada');
-    const eligible = triageQueue.bpmMembers.filter(
+    const eligible = triageQueue?.bpmMembers.filter(
       (m) =>
         m.role === 'member' &&
         m.collaboratorId !== r.requesterId &&
         m.collaboratorId !== r.beneficiaryId &&
         m.collaborator.status === 'ativo' &&
         m.collaborator.user?.status === 'active',
-    );
+    ) ?? [];
     const now = new Date();
     const calendar =
       (r.categoryVersion.bpmCalendarSnapshot as {
@@ -624,7 +682,7 @@ export class RequestRuntimeService {
           currentCycle: 1,
           submittedAt: now,
           lockVersion: { increment: 1 },
-          queueId: triageQueue.id,
+          queueId: triageQueue?.id ?? null,
         },
       });
       if (!changed.count) throw new ConflictException('VERSION_CONFLICT');
@@ -638,29 +696,40 @@ export class RequestRuntimeService {
           startedAt: now,
         },
       });
-      const token = await tx.executionToken.create({
-        data: {
-          instanceId: instance.id,
-          nodeId: 'triage',
-          activationKey: '1:triage',
-        },
-      });
-      const activity = await tx.activityInstance.create({
-        data: {
-          instanceId: instance.id,
-          tokenId: token.id,
-          nodeId: 'triage',
-          activationKey: '1:triage',
-          phase: 'triage',
-          queueId: triageQueue.id,
-          candidates: {
-            create: eligible.map((m) => ({
-              collaboratorId: m.collaboratorId,
-              sourceResolver: 'queueMembers',
-            })),
-          },
-        },
-      });
+      const activity = triageNode.assigneeRule
+        ? await this.createHumanActivity(tx, triageNode, {
+            instanceId: instance.id,
+            requestId: id,
+            cycle: 1,
+            requesterId: r.requesterId,
+            beneficiaryId: r.beneficiaryId,
+          })
+        : await (async () => {
+            const token = await tx.executionToken.create({
+              data: {
+                instanceId: instance.id,
+                nodeId: triageNode.id,
+                activationKey: `1:${triageNode.id}`,
+              },
+            });
+            const created = await tx.activityInstance.create({
+              data: {
+                instanceId: instance.id,
+                tokenId: token.id,
+                nodeId: triageNode.id,
+                activationKey: `1:${triageNode.id}`,
+                phase: triageNode.phase as any,
+                queueId: triageQueue!.id,
+                candidates: {
+                  create: eligible.map((m) => ({
+                    collaboratorId: m.collaboratorId,
+                    sourceResolver: 'queueMembers',
+                  })),
+                },
+              },
+            });
+            return created.id;
+          })();
       const responseTarget = addBusinessMinutes(
         now,
         firstResponseMinutes,
@@ -709,12 +778,12 @@ export class RequestRuntimeService {
           startAt: now,
         })),
       });
-      if (!eligible.length)
+      if (!triageNode.assigneeRule && !eligible.length)
         await tx.requestRuntimeIncident.create({
           data: {
             requestId: id,
             instanceId: instance.id,
-            activityId: activity.id,
+            activityId: activity,
             type: 'NO_ELIGIBLE_ASSIGNEE',
             safeDetails: { message: 'Aguardando definiÃ§Ã£o de responsÃ¡vel' },
           },
@@ -727,7 +796,7 @@ export class RequestRuntimeService {
         'request.submitted',
         user,
         dto.commandId,
-        { activityId: activity.id, eligibleCount: eligible.length },
+        { activityId: activity, eligibleCount: eligible.length },
       );
       const receipt = await tx.requestCommandReceipt.create({
         data: {
@@ -742,12 +811,12 @@ export class RequestRuntimeService {
           }),
           requestId: id,
           statusCode: 200,
-          resultRef: { requestId: id, activityId: activity.id, eventId: ev.id },
+          resultRef: { requestId: id, activityId: activity, eventId: ev.id },
         },
       });
       return {
         requestId: id,
-        activityId: activity.id,
+        activityId: activity,
         currentVersion: dto.expectedVersion + 1,
         receiptId: receipt.id,
       };
@@ -882,7 +951,7 @@ export class RequestRuntimeService {
 
   private async createHumanActivity(
     tx: Tx,
-    node: { id: string; phase: string; queueId?: string },
+    node: { id: string; phase: string; queueId?: string; assigneeRule?: { type: string; field?: string } },
     ctx: { instanceId: string; requestId: string; cycle: number; requesterId: string; beneficiaryId: string },
   ): Promise<string> {
     const q = node.queueId
@@ -896,6 +965,27 @@ export class RequestRuntimeService {
           },
         })
       : null;
+    let assignedCollaboratorId: string | null = null;
+    if (node.assigneeRule?.type === 'requester') {
+      assignedCollaboratorId = ctx.requesterId;
+    } else if (node.assigneeRule?.type === 'cost_center_responsible') {
+      const request = await tx.request.findUnique({
+        where: { id: ctx.requestId },
+        select: { costCenterId: true, formData: true },
+      });
+      const field = node.assigneeRule.field ?? 'centro_custo';
+      const raw = request?.formData && typeof request.formData === 'object' && !Array.isArray(request.formData)
+        ? (request.formData as Record<string, unknown>)[field]
+        : undefined;
+      const costCenterId = request?.costCenterId ?? (typeof raw === 'string' ? raw : null);
+      if (costCenterId) {
+        const center = await tx.costCenter.findUnique({
+          where: { id: costCenterId },
+          select: { responsibleCollaboratorId: true },
+        });
+        assignedCollaboratorId = center?.responsibleCollaboratorId ?? null;
+      }
+    }
     const eligible =
       q?.bpmMembers.filter(
         (m: any) =>
@@ -917,12 +1007,16 @@ export class RequestRuntimeService {
         activationKey,
         phase: node.phase as any,
         queueId: q?.id,
+        assigneeId: assignedCollaboratorId,
+        ...(assignedCollaboratorId ? { state: 'claimed', claimedAt: new Date() } : {}),
         candidates: {
-          create: eligible.map((m: any) => ({ collaboratorId: m.collaboratorId, sourceResolver: 'queueMembers' })),
+          create: assignedCollaboratorId
+            ? [{ collaboratorId: assignedCollaboratorId, sourceResolver: node.assigneeRule?.type ?? 'assigneeRule' }]
+            : eligible.map((m: any) => ({ collaboratorId: m.collaboratorId, sourceResolver: 'queueMembers' })),
         },
       },
     });
-    if (!eligible.length)
+    if (!assignedCollaboratorId && !eligible.length)
       await tx.requestRuntimeIncident.create({
         data: {
           requestId: ctx.requestId,
@@ -995,9 +1089,18 @@ export class RequestRuntimeService {
       const splitOut = edges.filter((e: any) => e.from === nodeId);
       const actIds: string[] = [];
       for (const be of splitOut) {
-        const branchNode = nodes.find((n: any) => n.id === be.to);
-        if (branchNode?.type === 'human')
-          actIds.push(await this.createHumanActivity(tx, branchNode, ctx));
+        const branch = await this.enterNode(
+          tx,
+          be.to,
+          nodeId,
+          fromPhase,
+          nodes,
+          edges,
+          fields,
+          ctx,
+          gatewayEvents,
+        );
+        actIds.push(...branch.nextActivityIds);
       }
       gatewayEvents.push({ type: 'gateway.split', summary: { nodeId, branchCount: actIds.length } });
       if (fromPhase === 'triage') {
@@ -1018,7 +1121,7 @@ export class RequestRuntimeService {
       for (const cond of conditions) {
         if (!cond.condition) { chosenNodeId = cond.targetNodeId; break; }
         try {
-          if (evaluateCondition(cond.condition, { fields })) { chosenNodeId = cond.targetNodeId; break; }
+          if (evaluateCondition(cond.condition, { fields, context: { nodeId } })) { chosenNodeId = cond.targetNodeId; break; }
         } catch {}
       }
       if (!chosenNodeId) throw new BadRequestException('Gateway XOR: nenhuma condição correspondente');
@@ -2005,9 +2108,12 @@ export class RequestRuntimeService {
       })(),
       activities: inst?.activities.map((a) => ({
         id: a.id,
+        nodeId: a.nodeId,
         phase: a.phase,
         state: a.state,
         assigneeId: a.assigneeId,
+        assigneeName: a.assignee?.fullName ?? null,
+        assignedToCurrentUser: a.assigneeId === user.collaboratorId || a.candidates.some((candidate) => candidate.collaboratorId === user.collaboratorId),
         queueId: a.queueId,
         resolution: a.resolution,
         question: a.question ?? null,

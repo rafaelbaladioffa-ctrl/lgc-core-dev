@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { FormPage, FormSection } from '../components/layout/FormPage';
+import { formatBRL } from '../utils/format';
 import { requestCategoriesApi, type RequestCategory, type RequestFormField, type RequestFieldOptionsSource } from '../api/requestCategories';
 import { requestsApi, type CreateRequestInput } from '../api/requests';
 import { projectsApi, type Project } from '../api/projects';
@@ -217,7 +218,7 @@ export function NewRequestPage() {
             {purchaseSearch.trim() && (
               <select value="" onChange={(e) => { addPurchaseRow(e.target.value); setPurchaseSearch(''); }} disabled={purchaseSearchResults.length === 0} aria-label="Resultado da pesquisa de item">
                 <option value="">{purchaseSearchResults.length ? 'Selecione o item encontrado' : 'Nenhum item encontrado — use os filtros abaixo'}</option>
-                {purchaseSearchResults.map((item) => <option key={item.id} value={item.id}>{item.category} / {item.subcategory || 'Sem subcategoria'} / {item.shortDescription} — R$ {Number(item.unitPrice).toFixed(2)} / {item.unit}</option>)}
+                {purchaseSearchResults.map((item) => <option key={item.id} value={item.id}>{item.category} / {item.subcategory || 'Sem subcategoria'} / {item.shortDescription} — {formatBRL(item.unitPrice)} / {item.unit}</option>)}
               </select>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto', gap: 10, alignItems: 'center' }}>
@@ -231,14 +232,14 @@ export function NewRequestPage() {
               </select>
               <select value={purchaseItemSelection} onChange={(e) => setPurchaseItemSelection(e.target.value)} disabled={!purchaseSubcategory || purchaseItems.length === 0} aria-label="Item da Logística">
                 <option value="">{purchaseSubcategory ? 'Item' : 'Selecione categoria e subcategoria'}</option>
-                {purchaseItems.map((item) => <option key={item.id} value={item.id}>{item.shortDescription} — R$ {Number(item.unitPrice).toFixed(2)} / {item.unit}</option>)}
+                {purchaseItems.map((item) => <option key={item.id} value={item.id}>{item.shortDescription} — {formatBRL(item.unitPrice)} / {item.unit}</option>)}
               </select>
               <button type="button" onClick={() => addPurchaseRow(purchaseItemSelection)} disabled={!purchaseItemSelection || purchaseRows.some((row) => row.materialId === purchaseItemSelection)}>Adicionar item</button>
             </div>
             <small style={{ color: 'var(--text-muted)' }}>{purchaseRows.length ? `${purchaseRows.length} item(ns) adicionado(s). Selecione outro item e clique em “Adicionar item”.` : 'Você pode adicionar vários itens diferentes na mesma requisição.'}</small>
             {purchaseRows.map((row) => {
               const item = purchaseCatalog.find((candidate) => candidate.id === row.materialId)!;
-              return <div key={row.materialId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px auto', gap: 8, alignItems: 'center' }}><span>{item.category} / {item.subcategory ?? '—'} / <strong>{item.shortDescription}</strong><br /><small>R$ {Number(item.unitPrice).toFixed(2)} por {item.unit}</small></span><input type="number" min="1" step="1" value={row.quantity} aria-label={`Quantidade de ${item.shortDescription}`} onChange={(e) => setPurchaseRows((rows) => rows.map((current) => current.materialId === row.materialId ? { ...current, quantity: Math.max(1, Number(e.target.value) || 1) } : current))} /><button type="button" onClick={() => setPurchaseRows((rows) => rows.filter((current) => current.materialId !== row.materialId))}>Remover</button></div>;
+              return <div key={row.materialId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px auto', gap: 8, alignItems: 'center' }}><span>{item.category} / {item.subcategory ?? '—'} / <strong>{item.shortDescription}</strong><br /><small>{formatBRL(item.unitPrice)} por {item.unit}</small></span><input type="number" min="1" step="1" value={row.quantity} aria-label={`Quantidade de ${item.shortDescription}`} onChange={(e) => setPurchaseRows((rows) => rows.map((current) => current.materialId === row.materialId ? { ...current, quantity: Math.max(1, Number(e.target.value) || 1) } : current))} /><button type="button" onClick={() => setPurchaseRows((rows) => rows.filter((current) => current.materialId !== row.materialId))}>Remover</button></div>;
             })}
           </div>
         </FormSection>

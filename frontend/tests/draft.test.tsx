@@ -159,21 +159,26 @@ describe("real draft controls with mocked API", () => {
       .mockResolvedValueOnce({
         items: [{ ...initial, id: "r2", code: "REQ-2" }],
         nextCursor: null,
-      })
-      .mockResolvedValueOnce({ items: [], nextCursor: null });
-    render(
+      });
+    const portal = render(
       <MemoryRouter>
         <BpmPortalPage />
       </MemoryRouter>,
     );
-    await waitFor(() => screen.getByText(/REQ-1 —/));
+    await waitFor(() => screen.getByText("Processo sem categoria"));
     fireEvent.click(screen.getByText("Carregar mais"));
-    await waitFor(() => screen.getByText(/REQ-2 —/));
+    await waitFor(() => screen.getByText("2 atividades"));
     expect(vi.mocked(bpmApi.requestsPage).mock.calls[1]).toEqual([
       "mine",
       "next",
     ]);
-    fireEvent.click(screen.getByText("Inbox e fila de atendimento"));
+    portal.unmount();
+    vi.mocked(bpmApi.requestsPage).mockResolvedValueOnce({ items: [], nextCursor: null });
+    render(
+      <MemoryRouter initialEntries={["/requests/bpm?workspace=inbox"]}>
+        <BpmPortalPage />
+      </MemoryRouter>,
+    );
     await waitFor(() =>
       expect(vi.mocked(bpmApi.requestsPage).mock.calls[2][0]).toBe("queue"),
     );
@@ -195,11 +200,12 @@ describe("real draft controls with mocked API", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("status").textContent).toContain("Carregando requisições");
+    await waitFor(() => expect(rejectFirst).toBeTypeOf("function"));
     await act(async () => rejectFirst(new Error("Offline")));
     await waitFor(() => expect(screen.getByText("Offline")).toBeTruthy());
     fireEvent.click(screen.getByText("Tentar novamente"));
     await waitFor(() =>
-      expect(screen.getByText("Nenhuma requisição nesta visão.")).toBeTruthy(),
+      expect(screen.getByText("Nenhuma atividade nesta visão.")).toBeTruthy(),
     );
   });
   it("edits SLA metadata and previews options, while published versions stay immutable", async () => {
@@ -458,7 +464,7 @@ describe("real draft controls with mocked API", () => {
         </Routes>
       </MemoryRouter>,
     );
-    await waitFor(() => screen.getByText(/REQ-1 — versão 1/));
+    await waitFor(() => screen.getByText("Edited title", { selector: "h1" }));
     expect((screen.getByLabelText("Título") as HTMLInputElement).value).toBe(
       "Edited title",
     );
@@ -480,7 +486,7 @@ describe("real draft controls with mocked API", () => {
     fireEvent.click(screen.getByText("Concluir atividade"));
     await waitFor(() => screen.getByText("Encerrar"));
     fireEvent.click(screen.getByText("Encerrar"));
-    await waitFor(() => screen.getByText("Status: encerrada"));
+    await waitFor(() => screen.getByText("Encerrada"));
   });
   it("renders and emits false, zero, decimal text, date and option IDs", () => {
     const onChange = vi.fn();
@@ -542,7 +548,7 @@ describe("real draft controls with mocked API", () => {
       title: "Changed title",
     });
     expect(vi.mocked(bpmApi.submit).mock.calls[0][1].expectedVersion).toBe(8);
-    expect(screen.getByText(/versão 1/)).toBeTruthy();
+    expect(screen.getByText("Enviada")).toBeTruthy();
   });
   it("A11 keeps the losing edit visible on 409 and does not submit", async () => {
     vi.mocked(bpmApi.draft).mockRejectedValue({ response: { status: 409 } });
@@ -827,7 +833,7 @@ describe("real draft controls with mocked API", () => {
     });
     fireEvent.click(screen.getByText("Encerrar"));
     await waitFor(() =>
-      expect(screen.getByText("Status: encerrada")).toBeTruthy(),
+      expect(screen.getByText("Encerrada")).toBeTruthy(),
     );
   });
 });

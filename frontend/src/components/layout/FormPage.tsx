@@ -22,10 +22,10 @@ export const sectionStyle = {
 
 export function FormSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div style={sectionStyle}>
+    <section className="axis-section-card" style={sectionStyle}>
       <h4 style={sectionTitleStyle}>{title}</h4>
       {children}
-    </div>
+    </section>
   );
 }
 

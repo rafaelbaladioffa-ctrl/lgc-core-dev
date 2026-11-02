@@ -93,9 +93,12 @@ export interface BpmRequest {
   createdAt?: string;
   activities?: Array<{
     id: string;
+    nodeId?: string;
     phase: string;
     state: string;
     assigneeId?: string;
+    assigneeName?: string | null;
+    assignedToCurrentUser?: boolean;
     queueId?: string;
     resolution?: string;
     question?: string | null;
@@ -155,6 +158,13 @@ export const bpmApi = {
         { params: { view, cursor } },
       )
       .then((r) => r.data),
+  logisticsItems: (q: string, limit = 20) =>
+    api
+      .get<{ items: Array<{ id: string; code: string; name: string; unit?: string; unitPrice?: number }> }>(
+        "/bpm/logistics/items",
+        { params: { q, limit } },
+      )
+      .then((r) => r.data.items),
   request: (id: string) =>
     api.get<BpmRequest>(`/bpm/requests/${id}`).then((r) => r.data),
   createRequest: (input: Parameters<typeof createPayload>[0]) =>

@@ -1,4 +1,5 @@
 export type FieldMode = 'hidden' | 'read' | 'write';
+import { evaluateCondition } from '../request-processes/forms/condition-evaluator.js';
 const mode = (value: unknown): FieldMode | undefined =>
   value === 'hidden' || value === 'read' || value === 'write'
     ? value
@@ -22,6 +23,7 @@ export function fieldMode(
   },
   collaboratorId: string | null | undefined,
   key: string,
+  fields: Record<string, unknown> = {},
 ): FieldMode {
   const global = mode(definition.formAccess?.[key]);
   if (global === 'hidden') return 'hidden';
@@ -35,14 +37,18 @@ export function fieldMode(
         ['available', 'claimed'].includes(a.state) &&
         a.queueId === record.currentQueueId),
   );
-  const rules = relevant
-    .map((a) =>
-      mode(
-        definition.nodes?.find((node: any) => node.id === a.nodeId)
-          ?.formAccess?.[key],
-      ),
-    )
-    .filter(Boolean);
+  const rules = relevant.map((a) => {
+    const node = definition.nodes?.find((candidate: any) => candidate.id === a.nodeId);
+    const field = (definition.form && !Array.isArray(definition.form)
+      ? definition.form.sections?.flatMap((section: any) => section.fields ?? [])
+      : definition.form) ?.find((candidate: any) => candidate.key === key);
+    if (field?.visibleWhen && !evaluateCondition(field.visibleWhen, { fields, context: { nodeId: a.nodeId } }))
+      return 'hidden' as FieldMode;
+    const configured = mode(node?.formAccess?.[key]);
+    if (configured === 'write' && field?.writableWhen && !evaluateCondition(field.writableWhen, { fields, context: { nodeId: a.nodeId } }))
+      return 'read' as FieldMode;
+    return configured;
+  }).filter(Boolean) as FieldMode[];
   if (rules.includes('hidden')) return 'hidden';
   if (global === 'read' || rules.includes('read')) return 'read';
   return rules.includes('write') ? 'write' : 'read';

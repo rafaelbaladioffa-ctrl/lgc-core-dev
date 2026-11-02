@@ -1,4 +1,5 @@
 import type { BpmField } from "../DynamicForm";
+import { LogisticsItemAutocomplete } from "./LogisticsItemAutocomplete";
 
 interface Props {
   field: BpmField;
@@ -32,8 +33,11 @@ export function RepeatableTableField({ field, value, disabled, onChange }: Props
   if (columns.length === 0) return <p>Tabela sem colunas definidas.</p>;
 
   return (
-    <div>
-      <table>
+    <div className="lecom-repeatable-table">
+      <button className="lecom-table-add" type="button" disabled={disabled} onClick={addRow}>
+        ADICIONAR DADOS NA TABELA <span aria-hidden>＋</span>
+      </button>
+      <table className="lecom-data-table">
         <thead>
           <tr>
             {columns.map((col) => (
@@ -47,16 +51,41 @@ export function RepeatableTableField({ field, value, disabled, onChange }: Props
             <tr key={rowIdx}>
               {columns.map((col) => (
                 <td key={col.key}>
-                  <input
-                    disabled={disabled}
-                    value={String(row[col.key] ?? "")}
-                    onChange={(e) => updateCell(rowIdx, col.key, e.target.value)}
-                  />
+                  {col.source?.key === "logistics.catalog" ? (
+                    <LogisticsItemAutocomplete
+                      field={{ key: col.key, label: col.label, type: "reference", source: col.source }}
+                      value={row[col.key]}
+                      disabled={disabled}
+                      onChange={(_, value) => {
+                        const next = rows.map((current, index) =>
+                          index === rowIdx ? { ...current, [col.key]: value } : current,
+                        );
+                        setRows(next);
+                      }}
+                      onSelect={(item) => {
+                        setRows(rows.map((current, index) => index === rowIdx ? {
+                          ...current,
+                          [col.key]: item.id,
+                          ...(columns.some((candidate) => candidate.key === "unidade") && item.unit ? { unidade: item.unit } : {}),
+                          ...(columns.some((candidate) => candidate.key === "preco_unitario") && item.unitPrice !== undefined
+                            ? { preco_unitario: { amount: item.unitPrice.toFixed(2), currency: "BRL" } }
+                            : {}),
+                        } : current));
+                      }}
+                    />
+                  ) : (
+                    <input
+                      disabled={disabled}
+                      value={String(row[col.key] ?? "")}
+                      onChange={(e) => updateCell(rowIdx, col.key, e.target.value)}
+                    />
+                  )}
                 </td>
               ))}
               <td>
                 <button
                   type="button"
+                  aria-label="Remover linha"
                   disabled={disabled}
                   onClick={() => removeRow(rowIdx)}
                 >
@@ -67,9 +96,6 @@ export function RepeatableTableField({ field, value, disabled, onChange }: Props
           ))}
         </tbody>
       </table>
-      <button type="button" disabled={disabled} onClick={addRow}>
-        Adicionar linha
-      </button>
     </div>
   );
 }

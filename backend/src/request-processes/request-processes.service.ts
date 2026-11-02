@@ -378,8 +378,8 @@ export class RequestProcessesService {
     await this.assertCurrentPermission(user, 'request_process:model');
     await this.assertCurrentPermission(user, 'request_category:create');
     const [triage, execution] = await Promise.all([
-      this.assertQueue(dto.triageQueueId, dto.sectorId),
-      this.assertQueue(dto.executionQueueId, dto.sectorId),
+      dto.triageQueueId ? this.assertQueue(dto.triageQueueId, dto.sectorId) : Promise.resolve(null),
+      dto.executionQueueId ? this.assertQueue(dto.executionQueueId, dto.sectorId) : Promise.resolve(null),
     ]);
     const publisherIds = dto.publisherUserIds ?? [];
     const publishers = await this.prisma.user.findMany({
@@ -424,7 +424,7 @@ export class RequestProcessesService {
               slaResolutionMinutes: 2880,
               bpmStatus: 'draft',
               bpmRevision: 0,
-              bpmDefinition: this.definition(dto, triage.id, execution.id),
+              bpmDefinition: this.definition(dto, triage?.id ?? null, execution?.id ?? null),
               bpmCalendarSnapshot: this.calendar(),
               publishedAt: null,
             },
@@ -448,37 +448,26 @@ export class RequestProcessesService {
   }
   private definition(
     dto: CreateBpmProcessDto,
-    triageQueueId: string,
-    executionQueueId: string,
+    triageQueueId: string | null,
+    executionQueueId: string | null,
   ) {
+    const nodes: object[] = [{ id: 'start', type: 'start' }];
+    const edges: object[] = [];
+    if (triageQueueId) {
+      nodes.push({ id: 'triage', type: 'human', phase: 'triage', label: 'Conferir solicitação', queueId: triageQueueId, requiresResolution: true });
+      edges.push({ from: 'start', to: 'triage' });
+    }
+    if (executionQueueId) {
+      nodes.push({ id: 'execute', type: 'human', phase: 'execution', label: 'Atender solicitação', queueId: executionQueueId, requiresResolution: true });
+      edges.push({ from: triageQueueId ? 'triage' : 'start', to: 'execute' });
+    }
+    nodes.push({ id: 'end', type: 'end', terminalOutcome: 'completed' });
+    edges.push({ from: executionQueueId ? 'execute' : (triageQueueId ? 'triage' : 'start'), to: 'end' });
     return {
       format: 'axis-bpm/1',
       capabilities: ['human_tasks'],
-      nodes: [
-        { id: 'start', type: 'start' },
-        {
-          id: 'triage',
-          type: 'human',
-          phase: 'triage',
-          label: 'Conferir solicitação',
-          queueId: triageQueueId,
-          requiresResolution: true,
-        },
-        {
-          id: 'execute',
-          type: 'human',
-          phase: 'execution',
-          label: 'Atender solicitação',
-          queueId: executionQueueId,
-          requiresResolution: true,
-        },
-        { id: 'end', type: 'end', terminalOutcome: 'completed' },
-      ],
-      edges: [
-        { from: 'start', to: 'triage' },
-        { from: 'triage', to: 'execute' },
-        { from: 'execute', to: 'end' },
-      ],
+      nodes,
+      edges,
       form: [],
       policy: {
         confidentiality: 'interna',
@@ -557,14 +546,10 @@ export class RequestProcessesService {
               bpmStatus: v.bpmStatus,
               bpmRevision: v.bpmRevision,
               bpmDefinition: {
-                form: (definition.form ?? [])
-                  .filter(
-                    (f: any) => definition.formAccess?.[f.key] !== 'hidden',
-                  )
-                  .map((f: any) => ({
-                    ...f,
-                    readOnly: definition.formAccess?.[f.key] === 'read',
-                  })),
+                // P04 accepts both the legacy flat form and the sectioned form.
+                // Keep the shape intact so the frontend can render section titles
+                // and does not attempt Array.filter() on { sections: [...] }.
+                form: definition.form ?? [],
               },
             },
           ],
@@ -670,91 +655,109 @@ export class RequestProcessesService {
         path: 'sla',
         message: 'Metas SLA devem estar entre 1 e 120000 minutos',
       });
-    const hasGateway = nodes.some(
-      (n) => n.type === 'gateway_and' || n.type === 'gateway_xor',
-    );
-    if (!hasGateway) {
-      // P01 strict: exactly start, triage, execute, end in that linear order
-      const expectedNodes = {
-        start: 'start',
-        triage: 'human',
-        execute: 'human',
-        end: 'end',
-      };
-      if (
-        nodes.length !== 4 ||
-        nodes.some(
-          (n) =>
-            typeof n.id !== 'string' ||
-            expectedNodes[n.id as keyof typeof expectedNodes] !== n.type,
-        ) ||
-        Object.keys(expectedNodes).some((id) => !nodes.some((n) => n.id === id))
-      )
-        errors.push({
-          path: 'nodes',
-          message: 'P01 exige start, triage, execute e end',
-        });
-      if (
-        nodes
-          .filter((n) => n.type === 'human')
-          .map((n) => n.phase)
-          .sort()
-          .join(',') !== 'execution,triage'
-      )
-        errors.push({
-          path: 'nodes.phase',
-          message: 'P01 exige exatamente triage e execution',
-        });
-      const expectedEdges = [
-        ['start', 'triage'],
-        ['triage', 'execute'],
-        ['execute', 'end'],
-      ];
-      if (
-        edges.length !== 3 ||
-        edges.some(
-          (e, i) =>
-            e.from !== expectedEdges[i]?.[0] || e.to !== expectedEdges[i]?.[1],
-        )
-      )
-        errors.push({
-          path: 'edges',
-          message: 'P01 exige três arestas lineares',
-        });
-    } else {
-      // P03 relaxed: validate graph structure for gateway-enabled definitions
-      const VALID_TYPES = new Set(['start', 'end', 'human', 'gateway_and', 'gateway_xor']);
-      const nodeIds = new Set<string>();
-      for (const n of nodes) {
-        if (typeof n.id !== 'string' || !n.id)
-          errors.push({ path: 'nodes', message: 'Nó sem id' });
-        else if (nodeIds.has(n.id))
-          errors.push({ path: 'nodes', message: `Nó duplicado: ${n.id}` });
-        else nodeIds.add(n.id as string);
-        if (!VALID_TYPES.has(n.type as string))
-          errors.push({ path: 'nodes', message: `Tipo inválido: ${n.type}` });
-        if (n.type === 'human' && !['triage', 'execution'].includes(n.phase as string))
-          errors.push({ path: 'nodes.phase', message: `Fase inválida em ${n.id}: ${n.phase}` });
-        if ((n.type === 'human') && typeof n.queueId !== 'string')
-          errors.push({ path: 'nodes.queueId', message: `queueId obrigatório em ${n.id}` });
-        if (n.type === 'gateway_xor') {
-          if (!Array.isArray(n.conditions) || (n.conditions as any[]).length === 0)
-            errors.push({ path: 'nodes.conditions', message: `gateway_xor ${n.id} sem conditions` });
-        }
-      }
-      if (!nodes.some((n) => n.type === 'start'))
-        errors.push({ path: 'nodes', message: 'Definição sem nó start' });
-      if (!nodes.some((n) => n.type === 'end'))
-        errors.push({ path: 'nodes', message: 'Definição sem nó end' });
-      if (!nodes.some((n) => n.type === 'human' && n.phase === 'triage'))
-        errors.push({ path: 'nodes', message: 'Definição sem nó triage' });
-      for (const e of edges) {
-        if (typeof e.from !== 'string' || !nodeIds.has(e.from))
-          errors.push({ path: 'edges', message: `Aresta com from inválido: ${e.from}` });
-        if (typeof e.to !== 'string' || !nodeIds.has(e.to))
-          errors.push({ path: 'edges', message: `Aresta com to inválido: ${e.to}` });
+    const VALID_TYPES = new Set(['start', 'end', 'human', 'gateway_and', 'gateway_xor']);
+    const nodeIds = new Set<string>();
+    for (const n of nodes) {
+      if (typeof n.id !== 'string' || !n.id)
+        errors.push({ path: 'nodes', message: 'Nó sem id' });
+      else if (nodeIds.has(n.id))
+        errors.push({ path: 'nodes', message: `Nó duplicado: ${n.id}` });
+      else nodeIds.add(n.id);
+      if (!VALID_TYPES.has(n.type as string))
+        errors.push({ path: 'nodes', message: `Tipo inválido: ${n.type}` });
+      if (n.type === 'human' && !['triage', 'execution', 'approval', 'confirmation'].includes(n.phase as string))
+        errors.push({ path: 'nodes.phase', message: `Fase inválida em ${n.id}: ${n.phase}` });
+      if (n.type === 'human' && typeof n.queueId !== 'string' && !n.assigneeRule)
+        errors.push({ path: 'nodes.queueId', message: `queueId ou assigneeRule obrigatório em ${n.id}` });
+      if (n.type === 'human' && n.assigneeRule &&
+        (!['requester', 'cost_center_responsible'].includes((n.assigneeRule as any).type) ||
+          ((n.assigneeRule as any).type === 'cost_center_responsible' && typeof (n.assigneeRule as any).field !== 'string')))
+        errors.push({ path: `nodes.${n.id}.assigneeRule`, message: 'Regra de responsável inválida' });
+    }
+    const starts = nodes.filter((n) => n.type === 'start');
+    const ends = nodes.filter((n) => n.type === 'end');
+    if (starts.length !== 1) errors.push({ path: 'nodes', message: 'Deve existir exatamente um nó start' });
+    if (ends.length !== 1) errors.push({ path: 'nodes', message: 'Deve existir exatamente um nó end' });
+    if (!nodes.some((n) => n.type === 'human' && (n.phase === 'triage' || (n as any).assigneeRule)))
+      errors.push({ path: 'nodes', message: 'Definição sem nó humano inicial' });
+
+    const outgoing = new Map<string, Array<Record<string, unknown>>>();
+    const incoming = new Map<string, Array<Record<string, unknown>>>();
+    for (const e of edges) {
+      const from = e.from as string;
+      const to = e.to as string;
+      if (typeof from !== 'string' || !nodeIds.has(from))
+        errors.push({ path: 'edges', message: `Aresta com from inválido: ${e.from}` });
+      if (typeof to !== 'string' || !nodeIds.has(to))
+        errors.push({ path: 'edges', message: `Aresta com to inválido: ${e.to}` });
+      if (nodeIds.has(from) && nodeIds.has(to)) {
+        outgoing.set(from, [...(outgoing.get(from) ?? []), e]);
+        incoming.set(to, [...(incoming.get(to) ?? []), e]);
       }
     }
+    const andJoinIds = new Set(
+      nodes
+        .filter((n) => n.type === 'gateway_and' && (incoming.get(n.id as string)?.length ?? 0) >= 2)
+        .map((n) => n.id as string),
+    );
+    const descendants = (root: string) => {
+      const seen = new Set<string>();
+      const todo = [root];
+      while (todo.length) {
+        const id = todo.pop()!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        for (const e of outgoing.get(id) ?? []) todo.push(e.to as string);
+      }
+      return seen;
+    };
+    for (const n of nodes.filter((candidate) => candidate.type === 'gateway_and')) {
+      const out = outgoing.get(n.id as string) ?? [];
+      const inc = incoming.get(n.id as string) ?? [];
+      if (inc.length === 1 && out.length >= 2) {
+        const branchJoinSets = out.map((e) => {
+          const reached = descendants(e.to as string);
+          return new Set([...reached].filter((id) => andJoinIds.has(id)));
+        });
+        const commonJoins = [...(branchJoinSets[0] ?? [])].filter((id) => branchJoinSets.every((set) => set.has(id)));
+        if (!commonJoins.length)
+          errors.push({ path: `nodes.${n.id}`, message: 'AND split deve ter um join comum alcançável por todos os ramos' });
+      }
+    }
+    for (const n of nodes) {
+      const out = outgoing.get(n.id as string) ?? [];
+      const inc = incoming.get(n.id as string) ?? [];
+      if (n.type === 'start' && out.length !== 1) errors.push({ path: `nodes.${n.id}`, message: 'start deve ter uma única saída' });
+      if (n.type === 'end' && out.length !== 0) errors.push({ path: `nodes.${n.id}`, message: 'end não pode ter saída' });
+      if (n.type === 'human' && out.length > 1) errors.push({ path: `nodes.${n.id}`, message: 'Atividade humana deve ter no máximo uma saída' });
+      if (n.type === 'gateway_and' && !((inc.length === 1 && out.length >= 2) || (inc.length >= 2 && out.length === 1)))
+        errors.push({ path: `nodes.${n.id}`, message: 'gateway_and deve ser split (1 entrada, 2+ saídas) ou join (2+ entradas, 1 saída)' });
+      if (n.type === 'gateway_xor') {
+        if (out.length < 2) errors.push({ path: `nodes.${n.id}`, message: 'gateway_xor deve ter ao menos duas saídas' });
+        const conditions = Array.isArray(n.conditions) ? n.conditions as Array<Record<string, unknown>> : [];
+        const targets = new Set(out.map((e) => e.to));
+        const defaults = conditions.filter((c) => c.condition === undefined || c.condition === null || c.condition === '').length;
+        if (conditions.length !== out.length || defaults !== 1)
+          errors.push({ path: `nodes.${n.id}.conditions`, message: 'XOR exige uma condição por saída e exatamente uma saída default' });
+        for (const c of conditions) {
+          if (typeof c.targetNodeId !== 'string' || !targets.has(c.targetNodeId))
+            errors.push({ path: `nodes.${n.id}.conditions`, message: 'Condição XOR aponta para destino que não é uma saída do gateway' });
+        }
+      }
+    }
+    const start = starts[0]?.id as string | undefined;
+    const end = ends[0]?.id as string | undefined;
+    const reachable = new Set<string>();
+    if (start) { const todo = [start]; while (todo.length) { const id = todo.pop()!; if (reachable.has(id)) continue; reachable.add(id); for (const e of outgoing.get(id) ?? []) todo.push(e.to as string); } }
+    const canEnd = new Set<string>();
+    if (end) { const todo = [end]; while (todo.length) { const id = todo.pop()!; if (canEnd.has(id)) continue; canEnd.add(id); for (const e of incoming.get(id) ?? []) todo.push(e.from as string); } }
+    for (const n of nodes) {
+      if (!reachable.has(n.id as string) || !canEnd.has(n.id as string))
+        errors.push({ path: `nodes.${n.id}`, message: 'Nó desconectado ou sem caminho alcançável até o end' });
+    }
+    const visiting = new Set<string>(), visited = new Set<string>();
+    const visit = (id: string) => { if (visiting.has(id)) { errors.push({ path: 'edges', message: 'Ciclos não são suportados no grafo P03' }); return; } if (visited.has(id)) return; visiting.add(id); for (const e of outgoing.get(id) ?? []) visit(e.to as string); visiting.delete(id); visited.add(id); };
+    if (start) visit(start);
     if (definition.form !== undefined) {
       const formErrors = validateFormSchema(definition.form, 200);
       for (const e of formErrors) errors.push(e);
@@ -767,6 +770,7 @@ export class RequestProcessesService {
   ) {
     for (const node of definition.nodes ?? [])
       if (node.type === 'human') {
+        if (node.assigneeRule) continue;
         const q = await this.prisma.queue.findUnique({
           where: { id: node.queueId },
           include: {

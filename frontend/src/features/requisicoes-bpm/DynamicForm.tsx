@@ -2,6 +2,7 @@ import React from "react";
 import { MoneyField } from "./forms/MoneyField";
 import { RepeatableTableField } from "./forms/RepeatableTableField";
 import { ReferenceField } from "./forms/ReferenceField";
+import { LogisticsItemAutocomplete } from "./forms/LogisticsItemAutocomplete";
 
 export type BpmField = {
   key: string;
@@ -21,12 +22,13 @@ export type BpmField = {
   required?: boolean;
   readOnly?: boolean;
   options?: Array<string | { id: string; label: string }>;
+  source?: { key: string };
   /** money field: ISO 4217 currency code, defaults to BRL */
   currency?: string;
   /** reference field: human name for the referenced entity */
   refLabel?: string;
   /** repeatable_table: column definitions */
-  columns?: Array<{ key: string; label: string; type: string; required?: boolean }>;
+  columns?: Array<{ key: string; label: string; type: string; required?: boolean; source?: { key: string } }>;
 };
 
 export type BpmFieldErrors = Record<string, string>;
@@ -118,7 +120,14 @@ function BpmFieldRow({
       />
     );
   else if (field.type === "reference")
-    input = (
+    input = field.source?.key === "logistics.catalog" ? (
+      <LogisticsItemAutocomplete
+        field={field}
+        value={value}
+        disabled={field.readOnly}
+        onChange={onChange}
+      />
+    ) : (
       <ReferenceField
         field={field}
         value={value}
@@ -194,7 +203,7 @@ function BpmFieldRow({
     );
 
   return (
-    <label htmlFor={`bpm-field-${field.key}`}>
+    <label className="lecom-field" htmlFor={`bpm-field-${field.key}`}>
       {field.label}
       {field.required ? " *" : ""}
       {input}
@@ -218,7 +227,7 @@ export function DynamicForm({
   onUpload?: (key: string, files: FileList) => void;
 }) {
   return (
-    <div>
+    <div className="lecom-form-fields">
       {fields.map((field) => (
         <BpmFieldRow
           key={field.key}
@@ -258,9 +267,9 @@ export function SectionedDynamicForm({
       />
     );
   return (
-    <div>
+    <div className="lecom-form-sections">
       {sections.map((section, idx) => (
-        <fieldset key={idx}>
+        <fieldset className="lecom-form-section" key={idx}>
           {section.title && <legend>{section.title}</legend>}
           {section.fields.map((field) => (
             <BpmFieldRow

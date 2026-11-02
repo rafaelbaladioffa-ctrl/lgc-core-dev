@@ -26,7 +26,8 @@
     "seed:requests-fase1": "tsx prisma/seed-requests-fase1.ts",
     "seed:requests-fase2-sectors": "tsx prisma/seed-requests-fase2-sectors.ts",
     "seed:requests-parallel-demo": "tsx prisma/seed-requests-parallel-demo.ts",
-    "seed:approval-authority-matrix": "tsx prisma/seed-approval-authority-matrix.ts"
+    "seed:approval-authority-matrix": "tsx prisma/seed-approval-authority-matrix.ts",
+    "seed:requests-suprimentos": "tsx prisma/seed-requests-suprimentos.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

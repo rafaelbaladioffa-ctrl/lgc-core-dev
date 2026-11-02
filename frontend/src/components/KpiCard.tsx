@@ -22,8 +22,8 @@ export function KpiCard({ label, value, tone = 'default', icon, change }: KpiCar
         background: 'var(--bg-elevated)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius)',
-        padding: '10px 14px',
-        minWidth: 140,
+        padding: '16px',
+        minWidth: 180,
         display: 'flex',
         alignItems: 'flex-start',
         gap: 10,
@@ -35,8 +35,8 @@ export function KpiCard({ label, value, tone = 'default', icon, change }: KpiCar
             width: 30,
             height: 30,
             borderRadius: 8,
-            background: 'var(--brand-gradient)',
-            color: '#fff',
+            background: 'var(--axis-teal-subtle)',
+            color: 'var(--primary)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -48,9 +48,9 @@ export function KpiCard({ label, value, tone = 'default', icon, change }: KpiCar
         </span>
       )}
       <div>
-        <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
+        <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: 0.4 }}>{label}</div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <div style={{ fontSize: 20, fontWeight: 700, color: TONE_COLORS[tone], marginTop: 3 }}>{value}</div>
+          <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 600, color: TONE_COLORS[tone], marginTop: 3 }}>{value}</div>
           {change !== undefined && (
             <span style={{ fontSize: 11, fontWeight: 600, color: change >= 0 ? 'var(--success)' : 'var(--danger)' }}>
               {change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(1)}%

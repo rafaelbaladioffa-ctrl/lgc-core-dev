@@ -10,6 +10,7 @@ import {
   UseGuards,
   UseInterceptors,
   UseFilters,
+  HttpCode,
 } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
@@ -112,6 +113,7 @@ export class RequestProcessesController {
     return this.service.validateVersion(id, d.expectedVersion, u);
   }
   @Post('versions/:id/publish')
+  @HttpCode(200)
   @RequirePermissions('request_process:publish')
   publish(
     @Param('id') id: string,

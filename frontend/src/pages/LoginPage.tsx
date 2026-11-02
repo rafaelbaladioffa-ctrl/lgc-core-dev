@@ -1,9 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import axisWordmarkDark from '../assets/brand/axis-wordmark-dark.svg';
-import axisWordmarkLight from '../assets/brand/axis-wordmark-light.svg';
-import axisIcon from '../assets/brand/axis-icon.svg';
 
 export function LoginPage() {
   const { login, loading } = useAuth();
@@ -31,7 +28,7 @@ export function LoginPage() {
         style={{
           flex: 1,
           minWidth: 0,
-          background: 'var(--brand-gradient)',
+          background: 'var(--surface-dark)',
           color: '#fff',
           display: 'flex',
           flexDirection: 'column',
@@ -40,7 +37,7 @@ export function LoginPage() {
         }}
         className="axis-login-panel"
       >
-        <img src={axisIcon} alt="" width={48} height={48} style={{ borderRadius: 12, marginBottom: 32 }} />
+        <img src="/brand-industrial/axis-app-icon.svg" alt="" width={52} height={52} style={{ marginBottom: 32 }} />
         <h1 style={{ color: '#fff', fontSize: 34, lineHeight: 1.2, maxWidth: 440 }}>
           Sistemas mais inteligentes.
           <br />
@@ -55,8 +52,8 @@ export function LoginPage() {
       {/* Right panel: login card */}
       <div style={{ width: 440, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg-elevated)', padding: 24 }}>
         <div style={{ width: '100%', maxWidth: 320 }}>
-          <img src={axisWordmarkDark} alt="Axis" className="axis-wordmark-light-theme" style={{ height: 44, marginBottom: 32 }} />
-          <img src={axisWordmarkLight} alt="Axis" className="axis-wordmark-dark-theme" style={{ height: 44, marginBottom: 32 }} />
+          <img src="/brand-industrial/axis-logo-light.svg" alt="Axis ERP + SGI" className="axis-wordmark-light-theme" style={{ height: 52, marginBottom: 32 }} />
+          <img src="/brand-industrial/axis-logo-dark.svg" alt="Axis ERP + SGI" className="axis-wordmark-dark-theme" style={{ height: 52, marginBottom: 32 }} />
 
           <form onSubmit={onSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div>
@@ -74,7 +71,7 @@ export function LoginPage() {
               style={{
                 width: '100%',
                 height: 40,
-                background: 'var(--brand-gradient)',
+                background: 'var(--primary)',
                 color: '#fff',
                 border: 'none',
                 borderRadius: 'var(--radius)',

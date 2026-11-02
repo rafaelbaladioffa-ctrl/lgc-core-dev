@@ -89,7 +89,7 @@ export interface ReferenceField extends BaseFieldDef {
 export interface RepeatableColumn {
   key: string;
   label: string;
-  type: Exclude<FieldType, 'repeatable_table' | 'attachment'>;
+  type: Exclude<FieldType, 'repeatable_table'>;
   required?: boolean;
   maxLength?: number;
   min?: number | string;

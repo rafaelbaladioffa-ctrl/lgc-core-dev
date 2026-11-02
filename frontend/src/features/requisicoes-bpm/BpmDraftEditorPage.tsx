@@ -218,11 +218,22 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
       } else if (status >= 400 && status < 500) {
         transition.current = null;
       }
-      setError(
-        e?.response?.status === 409
-          ? "Conflito: edição preservada. Recarregue para resolver."
-          : (e.message ?? "Falha: repetir preserva a tentativa."),
-      );
+      const data = e?.response?.data;
+      let detail: string;
+      if (e?.response?.status === 409) {
+        detail = "Conflito: edição preservada. Recarregue para resolver.";
+      } else if (data?.fields && typeof data.fields === "object") {
+        detail = Object.entries(data.fields as Record<string, string>)
+          .map(([k, v]) => `${k}: ${v}`)
+          .join(" | ");
+      } else if (data?.message) {
+        detail = Array.isArray(data.message) ? data.message.join("; ") : String(data.message);
+      } else if (typeof data === "string") {
+        detail = data;
+      } else {
+        detail = e.message ?? "Falha: repetir preserva a tentativa.";
+      }
+      setError(detail);
     } finally {
       setBusy(false);
     }
@@ -413,16 +424,58 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
   };
 
   const p2Disabled = busy || transitionConflict || !!transition.current;
+  const activeActivity = record.activities?.find((activity) =>
+    ["available", "claimed"].includes(activity.state),
+  );
+  const actionLabels: Record<string, string> = {
+    cc_aprovacao_inicial: "Aprovar abertura da requisição",
+    suprimentos_cotacao: "Enviar cotações para aprovação",
+    cc_aprova_cotacao: "Aprovar cotação e indicar fornecedor",
+    solicitante_aprova_cotacao: "Aprovar cotação escolhida",
+    suprimentos_compra: "Registrar compra efetuada",
+    solicitante_confirma_recebimento: "Confirmar recebimento do material",
+  };
+  const phaseLabels: Record<string, string> = {
+    triage: "Triagem",
+    execution: "Execução",
+    approval: "Aprovação",
+  };
+  const stateLabels: Record<string, string> = {
+    available: "Aguardando atendente",
+    assigned: "Atribuída",
+    in_progress: "Em andamento",
+    completed: "Concluída",
+    waiting: "Aguardando",
+  };
 
   return (
-    <section style={{ maxWidth: 760, width: "100%" }}>
-      <h1>
-        {record.code} — {record.title || "rascunho"}
-      </h1>
-      <p>
+    <section className="lecom-request-page">
+      <header className="lecom-request-header">
+        <div>
+          <div className="lecom-request-heading">
+            <Link to="/requests/bpm" aria-label="Voltar para minhas atividades">←</Link>
+            <h1>{record.title || "Solicitação"}</h1>
+          </div>
+          <p className="lecom-request-meta">
+            <span className="lecom-request-code">{record.code}</span>
+            [Renato] {record.category?.name ?? "Solicitação de Compras"} - aberto em {new Date(record.createdAt ?? Date.now()).toLocaleString("pt-BR")} por Administrador
+          </p>
+        </div>
+        <div className="lecom-request-actions">
+          <button type="button" title="Salvar" onClick={() => void save()} disabled={!editable || busy}>▣</button>
+          <button type="button" title="Mais ações">•••</button>
+        </div>
+      </header>
+      <div className="lecom-request-status">
+        <span aria-hidden>ⓘ</span>
         <strong>{statusLabel[record.status] ?? record.status}</strong>
-        {" · "}{record.category?.name}{" · "}v{record.version}
-      </p>
+        <span>· Ciclo 1 · Início em {new Date(record.createdAt ?? Date.now()).toLocaleString("pt-BR")}</span>
+      </div>
+      {activeActivity?.assigneeName && !activeActivity.assignedToCurrentUser && (
+        <div className="lecom-possession-banner">
+          Aguardando: {activeActivity.assigneeName}
+        </div>
+      )}
       <div ref={feedbackRef} tabIndex={-1}>
         {error && <p role="alert">{error}</p>}
         {transitionConflict && (
@@ -430,383 +483,314 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
         )}
       </div>
 
-      {/* === Draft editor (P01 + P02 rascunho) === */}
-      {editable ? (
-        <fieldset
-          disabled={
-            busy ||
-            transitionConflict ||
-            autosave.state === "conflict" ||
-            !!transition.current
-          }
-        >
-          <label>
-            Título
-            <input
-              value={snapshot.title}
-              onChange={(e) => patch({ title: e.target.value })}
-            />
-          </label>
-          <label>
-            Descrição
-            <textarea
-              value={snapshot.description}
-              onChange={(e) => patch({ description: e.target.value })}
-            />
-          </label>
-          {hasSections ? (
-            <SectionedDynamicForm
-              errors={
-                (autosave.lastError.current as any)?.response?.data?.error
-                  ?.fields ?? {}
-              }
-              sections={sections}
-              values={snapshot.fields}
-              onChange={(key, value) =>
-                patch({ fields: { ...latest.current.fields, [key]: value } })
-              }
-              onUpload={(key, files) => void upload(key, files)}
-            />
-          ) : (
-            <DynamicForm
-              errors={
-                (autosave.lastError.current as any)?.response?.data?.error
-                  ?.fields ?? {}
-              }
-              fields={flatFields}
-              values={snapshot.fields}
-              onChange={(key, value) =>
-                patch({ fields: { ...latest.current.fields, [key]: value } })
-              }
-              onUpload={(key, files) => void upload(key, files)}
-            />
-          )}
-        </fieldset>
-      ) : (
-        record.status === "rascunho" && (
-          <>
-            <p>{record.title}</p>
-            <p>{record.description}</p>
-            {Object.entries(record.fields).map(([k, v]) => (
-              <p key={k}>
-                {k}: {JSON.stringify(v)}
-              </p>
-            ))}
-          </>
-        )
-      )}
+      <div className="lecom-request-body">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: "var(--space-5)", alignItems: "start" }}>
 
-      <p role="status">{autosave.state}</p>
-      {editable && (
-        <button
-          disabled={
-            busy ||
-            transitionConflict ||
-            !!transition.current ||
-            autosave.state === "conflict"
-          }
-          onClick={() => void save()}
-        >
-          Salvar agora
-        </button>
-      )}
-      {(transitionConflict || autosave.state === "conflict") && (
-        <button onClick={() => window.location.reload()}>
-          Descartar edição e recarregar
-        </button>
-      )}
-      {transition.current && (
-        <button
-          disabled={busy}
-          onClick={() =>
-            void run(transition.current!.action, transition.current!.target)
-          }
-        >
-          Repetir tentativa
-        </button>
-      )}
-      {record.allowedActions?.includes("submit") && (
-        <button
-          disabled={
-            busy ||
-            transitionConflict ||
-            !!transition.current ||
-            uploads.current.length > 0 ||
-            ["error", "conflict"].includes(autosave.state)
-          }
-          onClick={() => void run("submit")}
-        >
-          Revisar e enviar
-        </button>
-      )}
-      <label>
-        Resolução ou motivo
-        <textarea
-          disabled={busy || transitionConflict || !!transition.current}
-          value={resolution}
-          onChange={(e) => setResolution(e.target.value)}
-        />
-      </label>
-      {(record as any).assignmentTargets?.length > 0 && (
-        <label>
-          Responsável
-          <select
-            disabled={busy || transitionConflict || !!transition.current}
-            value={assigneeId}
-            onChange={(e) => setAssigneeId(e.target.value)}
-          >
-            <option value="">Selecione</option>
-            {(record as any).assignmentTargets.map(
-              (p: { id: string; label: string }) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ),
+          {/* ===== LEFT: form + P02 sections ===== */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+
+            {/* Draft editor */}
+            {editable ? (
+              <fieldset
+                className="lecom-request-form"
+                disabled={busy || transitionConflict || autosave.state === "conflict" || !!transition.current}
+              >
+                <label className="lecom-field lecom-title-field">
+                  Título
+                  <input value={snapshot.title} onChange={(e) => patch({ title: e.target.value })} />
+                </label>
+                <label className="lecom-field lecom-description-field">
+                  Descrição
+                  <textarea value={snapshot.description} onChange={(e) => patch({ description: e.target.value })} />
+                </label>
+                {hasSections ? (
+                  <SectionedDynamicForm
+                    errors={(autosave.lastError.current as any)?.response?.data?.error?.fields ?? {}}
+                    sections={sections}
+                    values={snapshot.fields}
+                    onChange={(key, value) => patch({ fields: { ...latest.current.fields, [key]: value } })}
+                    onUpload={(key, files) => void upload(key, files)}
+                  />
+                ) : (
+                  <DynamicForm
+                    errors={(autosave.lastError.current as any)?.response?.data?.error?.fields ?? {}}
+                    fields={flatFields}
+                    values={snapshot.fields}
+                    onChange={(key, value) => patch({ fields: { ...latest.current.fields, [key]: value } })}
+                    onUpload={(key, files) => void upload(key, files)}
+                  />
+                )}
+              </fieldset>
+            ) : (
+              <fieldset className="lecom-request-form" disabled>
+                <label className="lecom-field lecom-title-field">
+                  Título
+                  <input value={record.title} readOnly />
+                </label>
+                <label className="lecom-field lecom-description-field">
+                  Descrição
+                  <textarea value={record.description} readOnly />
+                </label>
+                {hasSections ? (
+                  <SectionedDynamicForm
+                    sections={sections.map(s => ({ ...s, fields: s.fields.map(f => ({ ...f, readOnly: true })) }))}
+                    values={(record.fields as Record<string, unknown>) ?? {}}
+                    onChange={() => {}}
+                  />
+                ) : (
+                  <DynamicForm
+                    fields={flatFields.map(f => ({ ...f, readOnly: true }))}
+                    values={(record.fields as Record<string, unknown>) ?? {}}
+                    onChange={() => {}}
+                  />
+                )}
+              </fieldset>
             )}
-          </select>
-        </label>
-      )}
-      {(record as any).incidents?.map(
-        (incident: { id: string; type: string }) => (
-          <p key={incident.id} role="status">
-            Incidente: {incident.type}. Selecione um responsável elegível e
-            reatribua a atividade para resolver.
-          </p>
-        ),
-      )}
 
-      {/* Activities */}
-      {record.activities?.map((a) => (
-        <div key={a.id}>
-          {a.phase} — {a.state}
-          {a.allowedActions.map((action) => (
-            <button
-              disabled={p2Disabled}
-              key={action}
-              onClick={() => {
-                if (
-                  action === "returnForCorrection" ||
-                  action === "requestInformation"
-                ) {
-                  setP2ActionPanel({
-                    activityId: a.id,
-                    action,
-                    text: "",
-                  });
-                } else if (isCommandAction(action)) {
-                  void run(action, a.id);
-                }
-              }}
-            >
-              {(
-                {
-                  claim: "Assumir",
-                  complete: "Concluir atividade",
-                  release: "Liberar",
-                  reassign: "Reatribuir",
-                  returnForCorrection: "Devolver para correção",
-                  requestInformation: "Solicitar informação",
-                } as Record<string, string>
-              )[action] ?? action}
-            </button>
-          ))}
-          {/* P02 inline action panel for this activity */}
-          {p2ActionPanel?.activityId === a.id && (
-            <div>
-              <label>
-                {p2ActionPanel.action === "returnForCorrection"
-                  ? "Motivo da devolução"
-                  : "Pergunta para o solicitante"}
+            {/* P02: Correction editor */}
+            {record.allowedActions?.includes("saveCorrection") && (
+              <section className="lecom-request-form" aria-label="Correção solicitada">
+                <h2 style={{ margin: "0 0 var(--space-3)", fontSize: "var(--text-base)", fontWeight: 600 }}>Correção solicitada</h2>
+                <p style={{ margin: "0 0 var(--space-3)", color: "var(--foreground-muted)", fontSize: "var(--text-sm)" }}>Corrija os campos indicados e reenvie a requisição.</p>
+                {hasSections ? (
+                  <SectionedDynamicForm sections={sections} values={correctionFields} onChange={(key, value) => setCorrectionFields((prev) => ({ ...prev, [key]: value }))} />
+                ) : (
+                  <DynamicForm fields={flatFields} values={correctionFields} onChange={(key, value) => setCorrectionFields((prev) => ({ ...prev, [key]: value }))} />
+                )}
+                <div style={{ display: "flex", gap: "var(--space-2)", marginTop: "var(--space-4)" }}>
+                  <button disabled={p2Disabled} onClick={() => void handleSaveCorrection()}>Salvar correção</button>
+                  {record.allowedActions?.includes("resubmit") && (
+                    <button disabled={p2Disabled} onClick={() => void handleResubmit()}>Reenviar</button>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {/* P02: Information response */}
+            {record.allowedActions?.includes("respondInformation") && (
+              <section className="lecom-request-form" aria-label="Informação solicitada">
+                <h2 style={{ margin: "0 0 var(--space-3)", fontSize: "var(--text-base)", fontWeight: 600 }}>Informação solicitada</h2>
+                {record.activities?.map((a) =>
+                  (a as any).question ? (
+                    <blockquote key={a.id} style={{ margin: "0 0 var(--space-3)", padding: "var(--space-3)", background: "var(--surface-secondary)", borderLeft: "3px solid var(--primary)", borderRadius: "var(--radius-xs)" }}>{(a as any).question}</blockquote>
+                  ) : null,
+                )}
+                <label className="lecom-field">
+                  Resposta
+                  <textarea disabled={p2Disabled} value={answerText} onChange={(e) => setAnswerText(e.target.value)} />
+                </label>
+                <button disabled={p2Disabled || !answerText.trim()} onClick={() => void handleRespondInformation()} style={{ marginTop: "var(--space-3)" }}>Responder</button>
+              </section>
+            )}
+          </div>
+
+          {/* ===== RIGHT: action panel + SLA ===== */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+
+            {/* Autosave + draft actions */}
+            {editable && (
+              <div className="lecom-request-form" style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                <p role="status" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--foreground-muted)" }}>{autosave.state}</p>
+                <button
+                  disabled={busy || transitionConflict || !!transition.current || autosave.state === "conflict"}
+                  onClick={() => void save()}
+                >
+                  Salvar agora
+                </button>
+                {(transitionConflict || autosave.state === "conflict") && (
+                  <button onClick={() => window.location.reload()}>Descartar e recarregar</button>
+                )}
+                {transition.current && (
+                  <button disabled={busy} onClick={() => void run(transition.current!.action, transition.current!.target)}>Repetir tentativa</button>
+                )}
+                {record.allowedActions?.includes("submit") && (
+                  <button
+                    disabled={busy || transitionConflict || !!transition.current || uploads.current.length > 0 || ["error", "conflict"].includes(autosave.state)}
+                    onClick={() => void run("submit")}
+                  >
+                    Revisar e enviar
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Activities panel */}
+            {record.activities?.map((a) => (
+              <div key={a.id} className="lecom-request-form" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", paddingBottom: "var(--space-2)", borderBottom: "1px solid var(--border)" }}>
+                  <span style={{ fontWeight: 700, fontSize: "var(--text-sm)" }}>{phaseLabels[a.phase] ?? a.phase}</span>
+                  <span style={{ fontSize: "var(--text-xs)", color: "var(--foreground-muted)", background: "var(--surface-secondary)", padding: "2px 8px", borderRadius: 999 }}>{stateLabels[a.state] ?? a.state}</span>
+                </div>
+
+                {/* Responsável */}
+                {(record as any).assignmentTargets?.length > 0 && (
+                  <label className="lecom-field">
+                    Responsável
+                    <select disabled={busy || transitionConflict || !!transition.current} value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+                      <option value="">Selecione</option>
+                      {(record as any).assignmentTargets.map((p: { id: string; label: string }) => (
+                        <option key={p.id} value={p.id}>{p.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+
+                {/* Resolution — only for complete/close/cancel */}
+                {(a.allowedActions.includes("complete") || ["close", "cancel"].some(ac => record.allowedActions?.includes(ac))) && (
+                  <label className="lecom-field">
+                    Resolução ou motivo
+                    <textarea disabled={busy || transitionConflict || !!transition.current} value={resolution} onChange={(e) => setResolution(e.target.value)} rows={3} />
+                  </label>
+                )}
+
+                {/* Action buttons */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
+                  {a.allowedActions.map((action) => (
+                    <button
+                      key={action}
+                      disabled={p2Disabled}
+                      onClick={() => {
+                        if (action === "returnForCorrection" || action === "requestInformation") {
+                          setP2ActionPanel({ activityId: a.id, action, text: "" });
+                        } else if (isCommandAction(action)) {
+                          void run(action, a.id);
+                        }
+                      }}
+                    >
+                      {({
+                        claim: "Assumir",
+                        complete: actionLabels[a.nodeId ?? ""] ?? "Concluir",
+                        release: "Liberar",
+                        reassign: "Reatribuir",
+                        returnForCorrection: "Devolver",
+                        requestInformation: "Pedir informação",
+                      } as Record<string, string>)[action] ?? action}
+                    </button>
+                  ))}
+                </div>
+
+                {/* P02 inline action panel */}
+                {p2ActionPanel?.activityId === a.id && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", padding: "var(--space-3)", background: "var(--surface-secondary)", borderRadius: "var(--radius-sm)" }}>
+                    <label className="lecom-field">
+                      {p2ActionPanel.action === "returnForCorrection" ? "Motivo da devolução" : "Pergunta para o solicitante"}
+                      <textarea disabled={busy} value={p2ActionPanel.text} onChange={(e) => setP2ActionPanel({ ...p2ActionPanel, text: e.target.value })} rows={3} />
+                    </label>
+                    <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                      <button disabled={busy || p2ActionPanel.text.trim().length < 3} onClick={() => { if (p2ActionPanel.action === "returnForCorrection") void handleReturnForCorrection(a.id, p2ActionPanel.text); else void handleRequestInformation(a.id, p2ActionPanel.text); }}>Confirmar</button>
+                      <button disabled={busy} onClick={() => setP2ActionPanel(null)}>Cancelar</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Incidents */}
+                {(record as any).incidents?.map((incident: { id: string; type: string }) => (
+                  <p key={incident.id} role="alert" style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--danger)" }}>
+                    Incidente: {incident.type}. Selecione um responsável elegível e reatribua.
+                  </p>
+                ))}
+              </div>
+            ))}
+
+            {/* Close / Cancel (request-level) */}
+            {["close", "cancel"].some(a => record.allowedActions?.includes(a)) && (
+              <div className="lecom-request-form" style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+                {!record.activities?.some(a => a.allowedActions.includes("complete")) && (
+                  <label className="lecom-field">
+                    Motivo
+                    <textarea disabled={busy || transitionConflict || !!transition.current} value={resolution} onChange={(e) => setResolution(e.target.value)} rows={3} />
+                  </label>
+                )}
+                <div style={{ display: "flex", gap: "var(--space-2)" }}>
+                  {["close", "cancel"].filter(a => record.allowedActions?.includes(a)).map(action => (
+                    <button key={action} disabled={p2Disabled} onClick={() => void run(action)}>
+                      {action === "close" ? "Encerrar" : "Cancelar requisição"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* SLA */}
+            {record.sla && record.sla.length > 0 && (
+              <div className="lecom-request-form">
+                <h3 style={{ margin: "0 0 var(--space-2)", fontSize: "var(--text-sm)", fontWeight: 600, color: "var(--foreground-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>SLA</h3>
+                <SlaBar sla={record.sla} />
+                <Link to="/requests/bpm/sla" style={{ fontSize: "var(--text-xs)", marginTop: "var(--space-2)", display: "inline-block" }}>Dashboard SLA</Link>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ===== FULL WIDTH: Anexos, Comentários, Timeline ===== */}
+        <div style={{ marginTop: "var(--space-6)", display: "flex", flexDirection: "column", gap: "var(--space-5)" }}>
+
+          {/* Anexos */}
+          <section className="lecom-request-form">
+            <h2 style={{ margin: "0 0 var(--space-3)", fontSize: "var(--text-base)", fontWeight: 600 }}>Anexos</h2>
+            {record.attachments?.length === 0 && <p style={{ margin: 0, color: "var(--foreground-muted)", fontSize: "var(--text-sm)" }}>Nenhum anexo.</p>}
+            {uploads.current.length > 0 && <button disabled={busy || autosave.state === "conflict"} onClick={() => void upload()}>Repetir upload</button>}
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+              {record.attachments?.map((a) => (
+                <div key={a.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", padding: "var(--space-2) 0", borderBottom: "1px solid var(--border-subtle)" }}>
+                  <span style={{ flex: 1, fontSize: "var(--text-sm)" }}>{a.filename} <span style={{ color: "var(--foreground-muted)", fontSize: "var(--text-xs)" }}>v{a.version}</span></span>
+                  <button onClick={() => void bpmApi.download(record.id, a.id).then((blob) => { const url = URL.createObjectURL(blob); const link = document.createElement("a"); link.href = url; link.download = a.filename; link.click(); URL.revokeObjectURL(url); }).catch(() => setError("Falha no download"))}>Baixar</button>
+                  {editable && (a as any).fieldKey && (
+                    <label style={{ fontSize: "var(--text-xs)", cursor: "pointer" }}>
+                      Substituir
+                      <input type="file" disabled={busy} style={{ display: "none" }} onChange={(e) => e.target.files && void upload((a as any).fieldKey, e.target.files, a.id)} />
+                    </label>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Comentários */}
+          <section className="lecom-request-form">
+            <h2 style={{ margin: "0 0 var(--space-3)", fontSize: "var(--text-base)", fontWeight: 600 }}>Comentários</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
+              {comments.length === 0 && <p style={{ margin: 0, color: "var(--foreground-muted)", fontSize: "var(--text-sm)" }}>Nenhum comentário ainda.</p>}
+              {comments.map((item) => (
+                <div key={item.id} style={{ padding: "var(--space-2) var(--space-3)", background: "var(--surface-secondary)", borderRadius: "var(--radius-sm)", fontSize: "var(--text-sm)" }}>{item.body}</div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "var(--space-2)", alignItems: "flex-end" }}>
+              <label className="lecom-field" style={{ flex: 1 }}>
+                Novo comentário
                 <textarea
-                  disabled={busy}
-                  value={p2ActionPanel.text}
-                  onChange={(e) =>
-                    setP2ActionPanel({ ...p2ActionPanel, text: e.target.value })
-                  }
+                  disabled={busy || transitionConflict || !!transition.current || !!commentAttempt.current}
+                  value={comment}
+                  onChange={(e) => setComment(e.target.value)}
+                  rows={2}
                 />
               </label>
               <button
-                disabled={busy || p2ActionPanel.text.trim().length < 3}
-                onClick={() => {
-                  if (p2ActionPanel.action === "returnForCorrection")
-                    void handleReturnForCorrection(a.id, p2ActionPanel.text);
-                  else void handleRequestInformation(a.id, p2ActionPanel.text);
-                }}
+                disabled={busy || transitionConflict || !!transition.current || (!comment.trim() && !commentAttempt.current)}
+                onClick={() => void addComment()}
+                style={{ alignSelf: "flex-end" }}
               >
-                Confirmar
-              </button>
-              <button
-                disabled={busy}
-                onClick={() => setP2ActionPanel(null)}
-              >
-                Cancelar
+                Comentar
               </button>
             </div>
-          )}
+          </section>
+
+          {/* Timeline */}
+          <section className="lecom-request-form">
+            <h2 style={{ margin: "0 0 var(--space-3)", fontSize: "var(--text-base)", fontWeight: 600 }}>Timeline</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-1)" }}>
+              {timeline.map((e) => (
+                <div key={e.id} style={{ display: "flex", gap: "var(--space-3)", fontSize: "var(--text-xs)", padding: "var(--space-1) 0", borderBottom: "1px solid var(--border-subtle)" }}>
+                  <span style={{ color: "var(--foreground-muted)", whiteSpace: "nowrap" }}>{new Date(e.occurredAt).toLocaleString("pt-BR")}</span>
+                  <span>{e.type.replace("activity.", "").replace("request.", "").replace(/_/g, " ")}</span>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <Link to="/requests/bpm" style={{ fontSize: "var(--text-sm)", color: "var(--primary)" }}>← Voltar para atividades</Link>
         </div>
-      ))}
-
-      {["close", "cancel"]
-        .filter((action) => record.allowedActions?.includes(action))
-        .map((action) => (
-          <button
-            disabled={p2Disabled}
-            key={action}
-            onClick={() => void run(action)}
-          >
-            {action === "close" ? "Encerrar" : "Cancelar"}
-          </button>
-        ))}
-
-      {/* === P02: Correction editor === */}
-      {record.allowedActions?.includes("saveCorrection") && (
-        <section aria-label="Correção solicitada">
-          <h2>Correção solicitada</h2>
-          <p>Corrija os campos indicados e reenvie a requisição.</p>
-          {hasSections ? (
-            <SectionedDynamicForm
-              sections={sections}
-              values={correctionFields}
-              onChange={(key, value) =>
-                setCorrectionFields((prev) => ({ ...prev, [key]: value }))
-              }
-            />
-          ) : (
-            <DynamicForm
-              fields={flatFields}
-              values={correctionFields}
-              onChange={(key, value) =>
-                setCorrectionFields((prev) => ({ ...prev, [key]: value }))
-              }
-            />
-          )}
-          <button disabled={p2Disabled} onClick={() => void handleSaveCorrection()}>
-            Salvar correção
-          </button>
-          {record.allowedActions?.includes("resubmit") && (
-            <button disabled={p2Disabled} onClick={() => void handleResubmit()}>
-              Reenviar
-            </button>
-          )}
-        </section>
-      )}
-
-      {/* === P02: Information response === */}
-      {record.allowedActions?.includes("respondInformation") && (
-        <section aria-label="Informação solicitada">
-          <h2>Informação solicitada</h2>
-          {record.activities?.map((a) =>
-            (a as any).question ? (
-              <blockquote key={a.id}>{(a as any).question}</blockquote>
-            ) : null,
-          )}
-          <label>
-            Resposta
-            <textarea
-              disabled={p2Disabled}
-              value={answerText}
-              onChange={(e) => setAnswerText(e.target.value)}
-            />
-          </label>
-          <button
-            disabled={p2Disabled || !answerText.trim()}
-            onClick={() => void handleRespondInformation()}
-          >
-            Responder
-          </button>
-        </section>
-      )}
-
-      <h2>Anexos</h2>
-      {uploads.current.length > 0 && (
-        <button
-          disabled={busy || autosave.state === "conflict"}
-          onClick={() => void upload()}
-        >
-          Repetir upload
-        </button>
-      )}
-      {record.attachments?.map((a) => (
-        <div key={a.id}>
-          {a.filename} · v{a.version}
-          <button
-            onClick={() =>
-              void bpmApi
-                .download(record.id, a.id)
-                .then((blob) => {
-                  const url = URL.createObjectURL(blob);
-                  const link = document.createElement("a");
-                  link.href = url;
-                  link.download = a.filename;
-                  link.click();
-                  URL.revokeObjectURL(url);
-                })
-                .catch(() => setError("Falha no download"))
-            }
-          >
-            Baixar
-          </button>
-          {editable && (a as any).fieldKey && (
-            <label>
-              Substituir {a.filename}
-              <input
-                type="file"
-                disabled={busy}
-                onChange={(e) =>
-                  e.target.files &&
-                  void upload((a as any).fieldKey, e.target.files, a.id)
-                }
-              />
-            </label>
-          )}
-        </div>
-      ))}
-      <h2>Comentários</h2>
-      {comments.map((item) => (
-        <p key={item.id}>{item.body}</p>
-      ))}
-      <label>
-        Comentário
-        <textarea
-          disabled={
-            busy ||
-            transitionConflict ||
-            !!transition.current ||
-            !!commentAttempt.current
-          }
-          value={comment}
-          onChange={(e) => setComment(e.target.value)}
-        />
-      </label>
-      <button
-        disabled={
-          busy ||
-          transitionConflict ||
-          !!transition.current ||
-          (!comment.trim() && !commentAttempt.current)
-        }
-        onClick={() => void addComment()}
-      >
-        Comentar
-      </button>
-      {record.sla && record.sla.length > 0 && (
-        <div>
-          <h2>SLA</h2>
-          <SlaBar sla={record.sla} />
-          <Link to="/requests/bpm/sla" style={{ fontSize: 13 }}>Dashboard SLA</Link>
-        </div>
-      )}
-      <h2>Timeline</h2>
-      {timeline.map((e) => (
-        <p key={e.id} style={{ fontSize: 13 }}>
-          <span style={{ color: "var(--text-muted)" }}>
-            {new Date(e.occurredAt).toLocaleString("pt-BR")}
-          </span>
-          {" · "}
-          {e.type.replace("activity.", "").replace("request.", "").replace(/_/g, " ")}
-        </p>
-      ))}
-      <Link to="/requests/bpm">Voltar</Link>
+      </div>
     </section>
   );
 }

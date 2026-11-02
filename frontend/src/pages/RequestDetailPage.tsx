@@ -6,6 +6,7 @@ import { Button } from '../components/Button';
 import { useAuth } from '../context/AuthContext';
 import { requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
+import { formatBRL } from '../utils/format';
 
 const STATUS_LABEL: Record<RequestStatus, string> = {
   rascunho: 'Rascunho',
@@ -206,7 +207,7 @@ export function RequestDetailPage() {
             <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead><tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left' }}><th style={{ padding: 9 }}>Categoria / subcategoria</th><th style={{ padding: 9 }}>Item</th><th style={{ padding: 9 }}>Quantidade</th><th style={{ padding: 9 }}>Valor unitário</th><th style={{ padding: 9 }}>Total</th></tr></thead>
-                <tbody>{purchaseItems.map((item, index) => <tr key={`${item.item}-${index}`} style={{ borderBottom: index === purchaseItems.length - 1 ? undefined : '1px solid var(--border)' }}><td style={{ padding: 9 }}>{item.category ?? '—'} / {item.subcategory ?? '—'}</td><td style={{ padding: 9, fontWeight: 600 }}>{item.item}</td><td style={{ padding: 9 }}>{item.quantity} {item.unit ?? ''}</td><td style={{ padding: 9 }}>R$ {Number(item.unitPrice).toFixed(2)}</td><td style={{ padding: 9 }}>R$ {(Number(item.unitPrice) * Number(item.quantity)).toFixed(2)}</td></tr>)}</tbody>
+                <tbody>{purchaseItems.map((item, index) => <tr key={`${item.item}-${index}`} style={{ borderBottom: index === purchaseItems.length - 1 ? undefined : '1px solid var(--border)' }}><td style={{ padding: 9 }}>{item.category ?? '—'} / {item.subcategory ?? '—'}</td><td style={{ padding: 9, fontWeight: 600 }}>{item.item}</td><td style={{ padding: 9 }}>{item.quantity} {item.unit ?? ''}</td><td style={{ padding: 9 }}>{formatBRL(item.unitPrice)}</td><td style={{ padding: 9 }}>{formatBRL(Number(item.unitPrice) * Number(item.quantity))}</td></tr>)}</tbody>
               </table>
             </div>
           </div>

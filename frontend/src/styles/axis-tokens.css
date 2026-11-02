@@ -1,0 +1,97 @@
+:root {
+  --axis-graphite-900: #0e1114;
+  --axis-graphite-800: #1a1f24;
+  --axis-graphite-700: #262c32;
+  --axis-graphite-600: #3a424a;
+  --axis-graphite-400: #66707a;
+  --axis-graphite-200: #d4dae0;
+  --axis-graphite-100: #eef2f4;
+  --axis-teal: #14b8a6;
+  --axis-teal-action: #0f766e;
+  --axis-teal-hover: #115e59;
+  --axis-teal-subtle: #ccfbf1;
+  --axis-teal-dark: #153e3b;
+
+  --background: var(--axis-graphite-100);
+  --surface: #ffffff;
+  --surface-secondary: #f8fafb;
+  --surface-dark: var(--axis-graphite-800);
+  --foreground: var(--axis-graphite-800);
+  --foreground-muted: var(--axis-graphite-400);
+  --foreground-inverse: #f8fafc;
+  --border: var(--axis-graphite-200);
+  --border-subtle: #e5e9ed;
+  --primary: var(--axis-teal-action);
+  --primary-hover: var(--axis-teal-hover);
+  --primary-foreground: #ffffff;
+  --focus-ring: var(--axis-teal-action);
+  --success: #15803d;
+  --warning: #b45309;
+  --danger: #b91c1c;
+  --info: #2563eb;
+
+  --font-family: "Inter", "Segoe UI", sans-serif;
+  --text-xs: .75rem;
+  --text-sm: .875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --sidebar-width: 248px;
+  --sidebar-collapsed-width: 64px;
+  --header-height: 60px;
+  --shadow-sm: 0 1px 2px rgba(14, 17, 20, .04);
+  --shadow-md: 0 3px 10px rgba(14, 17, 20, .06);
+  --transition-fast: 120ms ease;
+  --transition-default: 180ms ease;
+
+  /* Compatibility aliases for existing pages and shared components. */
+  --bg: var(--background);
+  --bg-elevated: var(--surface);
+  --bg-topbar: var(--surface-dark);
+  --bg-sidebar: var(--surface-dark);
+  --bg-sidebar-active: var(--axis-teal-dark);
+  --text: var(--foreground);
+  --text-muted: var(--foreground-muted);
+  --text-sidebar: #dce3e8;
+  --text-sidebar-active: var(--foreground-inverse);
+  --text-topbar: var(--foreground-inverse);
+  --accent: var(--primary);
+  --accent-contrast: var(--primary-foreground);
+  --accent-soft: var(--axis-teal-subtle);
+  --success-soft: #dcfce7;
+  --warning-soft: #fef3c7;
+  --danger-soft: #fee2e2;
+  --row-hover: var(--surface-secondary);
+  --table-head: var(--surface-secondary);
+  --shadow: var(--shadow-sm);
+  --shadow-card: var(--shadow-sm);
+  --radius: var(--radius-md);
+  --control-height: 36px;
+  --sans: var(--font-family);
+  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+:root[data-theme="dark"] {
+  --background: var(--axis-graphite-900);
+  --surface: var(--axis-graphite-800);
+  --surface-secondary: var(--axis-graphite-700);
+  --foreground: #f8fafc;
+  --foreground-muted: #a9b4bd;
+  --border: var(--axis-graphite-600);
+  --border-subtle: var(--axis-graphite-700);
+  --row-hover: var(--axis-graphite-700);
+  --table-head: var(--axis-graphite-700);
+}

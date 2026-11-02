@@ -721,10 +721,44 @@ function FieldRow({
       )}
 
       {f.type === 'reference' && (
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12 }}>
-          Rótulo da referência
-          <input placeholder="ex: Projeto, Cliente…" value={(f.refLabel as string) ?? ''} onChange={e => set({ refLabel: e.target.value })} style={inputStyle} />
-        </label>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12, flex: '1 1 180px' }}>
+            Origem dos dados
+            <select
+              value={(f.source as { key: string } | undefined)?.key ?? ''}
+              onChange={e => set({ source: e.target.value ? { key: e.target.value } : undefined, binding: undefined })}
+              style={{ ...inputStyle, minWidth: 0 }}
+            >
+              <option value="">-- selecione --</option>
+              <optgroup label="Financeiro / Operacional">
+                <option value="cost_centers">Centros de custo</option>
+                <option value="projects">Projetos</option>
+              </optgroup>
+              <optgroup label="Cadastros">
+                <option value="clients">Clientes</option>
+                <option value="collaborators">Colaboradores</option>
+                <option value="sectors">Setores</option>
+              </optgroup>
+              <optgroup label="Logística">
+                <option value="logistics.catalog">Catálogo de logística</option>
+              </optgroup>
+            </select>
+          </label>
+          {((f.source as { key: string } | undefined)?.key === 'cost_centers' || (f.source as { key: string } | undefined)?.key === 'projects') && (
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12, flex: '1 1 200px' }}>
+              Vincular ao campo do pedido (opcional)
+              <select
+                value={(f.binding as string) ?? ''}
+                onChange={e => set({ binding: e.target.value || undefined })}
+                style={{ ...inputStyle, minWidth: 0 }}
+              >
+                <option value="">Sem vínculo</option>
+                {(f.source as { key: string } | undefined)?.key === 'cost_centers' && <option value="request.costCenterId">request.costCenterId</option>}
+                {(f.source as { key: string } | undefined)?.key === 'projects' && <option value="request.projectId">request.projectId</option>}
+              </select>
+            </label>
+          )}
+        </div>
       )}
 
       {f.type === 'repeatable_table' && (
