@@ -1,15 +1,10 @@
-import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useTheme } from "../../context/ThemeContext";
 import { NotificationsDropdown } from "./NotificationsDropdown";
-import { bpmApi, type BpmCapabilities } from "../../features/requisicoes-bpm/api";
 
-export function isBpmNavigationEnabled(capabilities: Pick<BpmCapabilities, "enabled">) {
-  return capabilities.enabled;
-}
-
-interface NavItem { to: string; label: string; icon: string; permission?: string; bpm?: boolean; children?: NavItem[]; }
+interface NavItem { to: string; label: string; icon: string; permission?: string; children?: NavItem[]; }
 
 const NAV_ITEMS: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: "▦" },
@@ -21,7 +16,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/clients", label: "Clientes", icon: "◈", permission: "client:read" },
   { to: "/projects", label: "Projetos", icon: "⚑", permission: "project:read" },
   { to: "/requests", label: "Requisições", icon: "⚑︎", permission: "request:read" },
-  { to: "/requests/bpm", label: "Processos", icon: "↻", permission: "request:read", bpm: true },
   { to: "/my-approvals", label: "Minhas Aprovações", icon: "✔", permission: "request:read" },
   { to: "/delegations", label: "Delegações", icon: "⇉", permission: "delegation:read" },
   { to: "/integrations", label: "Integrações", icon: "⇄", permission: "integration:read" },
@@ -36,23 +30,9 @@ export function AppLayout({ breadcrumb, children }: { breadcrumb: string[]; chil
   const { user, logout, hasPermission } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const location = useLocation();
-  const [bpmVisible, setBpmVisible] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-    void bpmApi.capabilities().then((capabilities) => active && setBpmVisible(isBpmNavigationEnabled(capabilities))).catch(() => active && setBpmVisible(false));
-    return () => { active = false; };
-  }, []);
-
-  const requestChildren: NavItem[] = [
-    { to: "/requests/bpm/new", label: "Abrir processo", icon: "+" }, { to: "/requests/bpm", label: "Minhas atividades", icon: "▦" },
-    { to: "/requests/bpm?workspace=inbox", label: "Caixa de entrada", icon: "▣" }, { to: "/requests/bpm?workspace=alert", label: "Em alerta", icon: "!" },
-    { to: "/requests/bpm?workspace=late", label: "Em atraso", icon: "◷" }, { to: "/requests/bpm?workspace=opened", label: "Abertos por mim", icon: "◆" },
-    { to: "/requests/bpm?workspace=managed", label: "Geridos por mim", icon: "♧" }, { to: "/requests/bpm/sla", label: "Dashboard SLA", icon: "◒" },
-    { to: "/requests/bpm/admin", label: "Administração", icon: "⚙" },
-  ];
-  const items = NAV_ITEMS.filter((item) => (!item.permission || hasPermission(item.permission)) && (!item.bpm || bpmVisible)).map((item) => item.to === "/requests" ? { ...item, children: requestChildren } : item);
+  const items = NAV_ITEMS.filter((item) => !item.permission || hasPermission(item.permission));
   return <div className="axis-app-shell">
     <header className="axis-app-topbar">
       <div className="axis-app-topbar-brand"><img src="/brand-industrial/axis-logo-dark.svg" alt="Axis ERP + SGI" /></div>

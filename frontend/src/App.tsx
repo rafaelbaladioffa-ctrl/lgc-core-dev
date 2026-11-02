@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { ThemeProvider } from "./context/ThemeContext";
@@ -35,28 +34,6 @@ import { UsersPage } from "./pages/UsersPage";
 import { UserFormPage } from "./pages/UserFormPage";
 import { ChangePasswordPage } from "./pages/ChangePasswordPage";
 import { RolesPage } from "./pages/RolesPage";
-import {
-  BpmNewRequestPage,
-  BpmPortalPage,
-  BpmSlaPage,
-} from "./features/requisicoes-bpm/BpmPages";
-import { BpmDraftEditorPage } from "./features/requisicoes-bpm/BpmDraftEditorPage";
-
-const BpmAdminPage = lazy(() =>
-  import("./features/requisicoes-bpm/BpmPages").then((m) => ({
-    default: m.BpmAdminPage,
-  })),
-);
-const BpmVersionPage = lazy(() =>
-  import("./features/requisicoes-bpm/BpmPages").then((m) => ({
-    default: m.BpmVersionPage,
-  })),
-);
-const BpmAdminFallback = (
-  <div role="status" style={{ padding: 24 }}>
-    Carregando administração BPM…
-  </div>
-);
 
 function PrivateRoute({
   children,
@@ -314,58 +291,7 @@ function AppRoutes() {
           </PrivateRoute>
         }
       />
-      <Route
-        path="/requests/bpm/admin/versions/:id"
-        element={
-          <Suspense fallback={BpmAdminFallback}>
-            <PrivateRoute permission="request_process:model">
-              <BpmVersionPage />
-            </PrivateRoute>
-          </Suspense>
-        }
-      />
-      <Route
-        path="/requests/bpm/admin"
-        element={
-          <Suspense fallback={BpmAdminFallback}>
-            <PrivateRoute permission="request_process:model">
-              <BpmAdminPage />
-            </PrivateRoute>
-          </Suspense>
-        }
-      />
-      <Route
-        path="/requests/bpm/new"
-        element={
-          <PrivateRoute permission="request:create">
-            <BpmNewRequestPage />
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/requests/bpm/sla"
-        element={
-          <PrivateRoute permission="request:read">
-            <BpmSlaPage />
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/requests/bpm/:id"
-        element={
-          <PrivateRoute permission="request:read">
-            <BpmDraftEditorPage />
-          </PrivateRoute>
-        }
-      />
-      <Route
-        path="/requests/bpm"
-        element={
-          <PrivateRoute permission="request:read">
-            <BpmPortalPage />
-          </PrivateRoute>
-        }
-      />
+
       <Route
         path="/requests/:id"
         element={

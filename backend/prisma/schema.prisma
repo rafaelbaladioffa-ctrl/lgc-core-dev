@@ -81,14 +81,11 @@ model User {
   passwordHash   String    @map("password_hash")
   status         UserStatus @default(active)
   lastLoginAt    DateTime? @map("last_login_at")
-  // true when the password was set by an admin/RH at creation or reset (PLANNING.md 4.7) — forces
-  // the change-password screen on next login, before the rest of the system is reachable.
   mustChangePassword Boolean @default(false) @map("must_change_password")
   collaboratorId String?   @unique @map("collaborator_id")
   collaborator   Collaborator? @relation(fields: [collaboratorId], references: [id])
   refreshTokens  RefreshToken[]
   userRoles      UserRole[]
-  bpmGrants      ProcessConfigGrant[]
   auditLogs      AuditLog[]
   sensitiveAccessLogs SensitiveDataAccessLog[]
   createdAt      DateTime  @default(now()) @map("created_at")
@@ -156,10 +153,6 @@ model UserRole {
 
 model Sector {
   id                         String   @id @default(uuid())
-  // Server-generated, hierarchical: root sectors get "100", "200", ... (multiples of 100, via
-  // sector_root_code_seq); a child gets "<parent.code>.<n>" where n is 1-based and scoped to that
-  // parent (e.g. "100.1", "100.2"), recursively — a grandchild of "100.1" would be "100.1.1".
-  // No longer accepted from the client; see SectorsService.create.
   code                       String   @unique
   name                       String
   parentSectorId             String?  @map("parent_sector_id")
@@ -183,8 +176,6 @@ model Sector {
 
 model CostCenter {
   id        String   @id @default(uuid())
-  // Same hierarchical, server-generated code scheme as Sector.code — see SectorsService.create /
-  // CostCentersService.create.
   code      String   @unique
   name      String
   parentCostCenterId String? @map("parent_cost_center_id")
@@ -218,10 +209,9 @@ model JobTitle {
 model WorkSchedule {
   id            String   @id @default(uuid())
   name          String
-  startTime     String   @map("start_time") // "HH:mm", kept as text (no need for a DB TIME type here)
+  startTime     String   @map("start_time")
   endTime       String   @map("end_time")
   breakMinutes  Int?     @map("break_minutes")
-  // Weekday abbreviations, e.g. ["seg","ter","qua","qui","sex"].
   daysOfWeek    String[] @map("days_of_week")
   collaborators Collaborator[]
   createdAt     DateTime @default(now()) @map("created_at")
@@ -233,15 +223,11 @@ model WorkSchedule {
 model Collaborator {
   id              String   @id @default(uuid())
   fullName        String   @map("full_name")
-  // Sensitive fields below are stored encrypted (AES-256-GCM, app-layer) as opaque base64 strings.
   rgEnc           String   @map("rg_enc")
   cpfEnc          String   @map("cpf_enc")
-  cpfHash         String   @unique @map("cpf_hash") // deterministic hash of CPF for uniqueness/lookups without decrypting
+  cpfHash         String   @unique @map("cpf_hash")
   ctpsEnc         String?  @map("ctps_enc")
   pisEnc          String?  @map("pis_enc")
-  // Split from the single "email" field: corporateEmail is the collaborator's primary/contact
-  // address (unique); personalEmail is informational only. Neither drives login — User.email is
-  // the separate, independent login identifier (User.collaboratorId is just an optional link).
   personalEmail   String?  @map("personal_email")
   corporateEmail  String   @unique @map("corporate_email")
   jobTitleId      String   @map("job_title_id")
@@ -253,32 +239,17 @@ model Collaborator {
   subordinates    Collaborator[] @relation("CollaboratorHierarchy")
   asoDate         DateTime? @map("aso_date")
   asoValidity     DateTime? @map("aso_validity")
-  // Was a boolean "has a yellow badge?" flag; the planning session reclassified it as the actual
-  // badge/login identifier string once pointed out it isn't a yes/no indicator.
   yellowBadge     String?  @map("yellow_badge")
   status          CollaboratorStatus @default(ativo)
   offboardedAt    DateTime? @map("offboarded_at")
-  // Used only to resolve the multi-level approval chain for high-cost ticket requests (see
-  // PLANNING.md 4.6.2) — deliberately independent of jobTitleId, which is the HR job title.
   managementLevel ManagementLevel @default(colaborador) @map("management_level")
-
-  // Matrícula: atomic sequential employee code (0000, 0001, ...), read from the
-  // `collaborator_matricula_seq` Postgres sequence at creation time — same pattern as the client
-  // code and project proposal sequence (see ClientsService/ProjectsService). Stored zero-padded;
-  // read-only from the API's perspective (never set by the client, never updated).
   matricula       String   @unique
-
-  // Personal / contact data (not subject to the app-layer encryption used for RG/CPF/CTPS/PIS —
-  // the planning session classified these as non-sensitive for this purpose).
   phone                 String?   @map("phone")
   emergencyContactName  String?   @map("emergency_contact_name")
   emergencyContactPhone String?   @map("emergency_contact_phone")
   birthDate             DateTime? @map("birth_date")
   maritalStatus         MaritalStatus? @map("marital_status")
   gender                Gender?   @map("gender")
-
-  // Address — filled by the frontend's ViaCEP autocomplete on the `cep` field, but every field
-  // stays independently editable (ViaCEP responses are sometimes wrong or incomplete).
   cep           String? @map("cep")
   addressStreet String? @map("address_street")
   addressNumber String? @map("address_number")
@@ -286,19 +257,12 @@ model Collaborator {
   addressDistrict String? @map("address_district")
   addressCity   String? @map("address_city")
   addressState  String? @map("address_state")
-
-  // Employment data
   admissionDate  DateTime? @map("admission_date")
   contractType   ContractType? @map("contract_type")
   workScheduleId String?   @map("work_schedule_id")
   workSchedule   WorkSchedule? @relation(fields: [workScheduleId], references: [id])
-  // Optional — which cost center this collaborator is allocated to. Not filtered by sector in
-  // the UI (deliberate: the planning session confirmed the full list, not a sector-scoped one).
   costCenterId   String?   @map("cost_center_id")
   costCenter     CostCenter? @relation(fields: [costCenterId], references: [id])
-
-  // Documents / compliance. Photo follows the same metadata-only pattern as ticket attachments
-  // (filename + storage path; no binary storage backend exists in this system yet).
   photoFilename    String? @map("photo_filename")
   photoStoragePath String? @map("photo_storage_path")
   uniformSize      String? @map("uniform_size")
@@ -318,11 +282,6 @@ model Collaborator {
   requestComments       RequestComment[]
   requestAttachmentsUploaded RequestAttachment[]
   requestApprovals      RequestApproval[] @relation("RequestApprover")
-  bpmQueueMemberships    RequestQueueMember[]
-  bpmCandidates          ActivityCandidate[]
-  bpmAssignments         ActivityInstance[] @relation("BpmAssignee")
-  bpmParticipants        RequestParticipant[]
-  bpmCommentsAuthored    BpmRequestComment[]
   delegationsGiven      Delegation[] @relation("DelegationDelegator")
   delegationsReceived   Delegation[] @relation("DelegationDelegate")
 
@@ -390,8 +349,6 @@ model Project {
   responsibleCollaboratorId String   @map("responsible_collaborator_id")
   responsibleCollaborator    Collaborator @relation(fields: [responsibleCollaboratorId], references: [id])
   status                    ProjectStatus @default(proposta)
-  // Stored for audit/query purposes; the authoritative source of truth is the `project_proposal_seq`
-  // Postgres sequence, read atomically at creation time (see ProjectsService.generateCode).
   proposalSequence          Int      @map("proposal_sequence")
   requests                  Request[]
   createdAt                 DateTime @default(now()) @map("created_at")
@@ -401,12 +358,6 @@ model Project {
   @@index([costCenterId])
   @@map("projects")
 }
-
-// --- Requisições — Fase 1 da nova spec (REQUISICOES_SPEC.md), que substitui PLANNING.md 4.6 e
-// a implementação ticket_* anterior. Catálogo versionado, estados completos, auditoria
-// append-only. Simplificações documentadas desta fase (ver hand-off notes): form_data continua
-// jsonb (não normalizado campo a campo), motor de SLA é só estrutura (sem calendário/pausas),
-// não há tela de administração do catálogo (seed), sem upload binário real.
 
 enum RequestConfidentiality {
   interna
@@ -450,7 +401,6 @@ enum RequestApprovalStatus {
   devolvido
 }
 
-/// Regra de conclusão de um nó de aprovação paralelo (§9.1) — ver RequestApproval.completionRule.
 enum RequestApprovalCompletionRule {
   todos
   qualquer_um
@@ -471,60 +421,7 @@ enum RequestExecutionMode {
   legacy
   bpm_v1
 }
-enum BpmVersionStatus {
-  draft
-  published
-  retired
-}
-enum BpmQueueMemberRole {
-  member
-  manager
-}
-enum BpmGrantRole {
-  modeler
-  publisher
-  operator
-  auditor
-}
-enum BpmInstanceState {
-  draft
-  running
-  completed
-  closed
-  cancelled
-}
-enum BpmTokenState {
-  active
-  waiting
-  consumed
-  cancelled
-}
-enum BpmActivityKind {
-  human
-}
-enum BpmActivityPhase {
-  triage
-  execution
-  approval
-  confirmation
-}
-enum BpmActivityState {
-  available
-  claimed
-  completed
-  cancelled
-}
-enum BpmIncidentState {
-  open
-  resolved
-}
-enum BpmSlaMetric {
-  first_response
-  resolution
-}
 
-/// Categoria de requisição (REQUISICOES_SPEC.md §13.1 `request_categories`) — o catálogo em si;
-/// o formulário e o workflow ficam na versão publicada (CategoryVersion), nunca aqui.
 model RequestCategory {
   id              String                  @id @default(uuid())
   code            String                  @unique
@@ -536,18 +433,9 @@ model RequestCategory {
   subcategories   RequestCategory[]       @relation("RequestCategoryHierarchy")
   confidentiality RequestConfidentiality  @default(interna)
   active          Boolean                 @default(true)
-  // §15.2/§11: categorias de entrega/mudança/serviço exigem aceite explícito do solicitante
-  // antes de ENCERRADA — ver Request.requesterAcceptedAt e RequestsService.close.
   requiresAcceptance Boolean              @default(false) @map("requires_acceptance")
-  // §9.2: em vez do workflowSchema fixo da versão, resolve a cadeia de aprovação pela matriz de
-  // alçada por valor (ApprovalAuthorityRule) — ver RequestsService.triage.
   useDynamicAuthority Boolean             @default(false) @map("use_dynamic_authority")
-  runtimeEnabled Boolean                  @default(false) @map("runtime_enabled")
-  configRevision Int                      @default(0) @map("config_revision")
-  publishedBpmVersionId String?            @map("published_bpm_version_id")
-  publishedBpmVersion CategoryVersion?     @relation("BpmPublished", fields: [publishedBpmVersionId], references: [id], onDelete: Restrict)
   versions        CategoryVersion[]
-  bpmGrants       ProcessConfigGrant[]
   createdAt       DateTime                @default(now()) @map("created_at")
   updatedAt       DateTime                @updatedAt @map("updated_at")
 
@@ -556,31 +444,18 @@ model RequestCategory {
   @@map("request_categories")
 }
 
-/// Versão publicada de uma categoria (§13.1 `category_versions`) — formSchema/workflowSchema são
-/// o snapshot imutável usado por toda requisição criada sob essa versão (§11.1: alterar uma
-/// versão nova nunca muda requisições já abertas sob a anterior).
 model CategoryVersion {
   id                      String           @id @default(uuid())
   categoryId              String           @map("category_id")
   category                RequestCategory  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   version                 Int
-  // Campos dinâmicos do formulário: [{ key, label, type, required, options?, optionsSource? }].
   formSchema              Json             @map("form_schema")
-  // Passos de aprovação desta versão: [{ stepOrder, approverRule: 'gestor_direto'|'management_level', requiredLevel? }].
   workflowSchema          Json             @map("workflow_schema")
   slaFirstResponseMinutes Int              @map("sla_first_response_minutes")
   slaResolutionMinutes    Int              @map("sla_resolution_minutes")
   publishedAt             DateTime?        @default(now()) @map("published_at")
   publishedBy             String?          @map("published_by")
-  bpmStatus               BpmVersionStatus? @map("bpm_status")
-  bpmDefinition           Json?            @map("bpm_definition")
-  bpmContentHash          String?          @map("bpm_content_hash")
-  bpmValidatedHash        String?          @map("bpm_validated_hash")
-  bpmRevision              Int              @default(0) @map("bpm_revision")
-  bpmCalendarSnapshot     Json?            @map("bpm_calendar_snapshot")
   requests                Request[]
-  bpmInstances            ProcessInstance[]
-  currentForCategories    RequestCategory[] @relation("BpmPublished")
   createdAt               DateTime         @default(now()) @map("created_at")
 
   @@unique([categoryId, version])
@@ -588,8 +463,6 @@ model CategoryVersion {
   @@map("category_versions")
 }
 
-/// Fila de atendimento de um setor (§13.1 `queues`) — toda requisição cai numa fila; por ora
-/// uma fila padrão por setor (distribuição/roteamento avançado é Fase 2).
 model Queue {
   id        String    @id @default(uuid())
   sectorId  String    @map("sector_id")
@@ -598,16 +471,12 @@ model Queue {
   active    Boolean   @default(true)
   revision  Int       @default(0)
   requests  Request[]
-  bpmMembers RequestQueueMember[]
-  bpmActivities ActivityInstance[]
   createdAt DateTime  @default(now()) @map("created_at")
 
   @@index([sectorId])
   @@map("queues")
 }
 
-/// Requisição (§13.1 `requests`, exibida como "Requisição" na UI). `code` segue o novo formato
-/// `REQ-{ano}-{sequencial}` (REQUISICOES_SPEC.md §6, §13.2) — não mais `REQ-000123`.
 model Request {
   id                    String                  @id @default(uuid())
   code                  String                  @unique
@@ -619,7 +488,6 @@ model Request {
   queue                 Queue?                  @relation(fields: [queueId], references: [id])
   requesterId           String                  @map("requester_id")
   requester             Collaborator            @relation("RequestRequester", fields: [requesterId], references: [id])
-  // Abertura em nome de terceiro (§4.1); igual ao requester quando não há representação.
   beneficiaryId         String                  @map("beneficiary_id")
   beneficiary           Collaborator            @relation("RequestBeneficiary", fields: [beneficiaryId], references: [id])
   assigneeId            String?                 @map("assignee_id")
@@ -641,26 +509,15 @@ model Request {
   costCenter            CostCenter?             @relation(fields: [costCenterId], references: [id])
   estimatedValue        Decimal?                @map("estimated_value") @db.Decimal(19, 4)
   currency              String                  @default("BRL")
-  // Campos dinâmicos da categoria (CategoryVersion.formSchema) — ver nota de simplificação no
-  // topo deste bloco: não normalizado em request_field_values nesta fase.
   formData              Json?                   @map("form_data")
-  // Denúncia/relato ético (§7.3) com `anonimo=true` no formulário — o `requesterId` acima nunca
-  // é apagado (precisa pra auditoria), mas fica oculto de todo participante do fluxo que não
-  // tenha `request:view_whistleblower_identity` (RequestsService.maskIdentityIfAnonymous).
   anonymous             Boolean                 @default(false)
-  // Otimista (§13.2 lock_version) — incrementado a cada PATCH; evita sobrescrever edição
-  // concorrente (409 em vez de last-write-wins).
   lockVersion           Int                     @default(0) @map("lock_version")
   submittedAt           DateTime?               @map("submitted_at")
   slaDueFirstResponseAt DateTime?               @map("sla_due_first_response_at")
   slaDueResolutionAt    DateTime?               @map("sla_due_resolution_at")
-  // §10.2: escalonamento automático de SLA — um único passo (atendente → supervisor dele),
-  // disparado uma vez quando o relógio de solução estoura (RequestsService.runSlaAlertsAndEscalation).
   escalatedAt           DateTime?               @map("escalated_at")
   escalationLevel       Int                     @default(0) @map("escalation_level")
   closedAt              DateTime?               @map("closed_at")
-  // Preenchido por accept() quando a categoria exige aceite (§15.2/§11) — close() recusa
-  // encerrar sem isso quando CategoryVersion.category.requiresAcceptance é true.
   requesterAcceptedAt   DateTime?               @map("requester_accepted_at")
   comments              RequestComment[]
   attachments           RequestAttachment[]
@@ -668,14 +525,6 @@ model Request {
   slaClocks             SlaClock[]
   relationsAsSource     RequestRelation[] @relation("RequestRelationSource")
   relationsAsTarget     RequestRelation[] @relation("RequestRelationTarget")
-  bpmInstances          ProcessInstance[]
-  bpmComments           BpmRequestComment[]
-  bpmAttachments        BpmRequestAttachment[]
-  bpmEvents             RequestRuntimeEvent[]
-  bpmReceipts           RequestCommandReceipt[]
-  bpmIncidents          RequestRuntimeIncident[]
-  bpmSlaClocks          RequestSlaClock[]
-  bpmParticipants       RequestParticipant[]
   createdAt             DateTime                @default(now()) @map("created_at")
   updatedAt             DateTime                @updatedAt @map("updated_at")
 
@@ -691,9 +540,6 @@ model Request {
   @@map("requests")
 }
 
-/// Ano-escopo do contador de `requests.code` (REQ-{ano}-{sequencial}) — trava a linha do ano
-/// (SELECT ... FOR UPDATE) dentro da transação de criação, mesmo padrão já usado para os códigos
-/// hierárquicos de setor/centro de custo (PLANNING.md 5.5).
 model RequestNumberCounter {
   year      Int @id
   lastValue Int @default(0) @map("last_value")
@@ -701,12 +547,6 @@ model RequestNumberCounter {
   @@map("request_number_counters")
 }
 
-/// Execução da cadeia de aprovação de uma requisição, resolvida a partir do `workflowSchema` da
-/// CategoryVersion no momento da criação/reenvio (mesma lógica de antes, agora dirigida por
-/// configuração em vez de um campo fixo `has_cost`).
-/// Uma linha por aprovador. Vários aprovadores no mesmo `stepOrder` formam um nó paralelo (§9.1)
-/// — `completionRule` (igual em todas as linhas daquele stepOrder) diz como o nó se resolve:
-/// `todos` exige todas aprovadas, `qualquer_um` basta uma, `n_de_m` exige `requiredCount`.
 model RequestApproval {
   id             String                          @id @default(uuid())
   requestId      String                          @map("request_id")
@@ -742,25 +582,12 @@ model RequestComment {
   @@map("request_comments")
 }
 
-/// Metadado apenas — sem backend de upload binário ainda (mesmo padrão de
-/// collaborators.photo_filename/photo_storage_path).
-/// Anexo seguro versionado (§16) — hash/MIME/nome seguro são reais; **armazenamento é BYTEA no
-/// Postgres como solução temporária** (decisão explícita da sessão de planejamento, 2026-11-01)
-/// até a escolha de infraestrutura definitiva (disco/object storage) e de um motor de
-/// antimalware de verdade — ver nota de simplificação em requests.service.ts. Substituir um
-/// anexo cria uma linha nova com `previousVersionId` apontando pra anterior; nunca sobrescreve.
 model RequestAttachment {
   id                String              @id @default(uuid())
   requestId         String              @map("request_id")
   request           Request             @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  // Nome original informado por quem enviou — nunca usado como nome de arquivo real (ver
-  // safeFilename); só exibido na UI.
   filename          String
-  // Gerado (uuid + extensão derivada do mimeType detectado) — o único nome que qualquer
-  // referência de armazenamento/download usa.
   safeFilename      String              @map("safe_filename")
-  // Detectado pelos magic bytes do conteúdo, nunca confiado do Content-Type informado pelo
-  // cliente (§16 "MIME validado pelo conteúdo").
   mimeType          String              @map("mime_type")
   sizeBytes         Int                 @map("size_bytes")
   contentHash       String              @map("content_hash")
@@ -777,8 +604,6 @@ model RequestAttachment {
   @@map("request_attachments")
 }
 
-/// Estrutura do relógio de SLA (§10, §13.1 `sla_clocks`) — Fase 1 só guarda meta/início/fim;
-/// calendário útil, feriados e pausas automáticas ficam para a Fase 2 (motor completo).
 model SlaClock {
   id        String     @id @default(uuid())
   requestId String     @map("request_id")
@@ -789,17 +614,12 @@ model SlaClock {
   pausedAt  DateTime?  @map("paused_at")
   stoppedAt DateTime?  @map("stopped_at")
   breached  Boolean    @default(false)
-  // §10.2: alertas em 50/80/100% — guarda quais já disparou pra nunca duplicar
-  // (RequestsService.runSlaAlertsAndEscalation). [] = nenhum ainda.
   alertedThresholds Int[] @default([]) @map("alerted_thresholds")
 
   @@index([requestId])
   @@map("sla_clocks")
 }
 
-/// Feriado do calendário de SLA (§10.2) — um único calendário global: o Axis não modela
-/// empresa/unidade como entidades separadas ainda, então "por empresa/unidade" do documento
-/// não se aplica aqui (simplificação documentada no hand-off).
 model Holiday {
   id        String   @id @default(uuid())
   date      DateTime @db.Date
@@ -810,10 +630,6 @@ model Holiday {
   @@map("holidays")
 }
 
-/// Trilha de auditoria append-only (§13.1/§17 `audit_events`) — nunca editável pela API; toda
-/// mudança de estado relevante da requisição grava uma linha aqui, além do que já existe em
-/// `audit_logs` (esse último é genérico do resto do sistema; este é específico de Requisições
-/// para bater com o contrato do novo documento).
 model AuditEvent {
   id            String   @id @default(uuid())
   aggregateType String   @map("aggregate_type")
@@ -831,12 +647,6 @@ model AuditEvent {
   @@map("audit_events")
 }
 
-// --- Requisições — Fase 2 (REQUISICOES_SPEC.md §23 "Governança"), incremento inicial: conflito de
-// interesse, delegação de aprovação, janela de reabertura com vínculo `origina`. O motor de
-// workflow configurável (TODOS/QUALQUER_UM/N_DE_M), a matriz de alçada dinâmica, o calendário de
-// SLA completo, anexos seguros versionados, subtarefas/aceite e os dashboards ficam para um
-// próximo incremento — ver nota de hand-off.
-
 enum RequestRelationType {
   depende_de
   bloqueia
@@ -845,18 +655,12 @@ enum RequestRelationType {
   subtarefa_de
 }
 
-/// Delegação de aprovação (§9.1, §11, §21.2) — início/fim/escopo explícitos, nunca retroativa
-/// (startsAt não pode ser no passado na criação); uma decisão só pode ser tomada "em nome de"
-/// quem delega enquanto `revokedAt` é nulo e `now` está entre `startsAt`/`endsAt`.
 model Delegation {
   id          String       @id @default(uuid())
   delegatorId String       @map("delegator_id")
   delegator   Collaborator @relation("DelegationDelegator", fields: [delegatorId], references: [id])
   delegateId  String       @map("delegate_id")
   delegate    Collaborator @relation("DelegationDelegate", fields: [delegateId], references: [id])
-  // Escopo opcional: restringe a delegação a um setor específico (null = toda a alçada do
-  // delegador). Granularidade mais fina (categoria, valor) fica para quando a matriz de alçada
-  // dinâmica (item 2 da Fase 2) existir.
   sectorId    String?      @map("sector_id")
   sector      Sector?      @relation(fields: [sectorId], references: [id])
   startsAt    DateTime     @map("starts_at")
@@ -870,8 +674,6 @@ model Delegation {
   @@map("delegations")
 }
 
-/// Vínculo entre requisições (§11.14) — usado hoje só por `reopen()` para ligar uma reabertura
-/// fora da janela de 5 dias úteis (`origina`) à requisição nova que ela cria.
 model RequestRelation {
   id           String              @id @default(uuid())
   sourceId     String              @map("source_id")
@@ -886,19 +688,12 @@ model RequestRelation {
   @@map("request_relations")
 }
 
-/// Faixa de valor → níveis de aprovação exigidos (§9.2) — "valores são parâmetros de
-/// implantação, não constantes no código": administrável via API, não fixo.
-/// `sectorId` nulo = regra global; uma regra com setor específico tem prioridade sobre a global
-/// que cobrir o mesmo valor (ver RequestsService.findAuthorityRule). `maxValue` nulo = sem teto
-/// (última faixa, "acima de").
 model ApprovalAuthorityRule {
   id        String            @id @default(uuid())
   sectorId  String?           @map("sector_id")
   sector    Sector?           @relation(fields: [sectorId], references: [id])
   minValue  Decimal           @map("min_value") @db.Decimal(19, 4)
   maxValue  Decimal?          @map("max_value") @db.Decimal(19, 4)
-  // Ordem de aprovação para esta faixa, ex.: [supervisor, gerente] — reaproveita
-  // RequestsService.resolveApprovalChain (ramo management_level) pra resolver quem são.
   levels    ManagementLevel[]
   active    Boolean           @default(true)
   createdAt DateTime          @default(now()) @map("created_at")
@@ -914,10 +709,6 @@ model IntegrationOutbox {
   status      OutboxStatus @default(pending)
   attempts    Int          @default(0)
   lastError   String?      @map("last_error")
-  // Not in PLANNING.md 5.15 as written, but required for the exponential-backoff retry
-  // described in section 3.1 to actually work (otherwise there's no way to know when a
-  // failed event becomes eligible for retry again). Defaults to "now" so new events are
-  // picked up on the dispatcher's very next run.
   nextAttemptAt DateTime   @default(now()) @map("next_attempt_at")
   createdAt   DateTime     @default(now()) @map("created_at")
   deliveredAt DateTime?    @map("delivered_at")
@@ -930,9 +721,6 @@ model IntegrationSatellite {
   id            String          @id @default(uuid())
   name          String          @unique
   webhookUrl    String          @map("webhook_url")
-  // URL do frontend humano do satélite (ex.: https://logistica.lgc.com.br) — diferente de
-  // webhookUrl (backend-a-backend, eventos). Usada só pelo "launcher" em Integrações; satélites
-  // sem frontend próprio (só webhook) deixam nulo.
   frontendUrl   String?         @map("frontend_url")
   hmacSecretEnc String          @map("hmac_secret_enc")
   apiKeyHash    String          @map("api_key_hash")
@@ -966,297 +754,4 @@ model AuditLog {
   @@index([actorUserId])
   @@index([resourceType, resourceId])
   @@map("audit_logs")
-}
-
-model RequestQueueMember {
-  id             String             @id @default(uuid())
-  queueId        String             @map("queue_id")
-  queue          Queue              @relation(fields: [queueId], references: [id], onDelete: Cascade)
-  collaboratorId String             @map("collaborator_id")
-  collaborator   Collaborator       @relation(fields: [collaboratorId], references: [id])
-  role           BpmQueueMemberRole
-  active         Boolean            @default(true)
-  startsAt       DateTime           @default(now()) @map("starts_at")
-  endsAt         DateTime?          @map("ends_at")
-  createdAt      DateTime           @default(now()) @map("created_at")
-  updatedAt      DateTime           @updatedAt @map("updated_at")
-  @@unique([queueId, collaboratorId, role])
-  @@index([queueId, active])
-  @@index([collaboratorId, active])
-  @@map("request_queue_members")
-}
-
-model ProcessConfigGrant {
-  id              String          @id @default(uuid())
-  categoryId      String          @map("category_id")
-  category        RequestCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  userId          String          @map("user_id")
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  role            BpmGrantRole
-  expiresAt       DateTime?       @map("expires_at")
-  restrictedRead  Boolean         @default(false) @map("restricted_read")
-  createdAt       DateTime        @default(now()) @map("created_at")
-  @@unique([categoryId, userId, role])
-  @@index([userId, role])
-  @@map("process_config_grants")
-}
-
-model ProcessInstance {
-  id                 String           @id @default(uuid())
-  requestId          String           @map("request_id")
-  request            Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  cycle              Int
-  categoryVersionId  String           @map("category_version_id")
-  categoryVersion    CategoryVersion  @relation(fields: [categoryVersionId], references: [id])
-  state              BpmInstanceState @default(draft)
-  definitionSnapshot Json             @map("definition_snapshot")
-  startedAt          DateTime?        @map("started_at")
-  completedAt        DateTime?        @map("completed_at")
-  closedAt           DateTime?        @map("closed_at")
-  lastEventSequence  Int              @default(0) @map("last_event_sequence")
-  tokens             ExecutionToken[]
-  activities         ActivityInstance[]
-  events             RequestRuntimeEvent[]
-  incidents          RequestRuntimeIncident[]
-  slaClocks          RequestSlaClock[]
-  createdAt          DateTime         @default(now()) @map("created_at")
-  updatedAt          DateTime         @updatedAt @map("updated_at")
-  @@unique([requestId, cycle])
-  @@index([requestId, state])
-  @@map("bpm_process_instances")
-}
-
-model ExecutionToken {
-  id             String           @id @default(uuid())
-  instanceId     String           @map("instance_id")
-  instance       ProcessInstance  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  nodeId         String           @map("node_id")
-  state          BpmTokenState    @default(active)
-  activationKey  String           @map("activation_key")
-  activities     ActivityInstance[]
-  createdAt      DateTime         @default(now()) @map("created_at")
-  @@unique([instanceId, activationKey])
-  @@index([instanceId, state])
-  @@map("bpm_execution_tokens")
-}
-
-model ActivityInstance {
-  id             String            @id @default(uuid())
-  instanceId     String            @map("instance_id")
-  instance       ProcessInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  nodeId         String            @map("node_id")
-  tokenId        String            @map("token_id")
-  token          ExecutionToken    @relation(fields: [tokenId], references: [id], onDelete: Cascade)
-  activationKey  String            @map("activation_key")
-  kind           BpmActivityKind   @default(human)
-  phase          BpmActivityPhase
-  state          BpmActivityState  @default(available)
-  queueId        String?           @map("queue_id")
-  queue          Queue?            @relation(fields: [queueId], references: [id])
-  assigneeId     String?           @map("assignee_id")
-  assignee       Collaborator?     @relation("BpmAssignee", fields: [assigneeId], references: [id])
-  round          Int               @default(1)
-  inputRevision  Int               @default(0) @map("input_revision")
-  openedAt       DateTime          @default(now()) @map("opened_at")
-  claimedAt      DateTime?         @map("claimed_at")
-  completedAt    DateTime?         @map("completed_at")
-  outcome             String?
-  resolution          String?
-  correctionFieldKeys Json?             @map("correction_field_keys")
-  question            String?
-  informationDueAt    DateTime?         @map("information_due_at")
-  parentActivityId    String?           @map("parent_activity_id")
-  parentActivity      ActivityInstance? @relation("ActivityParent", fields: [parentActivityId], references: [id])
-  childActivities     ActivityInstance[] @relation("ActivityParent")
-  candidates     ActivityCandidate[]
-  assignments    ActivityAssignment[]
-  participants   RequestParticipant[]
-  comments       BpmRequestComment[]
-  attachments    BpmRequestAttachment[]
-  slaClocks      RequestSlaClock[]
-  incidents      RequestRuntimeIncident[]
-  @@unique([instanceId, activationKey])
-  @@index([queueId, state, openedAt, id])
-  @@index([assigneeId, state, openedAt, id])
-  @@index([instanceId, state])
-  @@map("bpm_activity_instances")
-}
-
-model ActivityCandidate {
-  id             String           @id @default(uuid())
-  activityId     String           @map("activity_id")
-  activity       ActivityInstance @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  collaboratorId String           @map("collaborator_id")
-  collaborator   Collaborator     @relation(fields: [collaboratorId], references: [id])
-  sourceResolver String           @map("source_resolver")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  @@unique([activityId, collaboratorId, sourceResolver])
-  @@index([collaboratorId, activityId])
-  @@map("bpm_activity_candidates")
-}
-
-model ActivityAssignment {
-  id                  String           @id @default(uuid())
-  activityId          String           @map("activity_id")
-  activity            ActivityInstance @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  fromCollaboratorId  String?          @map("from_collaborator_id")
-  toCollaboratorId    String?          @map("to_collaborator_id")
-  byUserId            String           @map("by_user_id")
-  reason              String?
-  startedAt           DateTime         @default(now()) @map("started_at")
-  endedAt             DateTime?        @map("ended_at")
-  @@index([activityId, endedAt])
-  @@map("bpm_activity_assignments")
-}
-
-model RequestParticipant {
-  id                  String            @id @default(uuid())
-  requestId           String            @map("request_id")
-  request             Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  cycle               Int
-  collaboratorId      String            @map("collaborator_id")
-  collaborator        Collaborator      @relation(fields: [collaboratorId], references: [id])
-  kind                String
-  sourceActivityId    String?           @map("source_activity_id")
-  sourceActivity      ActivityInstance? @relation(fields: [sourceActivityId], references: [id])
-  fieldScope          Json?             @map("field_scope")
-  restrictedAllowed   Boolean           @default(false) @map("restricted_allowed")
-  startsAt            DateTime          @default(now()) @map("starts_at")
-  endsAt              DateTime?         @map("ends_at")
-  @@index([requestId, cycle])
-  @@index([collaboratorId, requestId])
-  @@map("bpm_request_participants")
-}
-
-model RequestRuntimeEvent {
-  id                  String           @id @default(uuid())
-  requestId           String           @map("request_id")
-  request             Request          @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  instanceId          String?          @map("instance_id")
-  instance            ProcessInstance? @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  cycle               Int
-  sequence            Int
-  type                String
-  actorUserId         String?          @map("actor_user_id")
-  actorCollaboratorId String?          @map("actor_collaborator_id")
-  commandId           String           @map("command_id")
-  correlationId       String?          @map("correlation_id")
-  summary             Json
-  visibility          String           @default("participant")
-  occurredAt          DateTime         @default(now()) @map("occurred_at")
-  @@unique([requestId, sequence])
-  @@index([requestId, occurredAt])
-  @@map("bpm_runtime_events")
-}
-
-model RequestCommandReceipt {
-  id            String   @id @default(uuid())
-  commandId     String   @map("command_id")
-  actorUserId   String   @map("actor_user_id")
-  key           String
-  routeScope    String   @map("route_scope")
-  requestHash   String   @map("request_hash")
-  requestId     String?  @map("request_id")
-  request       Request? @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  statusCode    Int      @map("status_code")
-  resultRef     Json     @map("result_ref")
-  completedAt   DateTime @default(now()) @map("completed_at")
-  @@unique([actorUserId, key])
-  @@index([requestId])
-  @@map("bpm_command_receipts")
-}
-
-model RequestRuntimeIncident {
-  id          String            @id @default(uuid())
-  requestId   String            @map("request_id")
-  request     Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  instanceId  String?           @map("instance_id")
-  instance    ProcessInstance?  @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  activityId  String?           @map("activity_id")
-  activity    ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  type        String
-  state       BpmIncidentState  @default(open)
-  effectKey   String?           @map("effect_key")
-  safeDetails Json              @map("safe_details")
-  resolvedBy  String?           @map("resolved_by")
-  resolvedAt  DateTime?         @map("resolved_at")
-  resolution  String?
-  createdAt   DateTime          @default(now()) @map("created_at")
-  @@index([requestId, state])
-  @@index([type, state])
-  @@map("bpm_runtime_incidents")
-}
-
-model RequestSlaClock {
-  id               String            @id @default(uuid())
-  requestId        String            @map("request_id")
-  request          Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  instanceId       String            @map("instance_id")
-  instance         ProcessInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  activityId       String?           @map("activity_id")
-  activity         ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  metric           BpmSlaMetric
-  activationKey    String            @map("activation_key")
-  calendarSnapshot Json              @map("calendar_snapshot")
-  budgetSeconds    Int               @map("budget_seconds")
-  elapsedSeconds   Int               @default(0) @map("elapsed_seconds")
-  checkpointAt     DateTime          @default(now()) @map("checkpoint_at")
-  originalTargetAt DateTime          @map("original_target_at")
-  targetAt         DateTime?         @map("target_at")
-  stoppedAt        DateTime?         @map("stopped_at")
-  breachedAt       DateTime?         @map("breached_at")
-  intervals        RequestSlaInterval[]
-  @@unique([instanceId, metric, activationKey])
-  @@index([requestId, metric])
-  @@map("bpm_sla_clocks")
-}
-
-model RequestSlaInterval {
-  id          String          @id @default(uuid())
-  clockId     String          @map("clock_id")
-  clock       RequestSlaClock @relation(fields: [clockId], references: [id], onDelete: Cascade)
-  kind        String
-  startAt     DateTime        @map("start_at")
-  endAt       DateTime?       @map("end_at")
-  reason      String?
-  actorUserId String?         @map("actor_user_id")
-  @@index([clockId, endAt])
-  @@map("bpm_sla_intervals")
-}
-
-model BpmRequestComment {
-  id                  String            @id @default(uuid())
-  requestId           String            @map("request_id")
-  request             Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  activityId          String?           @map("activity_id")
-  activity            ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  authorUserId        String            @map("author_user_id")
-  authorCollaboratorId String?          @map("author_collaborator_id")
-  authorCollaborator  Collaborator?     @relation(fields: [authorCollaboratorId], references: [id])
-  body                String
-  visibility          RequestCommentVisibility @default(publico)
-  createdAt           DateTime          @default(now()) @map("created_at")
-  @@index([requestId, createdAt])
-  @@map("bpm_request_comments")
-}
-
-model BpmRequestAttachment {
-  id           String            @id @default(uuid())
-  requestId    String            @map("request_id")
-  request      Request           @relation(fields: [requestId], references: [id], onDelete: Cascade)
-  activityId   String?           @map("activity_id")
-  activity     ActivityInstance? @relation(fields: [activityId], references: [id], onDelete: Cascade)
-  filename     String
-  safeFilename String            @map("safe_filename")
-  mimeType     String            @map("mime_type")
-  sizeBytes    Int               @map("size_bytes")
-  contentHash  String            @map("content_hash")
-  content      Bytes
-  fieldKey     String?           @map("field_key")
-  version      Int               @default(1)
-  previousId   String?           @map("previous_id")
-  uploadedBy   String            @map("uploaded_by")
-  createdAt    DateTime          @default(now()) @map("created_at")
-  @@index([requestId])
-  @@map("bpm_request_attachments")
 }
