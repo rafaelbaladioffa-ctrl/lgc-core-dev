@@ -98,12 +98,14 @@ export class RequestsService {
       if (!beneficiary) throw new BadRequestException('Beneficiário não encontrado');
     }
 
+    // Centro de custo é obrigatório em toda requisição, não só compras — ver RequestsService.create.
+    if (!dto.costCenterId) throw new BadRequestException('Informe o centro de custo.');
+    const costCenter = await this.prisma.costCenter.findUnique({ where: { id: dto.costCenterId } });
+    if (!costCenter) throw new BadRequestException('Centro de custo não encontrado.');
+
     const isPurchaseRequest = category.code === 'SUP-COMPRA' || category.name.toLowerCase() === 'compra de material';
     if (isPurchaseRequest) {
       this.assertPurchaseItems(dto.formData);
-      if (!dto.costCenterId) throw new BadRequestException('Informe o centro de custo da compra.');
-      const costCenter = await this.prisma.costCenter.findUnique({ where: { id: dto.costCenterId } });
-      if (!costCenter) throw new BadRequestException('Centro de custo não encontrado.');
     }
     else {
       if (!dto.title) throw new BadRequestException('Informe o título da requisição');
