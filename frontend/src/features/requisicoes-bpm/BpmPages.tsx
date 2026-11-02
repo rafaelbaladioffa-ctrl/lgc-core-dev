@@ -15,7 +15,6 @@ import {
 import { DynamicForm, SectionedDynamicForm, applyFormAccess } from "./DynamicForm";
 import { useAuth } from "../../context/AuthContext";
 
-const uid = () => crypto.randomUUID();
 const box: React.CSSProperties = {
   background: "var(--bg-elevated)",
   border: "1px solid var(--border)",
