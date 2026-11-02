@@ -135,11 +135,24 @@ describe.skipIf(!process.env.BPM_TEST_DATABASE_URL)(
         mgr,
       );
       categoryId = created.id;
-      const report = await config.validateVersion(created.versionId, 0, mgr);
+      // Patch the draft version to add a form field used in fixture data.
+      const draftVersion = await db.categoryVersion.findUniqueOrThrow({
+        where: { id: created.versionId },
+      });
+      const baseDef = draftVersion.bpmDefinition as Record<string, unknown>;
+      await config.patchVersion(
+        created.versionId,
+        {
+          expectedVersion: 0,
+          definition: { ...baseDef, form: [{ key: 'sistema', label: 'Sistema', type: 'text' }] },
+        },
+        mgr,
+      );
+      const report = await config.validateVersion(created.versionId, 1, mgr);
       if (!('validatedHash' in report)) throw new Error('validation failed');
       await config.publishVersion(
         created.versionId,
-        { expectedVersion: 0, validatedHash: report.validatedHash },
+        { expectedVersion: 1, validatedHash: report.validatedHash },
         mgr,
       );
       const category = await db.requestCategory.findUniqueOrThrow({
@@ -172,7 +185,7 @@ describe.skipIf(!process.env.BPM_TEST_DATABASE_URL)(
         },
         author,
       );
-      const requestId = req.requestId;
+      const requestId = req.id;
       let detail = await runtime.detail(requestId, author);
       // submit
       await runtime.submit(requestId, cmd(detail.currentVersion), author);
@@ -298,7 +311,7 @@ describe.skipIf(!process.env.BPM_TEST_DATABASE_URL)(
       expect((detail as any).status).toBe('em_atendimento');
       // answer stored in timeline
       const tl = await runtime.timeline(requestId, executor);
-      const answerEvent = tl.find((e: any) => e.type === 'information_responded');
+      const answerEvent = tl.find((e: any) => e.type === 'activity.information_responded');
       expect(answerEvent).toBeDefined();
     });
 

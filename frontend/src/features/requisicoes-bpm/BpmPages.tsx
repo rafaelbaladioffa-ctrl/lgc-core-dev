@@ -12,7 +12,7 @@ import {
   type BpmProcess,
   type BpmRequest,
 } from "./api";
-import { DynamicForm } from "./DynamicForm";
+import { DynamicForm, SectionedDynamicForm, applyFormAccess } from "./DynamicForm";
 import { useAuth } from "../../context/AuthContext";
 
 const uid = () => crypto.randomUUID();
@@ -629,7 +629,7 @@ export function BpmVersionPage() {
             <Select
               label="Tipo"
               value={f.type ?? "text"}
-              onChange={(type: string) => update(i, { type })}
+              onChange={(type: string) => update(i, { type, options: undefined, currency: undefined, columns: undefined })}
             >
               <option>text</option>
               <option>textarea</option>
@@ -639,6 +639,9 @@ export function BpmVersionPage() {
               <option>select</option>
               <option>boolean</option>
               <option>attachment</option>
+              <option>money</option>
+              <option>reference</option>
+              <option>repeatable_table</option>
             </Select>
             <label>
               <input
@@ -686,6 +689,69 @@ export function BpmVersionPage() {
                   }
                 />
               </label>
+            )}
+            {f.type === "money" && (
+              <label>
+                Moeda
+                <input
+                  value={f.currency ?? "BRL"}
+                  onChange={(e) => update(i, { currency: e.target.value })}
+                  style={{ width: 80 }}
+                />
+              </label>
+            )}
+            {f.type === "reference" && (
+              <label>
+                Rótulo da referência
+                <input
+                  placeholder="ex: Projeto, Cliente…"
+                  value={f.refLabel ?? ""}
+                  onChange={(e) => update(i, { refLabel: e.target.value })}
+                />
+              </label>
+            )}
+            {f.type === "repeatable_table" && (
+              <div>
+                <b>Colunas da tabela</b>
+                {(f.columns ?? []).map((col: any, ci: number) => (
+                  <div key={ci} style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                    <input
+                      placeholder="chave"
+                      value={col.key ?? ""}
+                      onChange={(e) => {
+                        const cols = [...(f.columns ?? [])];
+                        cols[ci] = { ...cols[ci], key: e.target.value };
+                        update(i, { columns: cols });
+                      }}
+                    />
+                    <input
+                      placeholder="rótulo"
+                      value={col.label ?? ""}
+                      onChange={(e) => {
+                        const cols = [...(f.columns ?? [])];
+                        cols[ci] = { ...cols[ci], label: e.target.value };
+                        update(i, { columns: cols });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        update(i, { columns: (f.columns ?? []).filter((_: any, n: number) => n !== ci) })
+                      }
+                    >
+                      –
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    update(i, { columns: [...(f.columns ?? []), { key: "", label: "", type: "text" }] })
+                  }
+                >
+                  + coluna
+                </button>
+              </div>
             )}
             <button onClick={() => setFields(fields.filter((_, n) => n !== i))}>
               Remover
@@ -794,9 +860,13 @@ export function BpmNewRequestPage() {
     void bpmApi.catalog().then(setItems).catch(setError);
   }, []);
   const process = items.find((p) => p.id === categoryId);
-  const form =
+  const rawForm =
     process?.versions.find((v) => v.id === versionId)?.bpmDefinition?.form ??
     [];
+  const sections = applyFormAccess(rawForm).map((s) => ({
+    ...s,
+    fields: s.fields.filter((f) => f.type !== "attachment"),
+  }));
   const create = async () => {
     if (creating) return;
     attempt.current ??= {
@@ -847,8 +917,8 @@ export function BpmNewRequestPage() {
             ))}
           </select>
         </label>
-        <DynamicForm
-          fields={form.filter((f: any) => f.type !== "attachment") as any}
+        <SectionedDynamicForm
+          sections={sections}
           values={fields}
           onChange={(key, value) => setFields({ ...fields, [key]: value })}
         />

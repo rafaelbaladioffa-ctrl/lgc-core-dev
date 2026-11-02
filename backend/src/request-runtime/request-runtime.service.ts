@@ -14,7 +14,7 @@ import {
   MAX_REQUEST_TOTAL_BYTES,
 } from '../requests/attachment-security.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
-import type { Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { fieldMode } from './field-policy.js';
 import {
   addBusinessMinutes,
@@ -1428,7 +1428,7 @@ export class RequestRuntimeService {
         throw new ForbiddenException('Atividade nÃ£o atribuÃ­da a vocÃª');
       const locked = await tx.request.updateMany({
         where: { id: r.id, lockVersion: dto.expectedVersion },
-        data: { lockVersion: { increment: 1 }, status: 'aguardando_correcao' as any as any, assigneeId: null },
+        data: { lockVersion: { increment: 1 }, status: 'aguardando_correcao', assigneeId: null },
       });
       if (!locked.count) throw new ConflictException('VERSION_CONFLICT');
       await tx.activityInstance.update({
@@ -1449,7 +1449,7 @@ export class RequestRuntimeService {
           phase: 'execution',
           queueId: null,
           parentActivityId: id,
-          correctionFieldKeys: dto.editableFieldKeys ? dto.editableFieldKeys as any : null,
+          correctionFieldKeys: dto.editableFieldKeys ?? Prisma.JsonNull,
           candidates: {
             create: [{ collaboratorId: r.requesterId, sourceResolver: 'author' }],
           },
@@ -1465,7 +1465,7 @@ export class RequestRuntimeService {
           resultRef: { requestId: r.id, activityId: id, correctionActivityId: corrActivity.id, currentVersion: dto.expectedVersion + 1 },
         },
       });
-      return { requestId: r.id, activityId: id, correctionActivityId: corrActivity.id, status: 'aguardando_correcao' as any, currentVersion: dto.expectedVersion + 1 };
+      return { requestId: r.id, activityId: id, correctionActivityId: corrActivity.id, status: 'aguardando_correcao' as const, currentVersion: dto.expectedVersion + 1 };
     });
   }
   // â”€â”€â”€ P02: saveCorrection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1474,7 +1474,7 @@ export class RequestRuntimeService {
     const r = await this.requestAccess(id, user, true);
     if (r.requesterId !== user.collaboratorId)
       throw new ForbiddenException('Somente o autor edita a correÃ§Ã£o');
-    if (r.status !== ('aguardando_correcao' as any))
+    if (r.status !== 'aguardando_correcao')
       throw new ConflictException('REQUEST_NOT_IN_CORRECTION');
     const inst = r.bpmInstances[0];
     const corrActivity = inst?.activities.find(
@@ -1486,7 +1486,7 @@ export class RequestRuntimeService {
     const existingFields = (r.formData as Record<string, unknown> | null) ?? {};
     const patch = dto.fields ?? {};
     // Restrict patch to correctionFieldKeys if set
-    const allowed = (corrActivity as any).correctionFieldKeys as string[] | null;
+    const allowed = corrActivity.correctionFieldKeys as string[] | null;
     if (allowed && allowed.length > 0) {
       const blocked = Object.keys(patch).filter((k) => !allowed.includes(k));
       if (blocked.length)
@@ -1500,7 +1500,7 @@ export class RequestRuntimeService {
       const rec = dto.commandKey ? await this.receipt(tx, user.userId, dto.commandKey, 'saveCorrection', body) : null;
       if (rec && 'id' in rec) return this.resultFromReceipt(tx, rec);
       const updated = await tx.request.updateMany({
-        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_correcao' as any },
+        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_correcao' },
         data: { formData: merged as Prisma.InputJsonValue, lockVersion: { increment: 1 } },
       });
       if (!updated.count) throw new ConflictException('VERSION_CONFLICT');
@@ -1524,7 +1524,7 @@ export class RequestRuntimeService {
     const r = await this.requestAccess(id, user, true);
     if (r.requesterId !== user.collaboratorId)
       throw new ForbiddenException('Somente o autor pode reenviar');
-    if (r.status !== ('aguardando_correcao' as any))
+    if (r.status !== 'aguardando_correcao')
       throw new ConflictException('REQUEST_NOT_IN_CORRECTION');
     const d = this.definition(r.categoryVersion);
     await this.validateFields(d, (r.formData as Record<string, unknown>) ?? {}, true);
@@ -1535,7 +1535,7 @@ export class RequestRuntimeService {
     );
     if (!corrActivity)
       throw new ConflictException('Atividade de correÃ§Ã£o nÃ£o encontrada');
-    const parentId = (corrActivity as any).parentActivityId as string | null;
+    const parentId = corrActivity.parentActivityId;
     const executionNode = d.nodes?.find((n: any) => n.phase === 'execution');
     const q = executionNode?.queueId
       ? await this.prisma.queue.findUnique({
@@ -1562,7 +1562,7 @@ export class RequestRuntimeService {
       const rec = await this.receipt(tx, user.userId, dto.commandKey, 'resubmit', body);
       if ('id' in rec) return this.resultFromReceipt(tx, rec);
       const changed = await tx.request.updateMany({
-        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_correcao' as any },
+        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_correcao' },
         data: { status: 'em_atendimento', assigneeId: null, queueId: q?.id ?? r.queueId, lockVersion: { increment: 1 } },
       });
       if (!changed.count) throw new ConflictException('VERSION_CONFLICT');
@@ -1622,11 +1622,11 @@ export class RequestRuntimeService {
         throw new ForbiddenException('Atividade nÃ£o atribuÃ­da a vocÃª');
       const locked = await tx.request.updateMany({
         where: { id: r.id, lockVersion: dto.expectedVersion },
-        data: { lockVersion: { increment: 1 }, status: 'aguardando_informacao' as any },
+        data: { lockVersion: { increment: 1 }, status: 'aguardando_informacao' },
       });
       if (!locked.count) throw new ConflictException('VERSION_CONFLICT');
       // Store question on the current activity
-      await (tx.activityInstance as any).update({ where: { id }, data: { question: dto.question } });
+      await tx.activityInstance.update({ where: { id }, data: { question: dto.question } });
       // Pause SLA resolution clock
       const now = new Date();
       const clocks = await tx.requestSlaClock.findMany({
@@ -1656,7 +1656,7 @@ export class RequestRuntimeService {
           resultRef: { requestId: r.id, activityId: id, currentVersion: dto.expectedVersion + 1 },
         },
       });
-      return { requestId: r.id, activityId: id, status: 'aguardando_informacao' as any, currentVersion: dto.expectedVersion + 1 };
+      return { requestId: r.id, activityId: id, status: 'aguardando_informacao' as const, currentVersion: dto.expectedVersion + 1 };
     });
   }
   // â”€â”€â”€ P02: respondInformation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1665,11 +1665,11 @@ export class RequestRuntimeService {
     const r = await this.requestAccess(id, user, true);
     if (r.requesterId !== user.collaboratorId)
       throw new ForbiddenException('Somente o autor pode responder');
-    if (r.status !== ('aguardando_informacao' as any))
+    if (r.status !== 'aguardando_informacao')
       throw new ConflictException('REQUEST_NOT_AWAITING_INFORMATION');
     const inst = r.bpmInstances[0];
     const execActivity = inst?.activities.find(
-      (a) => a.phase === 'execution' && a.state === 'claimed' && (a as any).question,
+      (a) => a.phase === 'execution' && a.state === 'claimed' && a.question,
     );
     if (!execActivity)
       throw new ConflictException('Atividade de execuÃ§Ã£o com pergunta nÃ£o encontrada');
@@ -1682,18 +1682,20 @@ export class RequestRuntimeService {
       const body = { ...dto, requestId: id };
       const rec = await this.receipt(tx, user.userId, dto.commandKey, 'respondInformation', body);
       if ('id' in rec) return this.resultFromReceipt(tx, rec);
-      const updateData: any = { lockVersion: { increment: 1 }, status: 'em_atendimento' };
-      if (dto.fields) {
-        const merged = { ...(r.formData as Record<string, unknown> ?? {}), ...dto.fields };
-        updateData.formData = merged as Prisma.InputJsonValue;
-      }
+      const mergedData = dto.fields
+        ? { ...(r.formData as Record<string, unknown> ?? {}), ...dto.fields }
+        : null;
       const changed = await tx.request.updateMany({
-        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_informacao' as any },
-        data: updateData,
+        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_informacao' },
+        data: {
+          lockVersion: { increment: 1 },
+          status: 'em_atendimento',
+          ...(mergedData ? { formData: mergedData as Prisma.InputJsonValue } : {}),
+        },
       });
       if (!changed.count) throw new ConflictException('VERSION_CONFLICT');
       // Clear question, store answer
-      await (tx.activityInstance as any).update({ where: { id: execActivity.id }, data: { question: null, resolution: dto.answer } });
+      await tx.activityInstance.update({ where: { id: execActivity.id }, data: { question: null, resolution: dto.answer } });
       // Resume SLA resolution clock
       const now = new Date();
       const clocks = await tx.requestSlaClock.findMany({ where: { requestId: id, metric: 'resolution', stoppedAt: null } });
@@ -1891,8 +1893,8 @@ export class RequestRuntimeService {
         assigneeId: a.assigneeId,
         queueId: a.queueId,
         resolution: a.resolution,
-        question: (a as any).question ?? null,
-        correctionFieldKeys: (a as any).correctionFieldKeys ?? null,
+        question: a.question ?? null,
+        correctionFieldKeys: a.correctionFieldKeys ?? null,
         allowedActions: !canExecute
           ? []
           : a.state === 'available' &&
