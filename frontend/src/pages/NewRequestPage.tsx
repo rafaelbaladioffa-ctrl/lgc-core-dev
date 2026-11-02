@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FormPage, FormSection } from '../components/layout/FormPage';
+import { FormPage, FormSection, fieldStyle, labelStyle } from '../components/layout/FormPage';
 import { formatBRL } from '../utils/format';
 import { requestCategoriesApi, type RequestCategory, type RequestFormField, type RequestFieldOptionsSource } from '../api/requestCategories';
 import { requestsApi, type CreateRequestInput } from '../api/requests';
@@ -62,6 +62,7 @@ export function NewRequestPage() {
   const [purchaseSubcategory, setPurchaseSubcategory] = useState('');
   const [purchaseItemSelection, setPurchaseItemSelection] = useState('');
   const [categoryId, setCategoryId] = useState(searchParams.get('categoryId') ?? '');
+  const [pickerSectorId, setPickerSectorId] = useState('');
   const parentRequestId = searchParams.get('parentRequestId') ?? undefined;
   const [form, setForm] = useState(emptyForm);
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
@@ -77,6 +78,17 @@ export function NewRequestPage() {
       },
     );
   }, []);
+
+  // Setor → requisição em cascata (em vez de uma lista única com todas as categorias): só setores
+  // com ao menos uma categoria publicada aparecem no primeiro select.
+  const sectorsWithCategories = useMemo(
+    () => sectors.filter((s) => categories.some((c) => c.sectorId === s.id)).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [sectors, categories],
+  );
+  const categoriesForSector = useMemo(
+    () => categories.filter((c) => c.sectorId === pickerSectorId).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [categories, pickerSectorId],
+  );
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const customFields: RequestFormField[] = useMemo(() => selectedCategory?.currentVersion?.formSchema ?? [], [selectedCategory]);
@@ -158,14 +170,36 @@ export function NewRequestPage() {
     <FormPage breadcrumb={['Axis', 'Requisições', 'Nova']} onSubmit={onSubmit} onCancel={() => navigate('/requests')} error={error} submitLabel="Enviar requisição">
       {!categoryId && (
         <FormSection title="Categoria">
-          <select value={categoryId} onChange={(e) => pickCategory(e.target.value)} required>
-            <option value="">Selecione a categoria</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={fieldStyle}>
+              <label style={labelStyle}>Setor</label>
+              <select
+                value={pickerSectorId}
+                onChange={(e) => setPickerSectorId(e.target.value)}
+                required
+              >
+                <option value="">Selecione o setor</option>
+                {sectorsWithCategories.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {pickerSectorId && (
+              <div style={fieldStyle}>
+                <label style={labelStyle}>Requisição</label>
+                <select value={categoryId} onChange={(e) => pickCategory(e.target.value)} required>
+                  <option value="">Selecione a requisição</option>
+                  {categoriesForSector.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </FormSection>
       )}
 
