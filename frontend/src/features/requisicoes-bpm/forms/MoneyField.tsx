@@ -1,4 +1,3 @@
-import React from "react";
 import type { BpmField } from "../DynamicForm";
 
 interface Props {
