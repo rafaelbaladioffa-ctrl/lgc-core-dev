@@ -2,7 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { AppLayout } from "../../components/layout/AppLayout";
 import { bpmApi, type BpmRequest } from "./api";
-import { DynamicForm } from "./DynamicForm";
+import {
+  DynamicForm,
+  SectionedDynamicForm,
+  applyFormAccess,
+  type BpmFormSection,
+} from "./DynamicForm";
 import { useDraftAutosave, type DraftSnapshot } from "./useDraftAutosave";
 import {
   buildCommand,
@@ -95,6 +100,18 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
   const [comments, setComments] = useState<Array<{ id: string; body: string }>>(
     (initial as any).comments ?? [],
   );
+
+  // P02 state
+  const [correctionFields, setCorrectionFields] = useState<Record<string, unknown>>(
+    initial.fields,
+  );
+  const [p2ActionPanel, setP2ActionPanel] = useState<{
+    activityId: string;
+    action: "returnForCorrection" | "requestInformation";
+    text: string;
+  } | null>(null);
+  const [answerText, setAnswerText] = useState("");
+
   const autosave = useDraftAutosave(
     async (body) =>
       bpmApi.draft(record.id, {
@@ -114,17 +131,19 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
     if (error || transitionConflict || autosave.state === "conflict")
       feedbackRef.current?.focus();
   }, [error, transitionConflict, autosave.state]);
+
+  // Normalize P01/P02 schema into sections with access map applied
+  const sections: BpmFormSection[] = applyFormAccess(
+    record.schema,
+    record.formAccess,
+  );
+  const hasSections = sections.length > 1 || !!sections[0]?.title;
+  const flatFields = sections.flatMap((s) => s.fields);
+
   const editable =
     record.status === "rascunho" &&
     !!record.allowedActions?.includes("saveDraft");
-  const schema = (record.schema ?? [])
-    .filter((f) => record.formAccess?.[f.key] !== "hidden")
-    .map((f) => ({
-      ...f,
-      readOnly: ["read", "readonly"].includes(
-        String(record.formAccess?.[f.key]),
-      ),
-    }));
+
   const patch = (value: Partial<DraftSnapshot>) => {
     const next = { ...latest.current, ...value };
     latest.current = next;
@@ -153,6 +172,14 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
     window.addEventListener("beforeunload", guard);
     return () => window.removeEventListener("beforeunload", guard);
   }, [autosave.state]);
+
+  const reload = async () => {
+    const next = await bpmApi.request(record.id);
+    setRecord(next);
+    autosave.currentVersion.current = next.currentVersion;
+    setCorrectionFields(next.fields);
+  };
+
   const run = async (action: string, target = record.id) => {
     if (busy || transitionConflict || !isCommandAction(action)) return;
     if (
@@ -181,9 +208,7 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
       const attempt = transition.current;
       await executeCommand(bpmApi, attempt);
       transition.current = null;
-      const next = await bpmApi.request(record.id);
-      setRecord(next);
-      autosave.currentVersion.current = next.currentVersion;
+      await reload();
     } catch (e: any) {
       const status = e?.response?.status;
       if (status === 409) {
@@ -201,6 +226,104 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
       setBusy(false);
     }
   };
+
+  // === P02 handlers ===
+
+  const handleReturnForCorrection = async (activityId: string, reason: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await bpmApi.returnForCorrection(activityId, {
+        expectedVersion: record.currentVersion,
+        commandKey: crypto.randomUUID(),
+        commandId: crypto.randomUUID(),
+        reason,
+      });
+      setP2ActionPanel(null);
+      await reload();
+    } catch (e: any) {
+      setError(e.message ?? "Falha ao devolver para correção.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRequestInformation = async (activityId: string, question: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await bpmApi.requestInformation(activityId, {
+        expectedVersion: record.currentVersion,
+        commandKey: crypto.randomUUID(),
+        commandId: crypto.randomUUID(),
+        question,
+      });
+      setP2ActionPanel(null);
+      await reload();
+    } catch (e: any) {
+      setError(e.message ?? "Falha ao solicitar informação.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveCorrection = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await bpmApi.saveCorrection(record.id, {
+        expectedVersion: record.currentVersion,
+        commandKey: crypto.randomUUID(),
+        commandId: crypto.randomUUID(),
+        fields: correctionFields,
+      });
+      await reload();
+    } catch (e: any) {
+      setError(e.message ?? "Falha ao salvar correção.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleResubmit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await bpmApi.resubmit(record.id, {
+        expectedVersion: record.currentVersion,
+        commandKey: crypto.randomUUID(),
+        commandId: crypto.randomUUID(),
+      });
+      await reload();
+    } catch (e: any) {
+      setError(e.message ?? "Falha ao reenviar.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRespondInformation = async () => {
+    if (!answerText.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      await bpmApi.respondInformation(record.id, {
+        expectedVersion: record.currentVersion,
+        commandKey: crypto.randomUUID(),
+        commandId: crypto.randomUUID(),
+        answer: answerText,
+      });
+      setAnswerText("");
+      await reload();
+    } catch (e: any) {
+      setError(e.message ?? "Falha ao responder.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // === Upload ===
+
   const uploads = useRef<any[]>([]);
   const addComment = async () => {
     if (busy || transition.current || transitionConflict) return;
@@ -287,6 +410,9 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
       setBusy(false);
     }
   };
+
+  const p2Disabled = busy || transitionConflict || !!transition.current;
+
   return (
     <section style={{ maxWidth: 760, width: "100%" }}>
       <h1>
@@ -299,6 +425,8 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
           <p role="alert">Conflito detectado. Suas edições foram preservadas.</p>
         )}
       </div>
+
+      {/* === Draft editor (P01 + P02 rascunho) === */}
       {editable ? (
         <fieldset
           disabled={
@@ -322,27 +450,48 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
               onChange={(e) => patch({ description: e.target.value })}
             />
           </label>
-          <DynamicForm
-            errors={(autosave.lastError.current as any)?.response?.data?.error?.fields ?? {}}
-            fields={schema}
-            values={snapshot.fields}
-            onChange={(key, value) =>
-              patch({ fields: { ...latest.current.fields, [key]: value } })
-            }
-            onUpload={(key, files) => void upload(key, files)}
-          />
+          {hasSections ? (
+            <SectionedDynamicForm
+              errors={
+                (autosave.lastError.current as any)?.response?.data?.error
+                  ?.fields ?? {}
+              }
+              sections={sections}
+              values={snapshot.fields}
+              onChange={(key, value) =>
+                patch({ fields: { ...latest.current.fields, [key]: value } })
+              }
+              onUpload={(key, files) => void upload(key, files)}
+            />
+          ) : (
+            <DynamicForm
+              errors={
+                (autosave.lastError.current as any)?.response?.data?.error
+                  ?.fields ?? {}
+              }
+              fields={flatFields}
+              values={snapshot.fields}
+              onChange={(key, value) =>
+                patch({ fields: { ...latest.current.fields, [key]: value } })
+              }
+              onUpload={(key, files) => void upload(key, files)}
+            />
+          )}
         </fieldset>
       ) : (
-        <>
-          <p>{record.title}</p>
-          <p>{record.description}</p>
-          {Object.entries(record.fields).map(([k, v]) => (
-            <p key={k}>
-              {k}: {JSON.stringify(v)}
-            </p>
-          ))}
-        </>
+        record.status === "rascunho" && (
+          <>
+            <p>{record.title}</p>
+            <p>{record.description}</p>
+            {Object.entries(record.fields).map(([k, v]) => (
+              <p key={k}>
+                {k}: {JSON.stringify(v)}
+              </p>
+            ))}
+          </>
+        )
       )}
+
       <p role="status">{autosave.state}</p>
       {editable && (
         <button
@@ -421,14 +570,29 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
           </p>
         ),
       )}
+
+      {/* Activities */}
       {record.activities?.map((a) => (
         <div key={a.id}>
           {a.phase} — {a.state}
           {a.allowedActions.map((action) => (
             <button
-              disabled={busy || transitionConflict || !!transition.current}
+              disabled={p2Disabled}
               key={action}
-              onClick={() => void run(action, a.id)}
+              onClick={() => {
+                if (
+                  action === "returnForCorrection" ||
+                  action === "requestInformation"
+                ) {
+                  setP2ActionPanel({
+                    activityId: a.id,
+                    action,
+                    text: "",
+                  });
+                } else if (isCommandAction(action)) {
+                  void run(action, a.id);
+                }
+              }}
             >
               {(
                 {
@@ -436,23 +600,119 @@ export function BpmRecordEditor({ initial }: { initial: BpmRequest }) {
                   complete: "Concluir atividade",
                   release: "Liberar",
                   reassign: "Reatribuir",
-                } as any
+                  returnForCorrection: "Devolver para correção",
+                  requestInformation: "Solicitar informação",
+                } as Record<string, string>
               )[action] ?? action}
             </button>
           ))}
+          {/* P02 inline action panel for this activity */}
+          {p2ActionPanel?.activityId === a.id && (
+            <div>
+              <label>
+                {p2ActionPanel.action === "returnForCorrection"
+                  ? "Motivo da devolução"
+                  : "Pergunta para o solicitante"}
+                <textarea
+                  disabled={busy}
+                  value={p2ActionPanel.text}
+                  onChange={(e) =>
+                    setP2ActionPanel({ ...p2ActionPanel, text: e.target.value })
+                  }
+                />
+              </label>
+              <button
+                disabled={busy || p2ActionPanel.text.trim().length < 3}
+                onClick={() => {
+                  if (p2ActionPanel.action === "returnForCorrection")
+                    void handleReturnForCorrection(a.id, p2ActionPanel.text);
+                  else void handleRequestInformation(a.id, p2ActionPanel.text);
+                }}
+              >
+                Confirmar
+              </button>
+              <button
+                disabled={busy}
+                onClick={() => setP2ActionPanel(null)}
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
         </div>
       ))}
+
       {["close", "cancel"]
         .filter((action) => record.allowedActions?.includes(action))
         .map((action) => (
           <button
-            disabled={busy || transitionConflict || !!transition.current}
+            disabled={p2Disabled}
             key={action}
             onClick={() => void run(action)}
           >
             {action === "close" ? "Encerrar" : "Cancelar"}
           </button>
         ))}
+
+      {/* === P02: Correction editor === */}
+      {record.allowedActions?.includes("saveCorrection") && (
+        <section aria-label="Correção solicitada">
+          <h2>Correção solicitada</h2>
+          <p>Corrija os campos indicados e reenvie a requisição.</p>
+          {hasSections ? (
+            <SectionedDynamicForm
+              sections={sections}
+              values={correctionFields}
+              onChange={(key, value) =>
+                setCorrectionFields((prev) => ({ ...prev, [key]: value }))
+              }
+            />
+          ) : (
+            <DynamicForm
+              fields={flatFields}
+              values={correctionFields}
+              onChange={(key, value) =>
+                setCorrectionFields((prev) => ({ ...prev, [key]: value }))
+              }
+            />
+          )}
+          <button disabled={p2Disabled} onClick={() => void handleSaveCorrection()}>
+            Salvar correção
+          </button>
+          {record.allowedActions?.includes("resubmit") && (
+            <button disabled={p2Disabled} onClick={() => void handleResubmit()}>
+              Reenviar
+            </button>
+          )}
+        </section>
+      )}
+
+      {/* === P02: Information response === */}
+      {record.allowedActions?.includes("respondInformation") && (
+        <section aria-label="Informação solicitada">
+          <h2>Informação solicitada</h2>
+          {record.activities?.map((a) =>
+            (a as any).question ? (
+              <blockquote key={a.id}>{(a as any).question}</blockquote>
+            ) : null,
+          )}
+          <label>
+            Resposta
+            <textarea
+              disabled={p2Disabled}
+              value={answerText}
+              onChange={(e) => setAnswerText(e.target.value)}
+            />
+          </label>
+          <button
+            disabled={p2Disabled || !answerText.trim()}
+            onClick={() => void handleRespondInformation()}
+          >
+            Responder
+          </button>
+        </section>
+      )}
+
       <h2>Anexos</h2>
       {uploads.current.length > 0 && (
         <button

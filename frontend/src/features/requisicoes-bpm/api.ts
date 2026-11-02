@@ -185,4 +185,28 @@ export const bpmApi = {
     post(`/bpm/activities/${id}/release`, input).then((r) => r.data),
   reassign: (id: string, input: any) =>
     post(`/bpm/activities/${id}/reassign`, input).then((r) => r.data),
+  returnForCorrection: (activityId: string, input: any) =>
+    post(`/bpm/activities/${activityId}/return`, input).then((r) => r.data),
+  saveCorrection: (
+    requestId: string,
+    input: {
+      expectedVersion: number;
+      fields?: Record<string, unknown>;
+      commandKey?: string;
+      commandId?: string;
+    },
+  ) =>
+    api
+      .patch(`/bpm/requests/${requestId}/correction`, input, {
+        headers: input.commandKey
+          ? { "Idempotency-Key": input.commandKey }
+          : {},
+      })
+      .then((r) => r.data),
+  resubmit: (requestId: string, input: any) =>
+    post(`/bpm/requests/${requestId}/resubmit`, input).then((r) => r.data),
+  requestInformation: (activityId: string, input: any) =>
+    post(`/bpm/activities/${activityId}/question`, input).then((r) => r.data),
+  respondInformation: (requestId: string, input: any) =>
+    post(`/bpm/requests/${requestId}/respond`, input).then((r) => r.data),
 };

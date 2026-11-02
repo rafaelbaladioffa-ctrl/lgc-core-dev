@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
@@ -29,7 +29,14 @@ import {
   CreateBpmRequestDto,
   DraftPatchDto,
   ReasonCommandDto,
+  ReturnForCorrectionDto,
+  SaveCorrectionDto,
+  ResubmitDto,
+  RequestInformationDto,
+  RespondInformationDto,
 } from './dto.js';
+import { extractFields, toSections } from '../request-processes/forms/form-schema.js';
+import { validateFormValues } from '../request-processes/forms/form-validator.js';
 
 type Tx = Prisma.TransactionClient;
 const snapshotCalendar = {
@@ -104,7 +111,7 @@ export class RequestRuntimeService {
     permission: string,
   ) {
     if (!(await this.hasCurrentPermission(user, permission)))
-      throw new ForbiddenException('Permissão atual insuficiente');
+      throw new ForbiddenException('PermissÃ£o atual insuficiente');
   }
   private async categoryVersion(
     categoryId: string,
@@ -122,13 +129,13 @@ export class RequestRuntimeService {
       v.category.publishedBpmVersionId !== v.id ||
       !v.category.runtimeEnabled
     )
-      throw new BadRequestException('Processo BPM indisponível');
+      throw new BadRequestException('Processo BPM indisponÃ­vel');
     return v;
   }
   private definition(v: { bpmDefinition: Prisma.JsonValue | null }) {
     const d = v.bpmDefinition;
     if (!d || typeof d !== 'object' || Array.isArray(d))
-      throw new BadRequestException('Definição BPM ausente');
+      throw new BadRequestException('DefiniÃ§Ã£o BPM ausente');
     return d as Record<string, any>;
   }
   private projectFields(
@@ -170,7 +177,7 @@ export class RequestRuntimeService {
     );
     if (blocked.length)
       throw new ForbiddenException(
-        `Campos não editáveis: ${blocked.join(', ')}`,
+        `Campos nÃ£o editÃ¡veis: ${blocked.join(', ')}`,
       );
   }
   private recordFieldMode(r: any, user: AuthenticatedUser, key: string) {
@@ -202,83 +209,12 @@ export class RequestRuntimeService {
     fields: Record<string, unknown> | undefined,
     submit = false,
   ) {
-    const schema = Array.isArray(definition.form)
-      ? (definition.form as Array<Record<string, any>>)
-      : [];
-    const values = fields ?? {};
-    const errors: Record<string, string> = {};
-    const allowed = new Set(schema.map((f) => f.key));
-    for (const key of Object.keys(values))
-      if (!allowed.has(key)) errors[key] = 'Campo desconhecido';
-    for (const f of schema) {
-      const value = values[f.key];
-      if (value !== undefined && value !== null) {
-        const ok =
-          f.type === 'text' || f.type === 'textarea'
-            ? typeof value === 'string'
-            : f.type === 'integer'
-              ? typeof value === 'number' && Number.isSafeInteger(value)
-              : f.type === 'decimal'
-                ? (() => {
-                    const text =
-                      typeof value === 'number' && Number.isFinite(value)
-                        ? String(value)
-                        : typeof value === 'string'
-                          ? value
-                          : '';
-                    return /^-?\d{1,15}(\.\d{1,4})?$/.test(text);
-                  })()
-                : f.type === 'boolean'
-                  ? typeof value === 'boolean'
-                  : f.type === 'date'
-                    ? typeof value === 'string' &&
-                      /^\d{4}-\d{2}-\d{2}$/.test(value) &&
-                      (() => {
-                        const [y, m, day] = value.split('-').map(Number);
-                        const parsed = new Date(Date.UTC(y, m - 1, day));
-                        return (
-                          parsed.getUTCFullYear() === y &&
-                          parsed.getUTCMonth() === m - 1 &&
-                          parsed.getUTCDate() === day
-                        );
-                      })()
-                    : f.type === 'select'
-                      ? typeof value === 'string' &&
-                        (!Array.isArray(f.options) ||
-                          f.options.some((o: any) =>
-                            typeof o === 'string'
-                              ? o === value
-                              : o?.id === value,
-                          ))
-                      : f.type === 'attachment'
-                        ? Array.isArray(value) &&
-                          value.every((id) => typeof id === 'string')
-                        : false;
-        if (!ok) errors[f.key] = 'Tipo ou valor inválido';
-        if (
-          ok &&
-          typeof value === 'string' &&
-          Number.isInteger(f.maxLength) &&
-          value.length > f.maxLength
-        )
-          errors[f.key] = 'Valor excede o limite do campo';
-      }
-      if (
-        submit &&
-        f.required &&
-        (value === undefined ||
-          value === null ||
-          (typeof value === 'string' && value.trim() === '') ||
-          (Array.isArray(value) && value.length === 0))
-      )
-        errors[f.key] = 'Campo obrigatório';
-    }
+    const form = definition.form;
+    if (!form) return;
+    const errors = validateFormValues(form, fields ?? {}, submit);
     if (submit && errors.title) throw new BadRequestException(errors);
     if (Object.keys(errors).length)
-      throw new BadRequestException({
-        code: 'FIELD_VALIDATION',
-        fields: errors,
-      });
+      throw new BadRequestException({ code: 'FIELD_VALIDATION', fields: errors });
   }
   private async requestAccess(
     id: string,
@@ -315,7 +251,7 @@ export class RequestRuntimeService {
         bpmComments: true,
       },
     });
-    if (!r) throw new NotFoundException('Requisição BPM não encontrada');
+    if (!r) throw new NotFoundException('RequisiÃ§Ã£o BPM nÃ£o encontrada');
     if (r.executionMode !== 'bpm_v1')
       throw new ConflictException('WRONG_EXECUTOR');
     const isRequester = r.requesterId === user.collaboratorId;
@@ -342,9 +278,9 @@ export class RequestRuntimeService {
             },
           });
     if (!isParticipant && !member && !grant)
-      throw new NotFoundException('Requisição BPM não encontrada');
+      throw new NotFoundException('RequisiÃ§Ã£o BPM nÃ£o encontrada');
     if (write && !isRequester && !member)
-      throw new ForbiddenException('Sem escopo para alterar esta requisição');
+      throw new ForbiddenException('Sem escopo para alterar esta requisiÃ§Ã£o');
     return r;
   }
   private async receipt(
@@ -412,7 +348,9 @@ export class RequestRuntimeService {
     fields: Record<string, unknown>,
   ) {
     const attachmentIds = new Set<string>();
-    for (const field of Array.isArray(definition.form) ? definition.form : []) {
+    const form = definition.form;
+    const fieldList = form ? extractFields(form) : [];
+    for (const field of fieldList) {
       if (field.type !== 'attachment') continue;
       const value = fields[field.key];
       if (Array.isArray(value))
@@ -427,7 +365,7 @@ export class RequestRuntimeService {
     if (owned.length !== attachmentIds.size)
       throw new BadRequestException({
         code: 'FIELD_VALIDATION',
-        fields: { attachment: 'Anexo não pertence à requisição' },
+        fields: { attachment: 'Anexo nÃ£o pertence Ã  requisiÃ§Ã£o' },
       });
   }
   private async stopClocks(
@@ -471,10 +409,10 @@ export class RequestRuntimeService {
     this.assertEnabled();
     await this.assertCurrentPermission(user, 'request:create');
     if (!user.collaboratorId)
-      throw new ForbiddenException('Usuário sem colaborador');
+      throw new ForbiddenException('UsuÃ¡rio sem colaborador');
     const collaboratorId = user.collaboratorId;
     if (dto.beneficiaryId && dto.beneficiaryId !== user.collaboratorId)
-      throw new ForbiddenException('Representação não permitida');
+      throw new ForbiddenException('RepresentaÃ§Ã£o nÃ£o permitida');
     return this.prisma.$transaction(async (tx) => {
       if (dto.commandKey) {
         const rec = await this.receipt(
@@ -636,8 +574,8 @@ export class RequestRuntimeService {
       throw new BadRequestException({
         code: 'SUBMIT_VALIDATION',
         fields: {
-          title: 'Título deve ter 10–120 caracteres',
-          description: 'Descrição obrigatória',
+          title: 'TÃ­tulo deve ter 10â€“120 caracteres',
+          description: 'DescriÃ§Ã£o obrigatÃ³ria',
         },
       });
     const triageNode = d.nodes.find((n: any) => n.phase === 'triage');
@@ -651,7 +589,7 @@ export class RequestRuntimeService {
       },
     });
     if (!triageQueue)
-      throw new BadRequestException('Fila de triagem não configurada');
+      throw new BadRequestException('Fila de triagem nÃ£o configurada');
     const eligible = triageQueue.bpmMembers.filter(
       (m) =>
         m.role === 'member' &&
@@ -777,7 +715,7 @@ export class RequestRuntimeService {
             instanceId: instance.id,
             activityId: activity.id,
             type: 'NO_ELIGIBLE_ASSIGNEE',
-            safeDetails: { message: 'Aguardando definição de responsável' },
+            safeDetails: { message: 'Aguardando definiÃ§Ã£o de responsÃ¡vel' },
           },
         });
       const ev = await this.event(
@@ -839,14 +777,14 @@ export class RequestRuntimeService {
       include: { instance: { include: { request: true } }, candidates: true },
     });
     if (!a || a.instance.request.executionMode !== 'bpm_v1')
-      throw new NotFoundException('Atividade BPM não encontrada');
+      throw new NotFoundException('Atividade BPM nÃ£o encontrada');
     if (a.instance.request.requesterId === user.collaboratorId)
-      throw new ForbiddenException('Autor não pode executar atividade própria');
+      throw new ForbiddenException('Autor nÃ£o pode executar atividade prÃ³pria');
     if (
       requireCandidate &&
       !a.candidates.some((c) => c.collaboratorId === user.collaboratorId)
     )
-      throw new ForbiddenException('Você não é candidato desta atividade');
+      throw new ForbiddenException('VocÃª nÃ£o Ã© candidato desta atividade');
     return a;
   }
   async claim(id: string, dto: CommandDto, user: AuthenticatedUser) {
@@ -949,7 +887,7 @@ export class RequestRuntimeService {
       );
       if ('id' in rec) return this.resultFromReceipt(tx, rec);
       if (a.state !== 'claimed' || a.assigneeId !== user.collaboratorId)
-        throw new ForbiddenException('Atividade não atribuída a você');
+        throw new ForbiddenException('Atividade nÃ£o atribuÃ­da a vocÃª');
       const locked = await tx.request.updateMany({
         where: { id: r.id, lockVersion: dto.expectedVersion },
         data: { lockVersion: { increment: 1 } },
@@ -1037,7 +975,7 @@ export class RequestRuntimeService {
               instanceId: a.instanceId,
               activityId: next.id,
               type: 'NO_ELIGIBLE_ASSIGNEE',
-              safeDetails: { message: 'Aguardando definição de responsável' },
+              safeDetails: { message: 'Aguardando definiÃ§Ã£o de responsÃ¡vel' },
             },
           });
       } else {
@@ -1113,7 +1051,7 @@ export class RequestRuntimeService {
         (a.assigneeId !== user.collaboratorId && !manager)
       )
         throw new ForbiddenException(
-          'Atividade não pode ser liberada por este ator',
+          'Atividade nÃ£o pode ser liberada por este ator',
         );
       const changed = await tx.request.updateMany({
         where: { id: r.id, lockVersion: dto.expectedVersion },
@@ -1204,13 +1142,13 @@ export class RequestRuntimeService {
           m.collaboratorId === dto.assigneeId,
       );
       if (!eligible)
-        throw new BadRequestException('Destino não é membro ativo da fila');
+        throw new BadRequestException('Destino nÃ£o Ã© membro ativo da fila');
       if (
         dto.assigneeId === r.requesterId ||
         dto.assigneeId === r.beneficiaryId
       )
         throw new ForbiddenException(
-          'Conflito de interesse: solicitante/beneficiário não pode executar',
+          'Conflito de interesse: solicitante/beneficiÃ¡rio nÃ£o pode executar',
         );
       const destination = await tx.user.findFirst({
         where: {
@@ -1324,7 +1262,7 @@ export class RequestRuntimeService {
       if ('id' in rec) return this.resultFromReceipt(tx, rec);
       if (r.status !== 'concluida')
         throw new BadRequestException(
-          'Somente requisição concluída pode ser encerrada',
+          'Somente requisiÃ§Ã£o concluÃ­da pode ser encerrada',
         );
       const changed = await tx.request.updateMany({
         where: { id, lockVersion: dto.expectedVersion, status: 'concluida' },
@@ -1383,10 +1321,10 @@ export class RequestRuntimeService {
     const authorMayCancel = !!isRequester && canCreate;
     const managerMayCancel = !!manager && canManage;
     if (!authorMayCancel && !managerMayCancel)
-      throw new ForbiddenException('Sem permissão para cancelar');
+      throw new ForbiddenException('Sem permissÃ£o para cancelar');
     if (authorMayCancel && !managerMayCancel && hasExecution)
       throw new ForbiddenException(
-        'Autor não pode cancelar após abrir execução',
+        'Autor nÃ£o pode cancelar apÃ³s abrir execuÃ§Ã£o',
       );
     return this.prisma.$transaction(async (tx) => {
       const body = { ...dto, requestId: id };
@@ -1399,7 +1337,7 @@ export class RequestRuntimeService {
       );
       if ('id' in receipt) return this.resultFromReceipt(tx, receipt);
       if (['concluida', 'encerrada', 'cancelada'].includes(r.status))
-        throw new BadRequestException('Estado não permite cancelamento');
+        throw new BadRequestException('Estado nÃ£o permite cancelamento');
       const changed = await tx.request.updateMany({
         where: { id, lockVersion: dto.expectedVersion },
         data: {
@@ -1469,6 +1407,311 @@ export class RequestRuntimeService {
         },
       });
       return result;
+    });
+  }
+  // â”€â”€â”€ P02: returnForCorrection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async returnForCorrection(
+    id: string,
+    dto: ReturnForCorrectionDto,
+    user: AuthenticatedUser,
+  ) {
+    await this.assertCurrentPermission(user, 'request:update');
+    const a = await this.activity(id, user);
+    const r = await this.requestAccess(a.instance.requestId, user, true);
+    if (a.phase !== 'execution')
+      throw new ForbiddenException('Devolver para correÃ§Ã£o exige atividade de execuÃ§Ã£o');
+    return this.prisma.$transaction(async (tx) => {
+      const body = { ...dto, requestId: r.id, activityId: id };
+      const rec = await this.receipt(tx, user.userId, dto.commandKey, 'returnForCorrection', body);
+      if ('id' in rec) return this.resultFromReceipt(tx, rec);
+      if (a.state !== 'claimed' || a.assigneeId !== user.collaboratorId)
+        throw new ForbiddenException('Atividade nÃ£o atribuÃ­da a vocÃª');
+      const locked = await tx.request.updateMany({
+        where: { id: r.id, lockVersion: dto.expectedVersion },
+        data: { lockVersion: { increment: 1 }, status: 'aguardando_correcao' as any as any, assigneeId: null },
+      });
+      if (!locked.count) throw new ConflictException('VERSION_CONFLICT');
+      await tx.activityInstance.update({
+        where: { id },
+        data: { state: 'completed', outcome: 'returned_for_correction', resolution: dto.reason, completedAt: new Date() },
+      });
+      await tx.executionToken.update({ where: { id: a.tokenId }, data: { state: 'consumed' } });
+      await tx.activityAssignment.updateMany({ where: { activityId: id, endedAt: null }, data: { endedAt: new Date() } });
+      const corrToken = await tx.executionToken.create({
+        data: { instanceId: a.instanceId, nodeId: 'correction', activationKey: `${r.currentCycle}:correction:${a.id}` },
+      });
+      const corrActivity = await tx.activityInstance.create({
+        data: {
+          instanceId: a.instanceId,
+          tokenId: corrToken.id,
+          nodeId: 'correction',
+          activationKey: `${r.currentCycle}:correction:${a.id}`,
+          phase: 'execution',
+          queueId: null,
+          parentActivityId: id,
+          correctionFieldKeys: dto.editableFieldKeys ? dto.editableFieldKeys as any : null,
+          candidates: {
+            create: [{ collaboratorId: r.requesterId, sourceResolver: 'author' }],
+          },
+        },
+      });
+      const ev = await this.event(tx, r.id, a.instanceId, r.currentCycle, 'activity.returned_for_correction', user, dto.commandId, { activityId: id, correctionActivityId: corrActivity.id, reason: dto.reason });
+      await tx.requestCommandReceipt.create({
+        data: {
+          commandId: dto.commandId, actorUserId: user.userId, key: dto.commandKey,
+          routeScope: 'returnForCorrection',
+          requestHash: hash({ routeScope: 'returnForCorrection', requestId: r.id, body }),
+          requestId: r.id, statusCode: 200,
+          resultRef: { requestId: r.id, activityId: id, correctionActivityId: corrActivity.id, currentVersion: dto.expectedVersion + 1 },
+        },
+      });
+      return { requestId: r.id, activityId: id, correctionActivityId: corrActivity.id, status: 'aguardando_correcao' as any, currentVersion: dto.expectedVersion + 1 };
+    });
+  }
+  // â”€â”€â”€ P02: saveCorrection â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async saveCorrection(id: string, dto: SaveCorrectionDto, user: AuthenticatedUser) {
+    await this.assertCurrentPermission(user, 'request:create');
+    const r = await this.requestAccess(id, user, true);
+    if (r.requesterId !== user.collaboratorId)
+      throw new ForbiddenException('Somente o autor edita a correÃ§Ã£o');
+    if (r.status !== ('aguardando_correcao' as any))
+      throw new ConflictException('REQUEST_NOT_IN_CORRECTION');
+    const inst = r.bpmInstances[0];
+    const corrActivity = inst?.activities.find(
+      (a) => a.nodeId === 'correction' && a.state === 'available',
+    );
+    if (!corrActivity)
+      throw new ConflictException('Atividade de correÃ§Ã£o nÃ£o encontrada');
+    const d = this.definition(r.categoryVersion);
+    const existingFields = (r.formData as Record<string, unknown> | null) ?? {};
+    const patch = dto.fields ?? {};
+    // Restrict patch to correctionFieldKeys if set
+    const allowed = (corrActivity as any).correctionFieldKeys as string[] | null;
+    if (allowed && allowed.length > 0) {
+      const blocked = Object.keys(patch).filter((k) => !allowed.includes(k));
+      if (blocked.length)
+        throw new ForbiddenException(`Campos fora do escopo de correÃ§Ã£o: ${blocked.join(', ')}`);
+    }
+    const merged = { ...existingFields, ...patch };
+    await this.validateFields(d, merged);
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM requests WHERE id = ${id} FOR UPDATE`;
+      const body = { ...dto, requestId: id };
+      const rec = dto.commandKey ? await this.receipt(tx, user.userId, dto.commandKey, 'saveCorrection', body) : null;
+      if (rec && 'id' in rec) return this.resultFromReceipt(tx, rec);
+      const updated = await tx.request.updateMany({
+        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_correcao' as any },
+        data: { formData: merged as Prisma.InputJsonValue, lockVersion: { increment: 1 } },
+      });
+      if (!updated.count) throw new ConflictException('VERSION_CONFLICT');
+      const saved = await tx.request.findUniqueOrThrow({ where: { id } });
+      const result = { requestId: id, currentVersion: saved.lockVersion, fields: this.projectFields(d, saved.formData) };
+      if (dto.commandKey && dto.commandId)
+        await tx.requestCommandReceipt.create({
+          data: {
+            commandId: dto.commandId, actorUserId: user.userId, key: dto.commandKey,
+            routeScope: 'saveCorrection',
+            requestHash: hash({ routeScope: 'saveCorrection', requestId: id, body }),
+            requestId: id, statusCode: 200, resultRef: result,
+          },
+        });
+      return result;
+    });
+  }
+  // â”€â”€â”€ P02: resubmit â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async resubmit(id: string, dto: ResubmitDto, user: AuthenticatedUser) {
+    await this.assertCurrentPermission(user, 'request:create');
+    const r = await this.requestAccess(id, user, true);
+    if (r.requesterId !== user.collaboratorId)
+      throw new ForbiddenException('Somente o autor pode reenviar');
+    if (r.status !== ('aguardando_correcao' as any))
+      throw new ConflictException('REQUEST_NOT_IN_CORRECTION');
+    const d = this.definition(r.categoryVersion);
+    await this.validateFields(d, (r.formData as Record<string, unknown>) ?? {}, true);
+    await this.validateAttachmentRefs(id, d, (r.formData as Record<string, unknown>) ?? {});
+    const inst = r.bpmInstances[0];
+    const corrActivity = inst?.activities.find(
+      (a) => a.nodeId === 'correction' && a.state === 'available',
+    );
+    if (!corrActivity)
+      throw new ConflictException('Atividade de correÃ§Ã£o nÃ£o encontrada');
+    const parentId = (corrActivity as any).parentActivityId as string | null;
+    const executionNode = d.nodes?.find((n: any) => n.phase === 'execution');
+    const q = executionNode?.queueId
+      ? await this.prisma.queue.findUnique({
+          where: { id: executionNode.queueId },
+          include: {
+            bpmMembers: {
+              where: { active: true },
+              include: { collaborator: { include: { user: true } } },
+            },
+          },
+        })
+      : null;
+    const eligible =
+      q?.bpmMembers.filter(
+        (m) =>
+          m.role === 'member' &&
+          m.collaboratorId !== r.requesterId &&
+          m.collaboratorId !== r.beneficiaryId &&
+          m.collaborator.status === 'ativo' &&
+          m.collaborator.user?.status === 'active',
+      ) ?? [];
+    return this.prisma.$transaction(async (tx) => {
+      const body = { ...dto, requestId: id };
+      const rec = await this.receipt(tx, user.userId, dto.commandKey, 'resubmit', body);
+      if ('id' in rec) return this.resultFromReceipt(tx, rec);
+      const changed = await tx.request.updateMany({
+        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_correcao' as any },
+        data: { status: 'em_atendimento', assigneeId: null, queueId: q?.id ?? r.queueId, lockVersion: { increment: 1 } },
+      });
+      if (!changed.count) throw new ConflictException('VERSION_CONFLICT');
+      await tx.activityInstance.update({
+        where: { id: corrActivity.id },
+        data: { state: 'completed', outcome: 'resubmitted', completedAt: new Date() },
+      });
+      await tx.executionToken.update({ where: { id: corrActivity.tokenId }, data: { state: 'consumed' } });
+      const token = await tx.executionToken.create({
+        data: {
+          instanceId: inst!.id,
+          nodeId: 'execute',
+          activationKey: `${r.currentCycle}:execute:resubmit:${corrActivity.id}`,
+        },
+      });
+      const next = await tx.activityInstance.create({
+        data: {
+          instanceId: inst!.id,
+          tokenId: token.id,
+          nodeId: 'execute',
+          activationKey: `${r.currentCycle}:execute:resubmit:${corrActivity.id}`,
+          phase: 'execution',
+          queueId: q?.id,
+          parentActivityId: parentId,
+          candidates: { create: eligible.map((m) => ({ collaboratorId: m.collaboratorId, sourceResolver: 'queueMembers' })) },
+        },
+      });
+      if (!eligible.length)
+        await tx.requestRuntimeIncident.create({
+          data: { requestId: id, instanceId: inst!.id, activityId: next.id, type: 'NO_ELIGIBLE_ASSIGNEE', safeDetails: { message: 'Aguardando definiÃ§Ã£o de responsÃ¡vel apÃ³s reenvio' } },
+        });
+      const ev = await this.event(tx, id, inst!.id, r.currentCycle, 'request.resubmitted', user, dto.commandId, { correctionActivityId: corrActivity.id, nextActivityId: next.id });
+      await tx.requestCommandReceipt.create({
+        data: {
+          commandId: dto.commandId, actorUserId: user.userId, key: dto.commandKey,
+          routeScope: 'resubmit',
+          requestHash: hash({ routeScope: 'resubmit', requestId: id, body }),
+          requestId: id, statusCode: 200,
+          resultRef: { requestId: id, nextActivityId: next.id, currentVersion: dto.expectedVersion + 1 },
+        },
+      });
+      return { requestId: id, nextActivityId: next.id, status: 'em_atendimento', currentVersion: dto.expectedVersion + 1 };
+    });
+  }
+  // â”€â”€â”€ P02: requestInformation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async requestInformation(id: string, dto: RequestInformationDto, user: AuthenticatedUser) {
+    await this.assertCurrentPermission(user, 'request:update');
+    const a = await this.activity(id, user);
+    const r = await this.requestAccess(a.instance.requestId, user, true);
+    if (a.phase !== 'execution')
+      throw new ForbiddenException('Pedir informaÃ§Ã£o exige atividade de execuÃ§Ã£o');
+    return this.prisma.$transaction(async (tx) => {
+      const body = { ...dto, requestId: r.id, activityId: id };
+      const rec = await this.receipt(tx, user.userId, dto.commandKey, 'requestInformation', body);
+      if ('id' in rec) return this.resultFromReceipt(tx, rec);
+      if (a.state !== 'claimed' || a.assigneeId !== user.collaboratorId)
+        throw new ForbiddenException('Atividade nÃ£o atribuÃ­da a vocÃª');
+      const locked = await tx.request.updateMany({
+        where: { id: r.id, lockVersion: dto.expectedVersion },
+        data: { lockVersion: { increment: 1 }, status: 'aguardando_informacao' as any },
+      });
+      if (!locked.count) throw new ConflictException('VERSION_CONFLICT');
+      // Store question on the current activity
+      await (tx.activityInstance as any).update({ where: { id }, data: { question: dto.question } });
+      // Pause SLA resolution clock
+      const now = new Date();
+      const clocks = await tx.requestSlaClock.findMany({
+        where: { requestId: r.id, stoppedAt: null, metric: 'resolution' },
+      });
+      for (const clock of clocks) {
+        const elapsed = businessSecondsBetween(
+          clock.checkpointAt,
+          now,
+          (clock.calendarSnapshot as any)?.holidays ?? [],
+          (clock.calendarSnapshot as any)?.timezone ?? 'America/Sao_Paulo',
+        );
+        await tx.requestSlaClock.update({
+          where: { id: clock.id },
+          data: { elapsedSeconds: clock.elapsedSeconds + elapsed, checkpointAt: now },
+        });
+        await tx.requestSlaInterval.updateMany({ where: { clockId: clock.id, endAt: null }, data: { endAt: now } });
+        await tx.requestSlaInterval.create({ data: { clockId: clock.id, kind: 'paused', startAt: now, reason: 'information_requested', actorUserId: user.userId } });
+      }
+      const ev = await this.event(tx, r.id, a.instanceId, r.currentCycle, 'activity.information_requested', user, dto.commandId, { activityId: id });
+      await tx.requestCommandReceipt.create({
+        data: {
+          commandId: dto.commandId, actorUserId: user.userId, key: dto.commandKey,
+          routeScope: 'requestInformation',
+          requestHash: hash({ routeScope: 'requestInformation', requestId: r.id, body }),
+          requestId: r.id, statusCode: 200,
+          resultRef: { requestId: r.id, activityId: id, currentVersion: dto.expectedVersion + 1 },
+        },
+      });
+      return { requestId: r.id, activityId: id, status: 'aguardando_informacao' as any, currentVersion: dto.expectedVersion + 1 };
+    });
+  }
+  // â”€â”€â”€ P02: respondInformation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  async respondInformation(id: string, dto: RespondInformationDto, user: AuthenticatedUser) {
+    await this.assertCurrentPermission(user, 'request:create');
+    const r = await this.requestAccess(id, user, true);
+    if (r.requesterId !== user.collaboratorId)
+      throw new ForbiddenException('Somente o autor pode responder');
+    if (r.status !== ('aguardando_informacao' as any))
+      throw new ConflictException('REQUEST_NOT_AWAITING_INFORMATION');
+    const inst = r.bpmInstances[0];
+    const execActivity = inst?.activities.find(
+      (a) => a.phase === 'execution' && a.state === 'claimed' && (a as any).question,
+    );
+    if (!execActivity)
+      throw new ConflictException('Atividade de execuÃ§Ã£o com pergunta nÃ£o encontrada');
+    const d = this.definition(r.categoryVersion);
+    if (dto.fields) {
+      const merged = { ...(r.formData as Record<string, unknown> ?? {}), ...dto.fields };
+      await this.validateFields(d, merged);
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const body = { ...dto, requestId: id };
+      const rec = await this.receipt(tx, user.userId, dto.commandKey, 'respondInformation', body);
+      if ('id' in rec) return this.resultFromReceipt(tx, rec);
+      const updateData: any = { lockVersion: { increment: 1 }, status: 'em_atendimento' };
+      if (dto.fields) {
+        const merged = { ...(r.formData as Record<string, unknown> ?? {}), ...dto.fields };
+        updateData.formData = merged as Prisma.InputJsonValue;
+      }
+      const changed = await tx.request.updateMany({
+        where: { id, lockVersion: dto.expectedVersion, status: 'aguardando_informacao' as any },
+        data: updateData,
+      });
+      if (!changed.count) throw new ConflictException('VERSION_CONFLICT');
+      // Clear question, store answer
+      await (tx.activityInstance as any).update({ where: { id: execActivity.id }, data: { question: null, resolution: dto.answer } });
+      // Resume SLA resolution clock
+      const now = new Date();
+      const clocks = await tx.requestSlaClock.findMany({ where: { requestId: id, metric: 'resolution', stoppedAt: null } });
+      for (const clock of clocks) {
+        await tx.requestSlaInterval.updateMany({ where: { clockId: clock.id, endAt: null }, data: { endAt: now } });
+        await tx.requestSlaInterval.create({ data: { clockId: clock.id, kind: 'running', startAt: now, reason: 'information_responded', actorUserId: user.userId } });
+      }
+      const ev = await this.event(tx, id, inst!.id, r.currentCycle, 'activity.information_responded', user, dto.commandId, { activityId: execActivity.id });
+      await tx.requestCommandReceipt.create({
+        data: {
+          commandId: dto.commandId, actorUserId: user.userId, key: dto.commandKey,
+          routeScope: 'respondInformation',
+          requestHash: hash({ routeScope: 'respondInformation', requestId: id, body }),
+          requestId: id, statusCode: 200,
+          resultRef: { requestId: id, currentVersion: dto.expectedVersion + 1 },
+        },
+      });
+      return { requestId: id, status: 'em_atendimento', currentVersion: dto.expectedVersion + 1 };
     });
   }
   async list(
@@ -1612,14 +1855,35 @@ export class RequestRuntimeService {
       cycle: r.currentCycle,
       category: r.categoryVersion.category,
       version: r.categoryVersion.version,
-      schema: (this.definition(r.categoryVersion).form ?? []).filter(
-        (f: any) => this.recordFieldMode(r, user, f.key) !== 'hidden',
-      ),
-      formAccess: Object.fromEntries(
-        (this.definition(r.categoryVersion).form ?? [])
-          .filter((f: any) => this.recordFieldMode(r, user, f.key) !== 'hidden')
-          .map((f: any) => [f.key, this.recordFieldMode(r, user, f.key)]),
-      ),
+      schema: (() => {
+        const form = this.definition(r.categoryVersion).form;
+        if (!form) return [];
+        const fields = extractFields(form);
+        const visible = fields.filter(
+          (f: any) => this.recordFieldMode(r, user, f.key) !== 'hidden',
+        );
+        if (Array.isArray(form)) return visible;
+        // Sectioned form: return sections with visible fields only
+        const visibleKeys = new Set(visible.map((f: any) => f.key));
+        return {
+          sections: toSections(form)
+            .map((sec) => ({
+              ...sec,
+              fields: sec.fields.filter((f) => visibleKeys.has(f.key)),
+            }))
+            .filter((sec) => sec.fields.length > 0),
+        };
+      })(),
+      formAccess: (() => {
+        const form = this.definition(r.categoryVersion).form;
+        if (!form) return {};
+        const fields = extractFields(form);
+        return Object.fromEntries(
+          fields
+            .filter((f: any) => this.recordFieldMode(r, user, f.key) !== 'hidden')
+            .map((f: any) => [f.key, this.recordFieldMode(r, user, f.key)]),
+        );
+      })(),
       activities: inst?.activities.map((a) => ({
         id: a.id,
         phase: a.phase,
@@ -1627,13 +1891,19 @@ export class RequestRuntimeService {
         assigneeId: a.assigneeId,
         queueId: a.queueId,
         resolution: a.resolution,
+        question: (a as any).question ?? null,
+        correctionFieldKeys: (a as any).correctionFieldKeys ?? null,
         allowedActions: !canExecute
           ? []
           : a.state === 'available' &&
               a.candidates.some((c) => c.collaboratorId === user.collaboratorId)
             ? ['claim']
             : a.state === 'claimed' && a.assigneeId === user.collaboratorId
-              ? ['complete', 'release']
+              ? [
+                  'complete',
+                  'release',
+                  ...(a.phase === 'execution' ? ['returnForCorrection', 'requestInformation'] : []),
+                ]
               : isManager && ['available', 'claimed'].includes(a.state)
                 ? [
                     ...(a.state === 'claimed' ? ['release'] : []),
@@ -1676,6 +1946,12 @@ export class RequestRuntimeService {
       allowedActions: [
         ...(canCreate && isRequester && r.status === 'rascunho'
           ? ['saveDraft', 'submit', 'cancel']
+          : []),
+        ...(canCreate && isRequester && (r.status as string) === 'aguardando_correcao'
+          ? ['saveCorrection', 'resubmit']
+          : []),
+        ...(canCreate && isRequester && (r.status as string) === 'aguardando_informacao'
+          ? ['respondInformation']
           : []),
         ...(canExecute && isManager && r.status === 'concluida'
           ? ['close']
@@ -1754,7 +2030,7 @@ export class RequestRuntimeService {
     const r = await this.requestAccess(id, user, true);
     if (r.status !== 'rascunho' || r.requesterId !== user.collaboratorId)
       throw new ForbiddenException(
-        'Anexo de formulário exige rascunho do autor',
+        'Anexo de formulÃ¡rio exige rascunho do autor',
       );
     if (dto.fieldKey)
       this.assertWritableFields(this.definition(r.categoryVersion), {
@@ -1809,7 +2085,7 @@ export class RequestRuntimeService {
           })
         : null;
       if (dto.previousId && !previous)
-        throw new BadRequestException('Anexo anterior inválido');
+        throw new BadRequestException('Anexo anterior invÃ¡lido');
       const a = await tx.bpmRequestAttachment.create({
         data: {
           requestId: id,
@@ -1874,9 +2150,9 @@ export class RequestRuntimeService {
     const a = await this.prisma.bpmRequestAttachment.findFirst({
       where: { id: attachmentId, requestId: id },
     });
-    if (!a) throw new NotFoundException('Anexo não encontrado');
+    if (!a) throw new NotFoundException('Anexo nÃ£o encontrado');
     if (!this.attachmentVisible(r, a.fieldKey, user))
-      throw new NotFoundException('Anexo não encontrado');
+      throw new NotFoundException('Anexo nÃ£o encontrado');
     return a;
   }
   async timeline(id: string, user: AuthenticatedUser) {
@@ -1922,3 +2198,4 @@ export class RequestRuntimeService {
     });
   }
 }
+

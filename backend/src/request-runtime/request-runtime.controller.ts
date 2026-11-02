@@ -32,6 +32,11 @@ import {
   ReasonCommandDto,
   ReassignDto,
   ListBpmDto,
+  ReturnForCorrectionDto,
+  SaveCorrectionDto,
+  ResubmitDto,
+  RequestInformationDto,
+  RespondInformationDto,
 } from './dto.js';
 
 @Controller('bpm')
@@ -158,5 +163,40 @@ export class RequestRuntimeController {
     @CurrentUser() u: AuthenticatedUser,
   ) {
     return this.service.timeline(id, u);
+  }
+  @Post('activities/:id/return') @RequirePermissions('request:update') returnForCorrection(
+    @Param('id') id: string,
+    @Body() d: ReturnForCorrectionDto,
+    @CurrentUser() u: AuthenticatedUser,
+  ) {
+    return this.service.returnForCorrection(id, d, u);
+  }
+  @Patch('requests/:id/correction') @RequirePermissions('request:create') saveCorrection(
+    @Param('id') id: string,
+    @Body() d: SaveCorrectionDto,
+    @CurrentUser() u: AuthenticatedUser,
+  ) {
+    return this.service.saveCorrection(id, d, u);
+  }
+  @Post('requests/:id/resubmit') @RequirePermissions('request:create') resubmit(
+    @Param('id') id: string,
+    @Body() d: ResubmitDto,
+    @CurrentUser() u: AuthenticatedUser,
+  ) {
+    return this.service.resubmit(id, d, u);
+  }
+  @Post('activities/:id/question') @RequirePermissions('request:update') requestInformation(
+    @Param('id') id: string,
+    @Body() d: RequestInformationDto,
+    @CurrentUser() u: AuthenticatedUser,
+  ) {
+    return this.service.requestInformation(id, d, u);
+  }
+  @Post('requests/:id/respond') @RequirePermissions('request:create') respondInformation(
+    @Param('id') id: string,
+    @Body() d: RespondInformationDto,
+    @CurrentUser() u: AuthenticatedUser,
+  ) {
+    return this.service.respondInformation(id, d, u);
   }
 }

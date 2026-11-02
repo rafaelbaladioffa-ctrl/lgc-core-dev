@@ -27,16 +27,7 @@ const P = [
   'request_process:publish',
   'request_queue:manage',
 ];
-const formTypes = new Set([
-  'text',
-  'textarea',
-  'integer',
-  'decimal',
-  'date',
-  'select',
-  'boolean',
-  'attachment',
-]);
+import { validateFormSchema } from './forms/form-validator.js';
 function hash(value: unknown) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -143,6 +134,17 @@ export class RequestProcessesService {
       nodes: ['start', 'human', 'end'],
       permissions,
       limits: { fields: 200, nodes: 4, slaMinutes: [1, 120000] },
+      fieldTypes: [
+        'text','textarea','integer','decimal','date',
+        'select','boolean','attachment',
+        'money','reference','repeatable_table',
+      ],
+      commands: [
+        'saveDraft','submit','claim','complete','release','reassign',
+        'close','cancel','comment','attachment',
+        'returnForCorrection','saveCorrection','resubmit',
+        'requestInformation','respondInformation',
+      ],
     };
   }
   private assertEnabled() {
@@ -714,53 +716,9 @@ export class RequestProcessesService {
         path: 'edges',
         message: 'P01 exige três arestas lineares',
       });
-    const form = (definition.form ?? []) as unknown;
-    if (!Array.isArray(form) || form.length > 200)
-      errors.push({ path: 'form', message: 'Formulário inválido' });
-    else {
-      const keys = new Set<string>();
-      for (const [i, field] of form.entries()) {
-        const f = field as Record<string, unknown>;
-        if (typeof f.key === 'string' && keys.has(f.key))
-          errors.push({ path: `form.${i}.key`, message: 'Chave duplicada' });
-        if (typeof f.key === 'string') keys.add(f.key);
-        if (typeof f.key !== 'string' || !/^[a-z][a-z0-9_]{0,63}$/.test(f.key))
-          errors.push({ path: `form.${i}.key`, message: 'Chave inválida' });
-        if (typeof f.label !== 'string' || !f.label.trim())
-          errors.push({
-            path: `form.${i}.label`,
-            message: 'Label obrigatório',
-          });
-        if (typeof f.type !== 'string' || !formTypes.has(f.type))
-          errors.push({
-            path: `form.${i}.type`,
-            message: 'Tipo não suportado',
-          });
-        if (
-          f.type === 'select' &&
-          (!Array.isArray(f.options) ||
-            f.options.length === 0 ||
-            f.options.some(
-              (o: any) =>
-                typeof o !== 'string' &&
-                (!o || typeof o.id !== 'string' || typeof o.label !== 'string'),
-            ))
-        )
-          errors.push({
-            path: `form.${i}.options`,
-            message: 'Select exige opções válidas',
-          });
-        if (
-          f.maxLength !== undefined &&
-          (!Number.isInteger(f.maxLength) ||
-            (f.maxLength as number) < 1 ||
-            (f.maxLength as number) > 10000)
-        )
-          errors.push({
-            path: `form.${i}.maxLength`,
-            message: 'Limite de texto inválido',
-          });
-      }
+    if (definition.form !== undefined) {
+      const formErrors = validateFormSchema(definition.form, 200);
+      for (const e of formErrors) errors.push(e);
     }
     return { valid: errors.length === 0, errors };
   }

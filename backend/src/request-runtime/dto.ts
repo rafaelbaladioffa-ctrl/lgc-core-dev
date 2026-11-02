@@ -66,3 +66,21 @@ export class AttachmentDto {
   @IsOptional() @IsString() fieldKey?: string;
   @IsOptional() @IsInt() @Min(0) expectedVersion?: number;
 }
+export class ReturnForCorrectionDto extends CommandDto {
+  @IsString() @MinLength(3) reason!: string;
+  @IsOptional() @IsString({ each: true }) editableFieldKeys?: string[];
+}
+export class SaveCorrectionDto {
+  @IsOptional() @IsUUID() commandId?: string;
+  @IsOptional() @IsString() @MinLength(8) commandKey?: string;
+  @IsInt() @Min(0) expectedVersion!: number;
+  @IsOptional() @IsObject() fields?: Record<string, unknown>;
+}
+export class ResubmitDto extends CommandDto {}
+export class RequestInformationDto extends CommandDto {
+  @IsString() @MinLength(3) @MaxLength(2000) question!: string;
+}
+export class RespondInformationDto extends CommandDto {
+  @IsString() @MinLength(1) @MaxLength(4000) answer!: string;
+  @IsOptional() @IsObject() fields?: Record<string, unknown>;
+}

@@ -431,6 +431,8 @@ enum RequestStatus {
   em_atendimento
   aguardando_solicitante
   aguardando_terceiro
+  aguardando_correcao
+  aguardando_informacao
   concluida
   encerrada
   devolvida_ajuste
@@ -1056,8 +1058,14 @@ model ActivityInstance {
   openedAt       DateTime          @default(now()) @map("opened_at")
   claimedAt      DateTime?         @map("claimed_at")
   completedAt    DateTime?         @map("completed_at")
-  outcome        String?
-  resolution     String?
+  outcome             String?
+  resolution          String?
+  correctionFieldKeys Json?             @map("correction_field_keys")
+  question            String?
+  informationDueAt    DateTime?         @map("information_due_at")
+  parentActivityId    String?           @map("parent_activity_id")
+  parentActivity      ActivityInstance? @relation("ActivityParent", fields: [parentActivityId], references: [id])
+  childActivities     ActivityInstance[] @relation("ActivityParent")
   candidates     ActivityCandidate[]
   assignments    ActivityAssignment[]
   participants   RequestParticipant[]

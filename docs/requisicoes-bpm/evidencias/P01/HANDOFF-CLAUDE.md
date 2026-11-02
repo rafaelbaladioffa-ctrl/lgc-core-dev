@@ -43,7 +43,7 @@ P02 ainda não foi implementado. Antes de começar, Claude deve:
 
 1. ler `docs/requisicoes-bpm/07-backlog-validacao.md`, `01-arquitetura.md`, `02-regras-autorizacao.md`,
    `04-contratos-api.md`, `05-telas-publicacao.md` e `06-sla-logistica.md`;
-2. preservar `executionMode=legacy`, o piloto P01 e as contas/cadastros existentes;
+2. preservar `executionMode=legacy`, o piloto P01 e as contas/cadastros existentes;subiu para o github?
 3. criar banco/fixtures dedicados terminados em `_bpm_test`; nunca usar `DATABASE_URL` operacional;
 4. executar o baseline P01 antes de qualquer mudança de P02;
 5. implementar somente o recorte P02: seções/reordenação, tabela repetível, dinheiro/referências,
