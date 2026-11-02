@@ -16,8 +16,11 @@ h4 { font-size: .9375rem; }
 a { color: var(--primary); }
 table { width: 100%; border-collapse: collapse; font-size: .8125rem; }
 th { font-size: var(--text-xs); font-weight: 600; }
-input, select, textarea { width: 100%; min-height: var(--control-height); padding: 0 10px; color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
+input:not([type="checkbox"]):not([type="radio"]), select, textarea { width: 100%; min-height: var(--control-height); padding: 0 10px; color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); transition: border-color var(--transition-fast), box-shadow var(--transition-fast); }
 textarea { min-height: 80px; padding-block: 8px; resize: vertical; }
+/* Sem o :not() acima, checkbox/radio herdavam width:100%/min-height do seletor genérico de
+   input e ficavam enormes — em qualquer tela do app, não só numa específica. */
+input[type="checkbox"], input[type="radio"] { width: 14px; height: 14px; accent-color: var(--primary); }
 input:hover, select:hover, textarea:hover { border-color: var(--axis-graphite-400); }
 input:focus, select:focus, textarea:focus { border-color: var(--focus-ring); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus-ring) 16%, transparent); outline: none; }
 input:disabled, select:disabled, textarea:disabled { color: var(--foreground-muted); background: var(--surface-secondary); }
