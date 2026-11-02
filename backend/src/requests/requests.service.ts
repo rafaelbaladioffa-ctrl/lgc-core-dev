@@ -85,7 +85,9 @@ export class RequestsService {
   async create(requesterId: string, dto: CreateRequestDto) {
     const category = await this.prisma.requestCategory.findUnique({ where: { id: dto.categoryId } });
     if (!category || !category.active) throw new BadRequestException('Categoria de requisição não encontrada ou inativa');
-    const categoryVersion = await this.prisma.categoryVersion.findFirst({ where: { categoryId: dto.categoryId, bpmStatus: null }, orderBy: { version: 'desc' } });
+    // `bpmStatus` filtrava a versão BPM-only fora da criação legada — removido junto do resto do
+    // módulo BPM (98dfce5); toda versão aqui já é legada.
+    const categoryVersion = await this.prisma.categoryVersion.findFirst({ where: { categoryId: dto.categoryId }, orderBy: { version: 'desc' } });
     if (!categoryVersion) throw new BadRequestException('Categoria sem versão publicada');
 
     const requester = await this.prisma.collaborator.findUnique({ where: { id: requesterId } });
