@@ -200,7 +200,7 @@ export class RequestsController {
   @RequirePermissions('request:create')
   @AuditAction({ action: 'cancel_request', resourceType: 'request', resourceIdParam: 'id' })
   cancel(@Param('id') id: string, @Body() dto: CancelRequestDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.cancel(id, requireCollaboratorId(user), dto);
+    return this.requestsService.cancel(id, requireCollaboratorId(user), user.permissions.includes('request:update'), dto);
   }
 
   @Post(':id/comments')

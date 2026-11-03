@@ -34,7 +34,7 @@ describe('legacy executor separation from BPM', () => {
   it.each([
     ['update', (service: RequestsService) => service.update('bpm-request', 'actor', { title: 'x' } as any)],
     ['submit', (service: RequestsService) => service.submit('bpm-request', 'actor')],
-    ['cancel', (service: RequestsService) => service.cancel('bpm-request', 'actor', { reason: 'x' } as any)],
+    ['cancel', (service: RequestsService) => service.cancel('bpm-request', 'actor', false, { reason: 'x' } as any)],
     ['findOne', (service: RequestsService) => service.findOne('bpm-request', { collaboratorId: 'actor', canViewWhistleblowerIdentity: false })],
   ])('rejects %s for a BPM request without writing', async (_operation, action) => {
     const fixture = legacyService();

@@ -336,6 +336,7 @@ export class RequestsService {
 
   async recordPurchaseAnalysis(id: string, actorId: string, dto: PurchaseAnalysisDto) {
     const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
     const isPurchase = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
     if (!isPurchase) throw new BadRequestException('Esta requisição não é de compras.');
@@ -351,6 +352,7 @@ export class RequestsService {
 
   async recordPurchaseQuotation(id: string, actorId: string, dto: PurchaseQuotationDto) {
     const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
     const isPurchase = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
     if (!isPurchase) throw new BadRequestException('Esta requisição não é de compras.');
@@ -409,6 +411,10 @@ export class RequestsService {
    * (todos aprovados / qualquer um / N de M); até lá, fica aguardando os demais do mesmo nó. */
   async approve(id: string, approverId: string, dto: ApproveRequestDto) {
     const request = await this.getPendingApproval(id);
+    // resolveApprovalChain já exclui requester/beneficiary da cadeia; isto cobre o único caso que
+    // escapa disso — o responsável do centro de custo (approvalSource 'centro_custo') ser a mesma
+    // pessoa que abriu a requisição.
+    this.assertNotRequester(request, approverId);
     const stepRows = this.activeStepRows(request.approvals);
     const { row: myRow, onBehalfOf } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
     if (myRow.approvalSource === 'centro_custo') {
@@ -449,6 +455,7 @@ export class RequestsService {
    * não há "maioria reprova" nesta versão (simplificação documentada no hand-off). */
   async reject(id: string, approverId: string, dto: RejectRequestDto) {
     const request = await this.getPendingApproval(id);
+    this.assertNotRequester(request, approverId);
     const stepRows = this.activeStepRows(request.approvals);
     const { row: myRow } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
 
@@ -468,6 +475,7 @@ export class RequestsService {
    * criado e nunca parado). */
   async start(id: string, actorId: string) {
     const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
     if (!['aprovada', 'planejada'].includes(request.status)) throw new BadRequestException('A requisição precisa estar aprovada para iniciar o atendimento');
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -479,6 +487,7 @@ export class RequestsService {
 
   async requestInformation(id: string, actorId: string, dto: RequestInformationDto) {
     const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível pedir informação durante o atendimento');
 
     return this.prisma.$transaction(async (tx) => {
@@ -514,6 +523,7 @@ export class RequestsService {
    */
   async complete(id: string, actorId: string, dto: CompleteRequestDto) {
     const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível concluir durante o atendimento');
 
     const subtaskLinks = await this.prisma.requestRelation.findMany({
@@ -552,6 +562,8 @@ export class RequestsService {
 
   async close(id: string, actorId: string | null) {
     const request = await this.getOrThrow(id);
+    // actorId é null quando runAutoClose() (cron) fecha sozinho — não há solicitante a excluir aí.
+    if (actorId) this.assertNotRequester(request, actorId);
     if (request.status !== 'concluida') throw new BadRequestException('Só é possível encerrar uma requisição concluída');
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
     if (categoryVersion.category.requiresAcceptance && !request.requesterAcceptedAt) {
@@ -614,9 +626,19 @@ export class RequestsService {
     });
   }
 
-  async cancel(id: string, actorId: string, dto: CancelRequestDto) {
+  // §4.2: antes o route-level `request:create` bastava — qualquer titular dessa permissão
+  // cancelava a requisição de qualquer pessoa, não só a própria. Agora: quem gerencia o fluxo
+  // (request:update) cancela em qualquer etapa aberta; o solicitante só enquanto a requisição
+  // ainda é dele de fato (rascunho/devolvida para ajuste) — depois de enviada, só quem está com
+  // a responsabilidade atual decide.
+  async cancel(id: string, actorId: string, canManage: boolean, dto: CancelRequestDto) {
     const request = await this.getOrThrow(id);
     if (['concluida', 'encerrada', 'cancelada'].includes(request.status)) throw new BadRequestException('Esta requisição não pode mais ser cancelada');
+    const isRequester = actorId === request.requesterId || actorId === request.beneficiaryId;
+    const requesterOwnsThisStage = ['rascunho', 'devolvida_ajuste'].includes(request.status);
+    if (!canManage && !(isRequester && requesterOwnsThisStage)) {
+      throw new ForbiddenException('Você não pode cancelar esta requisição nesta etapa.');
+    }
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.request.update({ where: { id }, data: { status: 'cancelada' } });
       await this.audit(tx, { aggregateId: id, event: 'request.cancelled', actorId, after: { reason: dto.reason } });
@@ -1024,6 +1046,16 @@ export class RequestsService {
     if (!request) throw new NotFoundException('Requisição não encontrada');
     if (request.executionMode === 'bpm_v1') throw new ConflictException('WRONG_EXECUTOR');
     return request;
+  }
+
+  /** Nunca deixa o próprio solicitante/beneficiário agir como staff na própria requisição, nem
+   * quando o papel dele também carrega uma permissão operacional (admin, gestor etc.) — mesmo
+   * princípio já aplicado em triage(), replicado aqui para os demais comandos de staff que não
+   * tinham essa checagem (start/requestInformation/complete/análise e cotação de Suprimentos). */
+  private assertNotRequester(request: { requesterId: string; beneficiaryId: string }, actorId: string) {
+    if (actorId === request.requesterId || actorId === request.beneficiaryId) {
+      throw new ForbiddenException('Você é o solicitante desta requisição — aguarde o próximo responsável.');
+    }
   }
 
   private async getPendingApproval(id: string) {
