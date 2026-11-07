@@ -16,6 +16,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/clients", label: "Clientes", icon: "◈", permission: "client:read" },
   { to: "/projects", label: "Projetos", icon: "⚑", permission: "project:read" },
   { to: "/requests", label: "Requisições", icon: "⚑︎", permission: "request:read" },
+  { to: "/request-categories", label: "Catálogo de requisições", icon: "☰", permission: "request_category:update" },
   { to: "/my-approvals", label: "Minhas Aprovações", icon: "✔", permission: "request:read" },
   { to: "/delegations", label: "Delegações", icon: "⇉", permission: "delegation:read" },
   { to: "/integrations", label: "Integrações", icon: "⇄", permission: "integration:read" },

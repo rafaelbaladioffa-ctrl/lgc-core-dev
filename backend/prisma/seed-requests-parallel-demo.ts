@@ -44,7 +44,7 @@ async function main() {
   const sector = await prisma.sector.findFirst({ where: { name: 'Compliance' } });
   if (!sector) throw new Error('Setor "Compliance" não encontrado — rode "npm run seed:org" primeiro.');
 
-  await requestCategoriesService.create(
+  await requestCategoriesService.createPublishedForSeed(
     {
       code: CODE,
       name: '[QA] Aprovação paralela (qualquer um)',

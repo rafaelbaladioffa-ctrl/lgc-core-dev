@@ -48,6 +48,7 @@ interface CategorySeed {
   name: string;
   sectorName: string;
   confidentiality?: 'interna' | 'confidencial' | 'restrita';
+  kind?: 'padrao' | 'compra_material' | 'denuncia';
   // §15.2/§11: entrega/mudança/serviço exige aceite do solicitante antes de encerrar.
   requiresAcceptance?: boolean;
   workflow: WorkflowStep[];
@@ -121,6 +122,7 @@ const CATEGORIES: CategorySeed[] = [
     code: 'SUP-COMPRA',
     name: 'Compra de material',
     sectorName: 'Suprimentos',
+    kind: 'compra_material',
     workflow: CADEIA_CUSTO,
     fields: [
       { key: 'purchaseItems', label: 'Itens selecionados no catálogo da Logística', type: 'text', required: true },
@@ -234,12 +236,13 @@ async function main() {
     if (!sector) {
       throw new Error(`Setor "${seed.sectorName}" não encontrado — rode "npm run seed:org" primeiro.`);
     }
-    await requestCategoriesService.create(
+    await requestCategoriesService.createPublishedForSeed(
       {
         code: seed.code,
         name: seed.name,
         sectorId: sector.id,
         confidentiality: seed.confidentiality,
+        kind: seed.kind,
         requiresAcceptance: seed.requiresAcceptance,
         formSchema: seed.fields,
         workflowSchema: seed.workflow,

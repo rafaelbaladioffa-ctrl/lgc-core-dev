@@ -7,6 +7,7 @@ import { OutboxService } from '../integration/outbox.service.js';
 import { DelegationsService } from '../delegations/delegations.service.js';
 import { ApprovalAuthorityRulesService } from '../approval-authority-rules/approval-authority-rules.service.js';
 import { HolidaysService } from '../holidays/holidays.service.js';
+import { findLatestPublishedVersion, isPurchase, isWhistleblower } from '../request-categories/category-kind.js';
 import { CreateRequestDto } from './dto/create-request.dto.js';
 import { UpdateRequestDto } from './dto/update-request.dto.js';
 import { TriageRequestDto } from './dto/triage-request.dto.js';
@@ -89,7 +90,7 @@ export class RequestsService {
     if (!category || !category.active) throw new BadRequestException('Categoria de requisição não encontrada ou inativa');
     // `bpmStatus` filtrava a versão BPM-only fora da criação legada — removido junto do resto do
     // módulo BPM (98dfce5); toda versão aqui já é legada.
-    const categoryVersion = await this.prisma.categoryVersion.findFirst({ where: { categoryId: dto.categoryId }, orderBy: { version: 'desc' } });
+    const categoryVersion = await findLatestPublishedVersion(this.prisma, dto.categoryId);
     if (!categoryVersion) throw new BadRequestException('Categoria sem versão publicada');
 
     const requester = await this.prisma.collaborator.findUnique({ where: { id: requesterId } });
@@ -105,7 +106,7 @@ export class RequestsService {
     const costCenter = await this.prisma.costCenter.findUnique({ where: { id: dto.costCenterId } });
     if (!costCenter) throw new BadRequestException('Centro de custo não encontrado.');
 
-    const isPurchaseRequest = category.code === 'SUP-COMPRA' || category.name.toLowerCase() === 'compra de material';
+    const isPurchaseRequest = isPurchase(category);
     if (isPurchaseRequest) {
       this.assertPurchaseItems(dto.formData);
     }
@@ -116,7 +117,7 @@ export class RequestsService {
     // Denúncia/relato ético (§7.3): `anonimo=true` no formulário oculta a identidade do
     // solicitante de todo participante do fluxo (ver maskIdentityIfAnonymous), sem jamais apagar
     // o requesterId em si — a trilha de auditoria técnica precisa dele.
-    const anonymous = category.code === 'CMP-DENUNCIA' && dto.formData?.anonimo === true;
+    const anonymous = isWhistleblower(category) && dto.formData?.anonimo === true;
     if (dto.parentRequestId) await this.getOrThrow(dto.parentRequestId);
 
     return this.prisma.$transaction(async (tx) => {
@@ -259,7 +260,7 @@ export class RequestsService {
     }
 
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
-    const isPurchaseRequest = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
+    const isPurchaseRequest = isPurchase(categoryVersion.category);
     if (isPurchaseRequest && !actorRoles.includes('analista_suprimentos') && !actorRoles.includes('admin')) {
       throw new ForbiddenException('Somente o Suprimentos pode aceitar a triagem de uma compra.');
     }
@@ -271,7 +272,7 @@ export class RequestsService {
 
     if (dto.action === 'recategorizar') {
       if (!dto.newCategoryId) throw new BadRequestException('Informe a nova categoria');
-      const newVersion = await this.prisma.categoryVersion.findFirst({ where: { categoryId: dto.newCategoryId }, orderBy: { version: 'desc' } });
+      const newVersion = await findLatestPublishedVersion(this.prisma, dto.newCategoryId);
       if (!newVersion) throw new BadRequestException('Categoria sem versão publicada');
       return this.prisma.$transaction(async (tx) => {
         const updated = await tx.request.update({ where: { id }, data: { categoryVersionId: newVersion.id, status: 'devolvida_ajuste' } });
@@ -307,7 +308,7 @@ export class RequestsService {
 
     return this.prisma.$transaction(async (tx) => {
       const resolved = await this.resolveApprovalChain(tx, requester.id, requester.managementLevel, steps, conflicted);
-      const isPurchaseRequest = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
+      const isPurchaseRequest = isPurchase(categoryVersion.category);
       if (isPurchaseRequest) {
         if (!request.costCenterId) throw new BadRequestException('A compra precisa ter um centro de custo.');
         const costCenter = await tx.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } });
@@ -362,8 +363,8 @@ export class RequestsService {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
-    const isPurchase = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
-    if (!isPurchase) throw new BadRequestException('Esta requisição não é de compras.');
+    const isPurchaseRequest = isPurchase(categoryVersion.category);
+    if (!isPurchaseRequest) throw new BadRequestException('Esta requisição não é de compras.');
     if (!['enviada', 'em_triagem', 'aguardando_aprovacao', 'aprovada', 'em_atendimento'].includes(request.status)) throw new BadRequestException('A requisição não está em uma etapa de análise.');
     const formData = (request.formData as Record<string, unknown> | null) ?? {};
     const purchaseItems = Array.isArray(formData.purchaseItems) ? formData.purchaseItems as Array<Record<string, unknown>> : [];
@@ -378,8 +379,8 @@ export class RequestsService {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
-    const isPurchase = categoryVersion.category.code === 'SUP-COMPRA' || categoryVersion.category.name.toLowerCase() === 'compra de material';
-    if (!isPurchase) throw new BadRequestException('Esta requisição não é de compras.');
+    const isPurchaseRequest = isPurchase(categoryVersion.category);
+    if (!isPurchaseRequest) throw new BadRequestException('Esta requisição não é de compras.');
     if (request.status !== 'em_atendimento') throw new BadRequestException('A cotação só pode ser registrada durante o atendimento do Suprimentos.');
     const formData = (request.formData as Record<string, unknown> | null) ?? {};
     if (!formData.procurementAnalysis) throw new BadRequestException('Registre a análise de estoque antes da cotação.');
@@ -1188,7 +1189,7 @@ export class RequestsService {
    * interesse, só que para um conjunto resolvido a partir de outra pessoa, não do solicitante. */
   private async whistleblowerExclusions(client: PrismaService | TxClient, request: { formData: Prisma.JsonValue }, categoryId: string): Promise<Set<string>> {
     const category = await client.requestCategory.findUnique({ where: { id: categoryId } });
-    if (category?.code !== 'CMP-DENUNCIA') return new Set();
+    if (!category || !isWhistleblower(category)) return new Set();
     const formData = request.formData as Record<string, unknown> | null;
     const envolvidoId = formData?.envolvido_id as string | undefined;
     if (!envolvidoId) return new Set();

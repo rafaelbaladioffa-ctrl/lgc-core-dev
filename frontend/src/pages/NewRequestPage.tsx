@@ -94,7 +94,7 @@ export function NewRequestPage() {
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const customFields: RequestFormField[] = useMemo(() => selectedCategory?.currentVersion?.formSchema ?? [], [selectedCategory]);
-  const isPurchaseRequest = selectedCategory?.code === 'SUP-COMPRA' || selectedCategory?.name.toLowerCase() === 'compra de material';
+  const isPurchaseRequest = selectedCategory?.kind === 'compra_material';
   const requesterSector = requester ? sectors.find((sector) => sector.id === requester.sectorId) : null;
   const requesterParentSector = requesterSector?.parentSectorId ? sectors.find((sector) => sector.id === requesterSector.parentSectorId) : null;
   const purchaseTitle = requesterSector ? `Compra de Materiais - ${requesterParentSector ? `${requesterParentSector.name}/${requesterSector.name}` : requesterSector.name}` : 'Compra de Materiais';

@@ -20,3 +20,20 @@ export function translateApiError(err: unknown, fallback: string): string {
   if (!message) return fallback;
   return KNOWN_MESSAGES[message] ?? fallback;
 }
+
+/** Mensagens do servidor (ja em pt-BR nas rotas do catalogo) como lista: o `message` do NestJS
+ * pode ser texto ou lista de erros de validacao por campo. */
+export function extractApiMessages(err: unknown, fallback: string): string[] {
+  const response =
+    err && typeof err === 'object' && 'response' in err
+      ? (err as { response?: { status?: number; data?: { message?: unknown } } }).response
+      : undefined;
+  if (response?.status === 403) return ['Você não tem permissão para esta ação.'];
+  const message = response?.data?.message;
+  if (Array.isArray(message)) {
+    const list = message.filter((m): m is string => typeof m === 'string' && m !== '');
+    if (list.length > 0) return list;
+  }
+  if (typeof message === 'string' && message !== '') return [message];
+  return [fallback];
+}

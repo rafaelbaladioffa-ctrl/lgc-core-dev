@@ -64,7 +64,7 @@ async function main() {
     console.log('Setor "Financeiro" não encontrado — rode "npm run seed:org" primeiro. Pulando categoria demo.');
     return;
   }
-  await requestCategoriesService.create(
+  await requestCategoriesService.createPublishedForSeed(
     {
       code: DEMO_CATEGORY_CODE,
       name: '[QA] Alçada dinâmica por valor',

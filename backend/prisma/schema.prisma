@@ -418,6 +418,17 @@ enum SlaMetric {
   solucao
 }
 
+enum RequestCategoryKind {
+  padrao
+  compra_material
+  denuncia
+}
+
+enum CategoryVersionStatus {
+  rascunho
+  publicada
+}
+
 enum RequestExecutionMode {
   legacy
   bpm_v1
@@ -429,9 +440,8 @@ model RequestCategory {
   name            String
   sectorId        String                  @map("sector_id")
   sector          Sector                  @relation(fields: [sectorId], references: [id])
-  parentCategoryId String?                @map("parent_category_id")
-  parentCategory  RequestCategory?        @relation("RequestCategoryHierarchy", fields: [parentCategoryId], references: [id])
-  subcategories   RequestCategory[]       @relation("RequestCategoryHierarchy")
+  /// Comportamento especial da categoria (substitui o teste por código/nome). Definido na criação.
+  kind            RequestCategoryKind     @default(padrao)
   confidentiality RequestConfidentiality  @default(interna)
   active          Boolean                 @default(true)
   requiresAcceptance Boolean              @default(false) @map("requires_acceptance")
@@ -441,7 +451,6 @@ model RequestCategory {
   updatedAt       DateTime                @updatedAt @map("updated_at")
 
   @@index([sectorId])
-  @@index([parentCategoryId])
   @@map("request_categories")
 }
 
@@ -454,11 +463,17 @@ model CategoryVersion {
   workflowSchema          Json             @map("workflow_schema")
   slaFirstResponseMinutes Int              @map("sla_first_response_minutes")
   slaResolutionMinutes    Int              @map("sla_resolution_minutes")
-  publishedAt             DateTime?        @default(now()) @map("published_at")
+  status                  CategoryVersionStatus @default(rascunho)
+  /// NULL enquanto for rascunho.
+  publishedAt             DateTime?        @map("published_at")
   publishedBy             String?          @map("published_by")
+  createdBy               String?          @map("created_by")
   requests                Request[]
   createdAt               DateTime         @default(now()) @map("created_at")
 
+  // No máximo um rascunho por categoria: índice único parcial `category_versions_one_draft_idx`
+  // (`CREATE UNIQUE INDEX ... ON category_versions (category_id) WHERE status = 'rascunho'`),
+  // criado à mão na migração 20261122000000 — o Prisma não modela índices parciais. Não remova.
   @@unique([categoryId, version])
   @@index([categoryId])
   @@map("category_versions")

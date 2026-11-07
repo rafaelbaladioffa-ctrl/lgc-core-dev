@@ -81,7 +81,6 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 ### 2.2 Permissões seedadas sem rota correspondente
 
 - `collaborator:delete` ("Desligar colaboradores"): nenhuma rota exige. O desligamento (`POST /collaborators/:id/offboard`) exige `collaborator:update`.
-- `request_category:update`: nenhuma rota exige. As rotas de catálogo, feriados e alçadas usam `request_category:create`/`read`.
 
 ## 3. Setores
 
@@ -264,7 +263,7 @@ O planning previa `cost_center_id` e flags de provisionamento no `collaborator.c
 | Dados sensíveis criptografados | CPF, RG, CTPS, PIS, ASO | CPF, RG, CTPS, PIS; ASO, CNH, telefone e endereço em texto puro |
 | Eventos `user.*` | `user.created/updated/disabled` | não emitidos |
 | Desligamento | `POST /collaborators/:id/offboard` | existe, mas a UI usa `PUT` com `status = desligado` |
-| Permissões | — | `collaborator:delete` e `request_category:update` seedadas sem rota |
+| Permissões | — | `collaborator:delete` seedada sem rota |
 | `users.collaborator_id` | nullable (contas de serviço) | nullable no schema, mas obrigatório no DTO de criação |
 | Auditoria | criação de usuário, troca de role, (des)ativação | implementada para usuários e colaboradores; ausente em papéis, setores, CCs, cargos, jornadas, certificações, clientes e projetos |
 | Contatos/endereço de cliente | JSON editável | sem campo na tela; `contacts` em lista é rejeitado pela validação |

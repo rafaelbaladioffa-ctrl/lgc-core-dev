@@ -49,6 +49,7 @@ interface CategorySeed {
   name: string;
   sectorName: string;
   confidentiality?: 'interna' | 'confidencial' | 'restrita';
+  kind?: 'padrao' | 'compra_material' | 'denuncia';
   workflow: WorkflowStep[];
   fields: FieldDef[];
 }
@@ -107,6 +108,7 @@ const CATEGORIES: CategorySeed[] = [
     code: 'CMP-DENUNCIA',
     name: 'Denúncia/relato ético',
     sectorName: 'Compliance',
+    kind: 'denuncia',
     confidentiality: 'restrita',
     workflow: GESTOR_DIRETO,
     fields: [
@@ -243,9 +245,9 @@ async function main() {
       // envolvido_id/anonimo (adicionados depois, pelo escopo de anonimato) — corrige o
       // form_schema da versão mais recente em vez de deixar categorias antigas defasadas.
       if (seed.code === 'CMP-DENUNCIA') {
-        const latestVersion = await prisma.categoryVersion.findFirst({ where: { categoryId: existing.id }, orderBy: { version: 'desc' } });
+        const latestVersion = await prisma.categoryVersion.findFirst({ where: { categoryId: existing.id, status: 'publicada' }, orderBy: { version: 'desc' } });
         if (latestVersion) {
-          await prisma.categoryVersion.update({ where: { id: latestVersion.id }, data: { formSchema: seed.fields } });
+          await prisma.categoryVersion.update({ where: { id: latestVersion.id }, data: { formSchema: seed.fields as object[] as never } });
           console.log(`  atualizada (form_schema): ${seed.code} — ${seed.name}`);
         }
       } else {
@@ -257,12 +259,13 @@ async function main() {
     if (!sector) {
       throw new Error(`Setor "${seed.sectorName}" não encontrado — rode "npm run seed:org" primeiro.`);
     }
-    await requestCategoriesService.create(
+    await requestCategoriesService.createPublishedForSeed(
       {
         code: seed.code,
         name: seed.name,
         sectorId: sector.id,
         confidentiality: seed.confidentiality,
+        kind: seed.kind,
         formSchema: seed.fields,
         workflowSchema: seed.workflow,
         slaFirstResponseMinutes: DEFAULT_SLA_FIRST_RESPONSE_MINUTES,

@@ -74,6 +74,8 @@ Seeds auxiliares (`backend/package.json`): `seed:org`, `seed:org-cc-restructure`
 `seed:requests-fase1`, `seed:requests-fase2-sectors`, `seed:requests-parallel-demo`,
 `seed:approval-authority-matrix`.
 
+Os seeds de requisições só criam o catálogo inicial (categorias com `kind` correto e versão 1 já publicada). A manutenção do catálogo (novas categorias, novas versões, desativação) é feita pela tela `/request-categories`, não por seed ou SQL. A permissão `request_category:publish` chega aos bancos existentes pelo `seed.ts`, que roda a cada partida e dá todas as permissões ao papel `admin`; para outros papéis, conceda-a em "Grupos e permissões".
+
 ## 4. Migrações — cuidados obrigatórios
 
 1. **Aplique migrações com `npm run db:migrate`** (é o que o container faz). Ele roda antes

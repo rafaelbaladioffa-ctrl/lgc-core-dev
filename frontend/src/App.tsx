@@ -12,6 +12,8 @@ import { SectorsPage } from "./pages/SectorsPage";
 import { SectorFormPage } from "./pages/SectorFormPage";
 import { CostCentersPage } from "./pages/CostCentersPage";
 import { CostCenterFormPage } from "./pages/CostCenterFormPage";
+import { RequestCategoriesPage } from "./pages/RequestCategoriesPage";
+import { RequestCategoryFormPage } from "./pages/RequestCategoryFormPage";
 import { JobTitleFormPage } from "./pages/JobTitleFormPage";
 import { WorkScheduleFormPage } from "./pages/WorkScheduleFormPage";
 import { ClientsPage } from "./pages/ClientsPage";
@@ -176,6 +178,30 @@ function AppRoutes() {
         element={
           <PrivateRoute permission="sector:update">
             <SectorFormPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/request-categories"
+        element={
+          <PrivateRoute permission="request_category:update">
+            <RequestCategoriesPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/request-categories/new"
+        element={
+          <PrivateRoute permission="request_category:create">
+            <RequestCategoryFormPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/request-categories/:id"
+        element={
+          <PrivateRoute permission="request_category:update">
+            <RequestCategoryFormPage />
           </PrivateRoute>
         }
       />

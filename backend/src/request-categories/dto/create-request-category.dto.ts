@@ -1,13 +1,12 @@
-import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Min, MaxLength } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, MaxLength, Max, Min } from 'class-validator';
+import { CATEGORY_CODE_REGEX, CATEGORY_KINDS, CONFIDENTIALITIES, MAX_SLA_MINUTES } from '../category-schema.validator.js';
 
-const CONFIDENTIALITY = ['interna', 'confidencial', 'restrita'] as const;
-
-/** Creates a category AND its first published version in one call — there is no separate
- * draft/publish admin UI in Fase 1 (REQUISICOES_SPEC.md §23 defers that to later phases); the
- * catalog is seeded as data, extensible later without a migration. */
+/** Cria a categoria e a versão 1 em **rascunho**. O conteúdo (formulário, fluxo, SLA) é
+ * opcional na criação e validado a fundo (category-schema.validator) quando enviado. */
 export class CreateRequestCategoryDto {
   @IsString()
   @MaxLength(40)
+  @Matches(CATEGORY_CODE_REGEX, { message: 'code: use letras maiúsculas, números e "-", começando por letra (2 a 40 caracteres).' })
   code!: string;
 
   @IsString()
@@ -17,27 +16,34 @@ export class CreateRequestCategoryDto {
   @IsUUID()
   sectorId!: string;
 
+  /** Só pode ser definido aqui; não muda depois. */
   @IsOptional()
-  @IsUUID()
-  parentCategoryId?: string;
+  @IsIn(CATEGORY_KINDS)
+  kind?: (typeof CATEGORY_KINDS)[number];
 
   @IsOptional()
-  @IsIn(CONFIDENTIALITY)
-  confidentiality?: 'interna' | 'confidencial' | 'restrita';
+  @IsIn(CONFIDENTIALITIES)
+  confidentiality?: (typeof CONFIDENTIALITIES)[number];
 
+  @IsOptional()
   @IsArray()
-  formSchema!: Record<string, unknown>[];
+  formSchema?: Record<string, unknown>[];
 
+  @IsOptional()
   @IsArray()
-  workflowSchema!: Record<string, unknown>[];
+  workflowSchema?: Record<string, unknown>[];
 
+  @IsOptional()
   @IsInt()
   @Min(1)
-  slaFirstResponseMinutes!: number;
+  @Max(MAX_SLA_MINUTES)
+  slaFirstResponseMinutes?: number;
 
+  @IsOptional()
   @IsInt()
   @Min(1)
-  slaResolutionMinutes!: number;
+  @Max(MAX_SLA_MINUTES)
+  slaResolutionMinutes?: number;
 
   // §15.2/§11: categorias de entrega/mudança/serviço exigem aceite do solicitante antes de
   // ENCERRADA — ver RequestsService.close.

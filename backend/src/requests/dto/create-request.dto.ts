@@ -13,7 +13,7 @@ export class CreateRequestDto {
   @IsUUID()
   beneficiaryId?: string;
 
-  // Para SUP-COMPRA o título é gerado no servidor. Nas demais categorias continua obrigatório.
+  // Para categorias do tipo compra_material o título é gerado no servidor. Nas demais categorias continua obrigatório.
   @IsOptional()
   @IsString()
   @MinLength(10)

@@ -64,6 +64,7 @@ const PERMISSIONS: Array<{ resource: string; action: string; description: string
   { resource: 'request_category', action: 'create', description: 'Criar categorias e versões do catálogo de requisições' },
   { resource: 'request_category', action: 'read', description: 'Visualizar catálogo de requisições' },
   { resource: 'request_category', action: 'update', description: 'Editar categorias/versões do catálogo' },
+  { resource: 'request_category', action: 'publish', description: 'Publicar versões do catálogo de requisições' },
   { resource: 'request', action: 'create', description: 'Abrir requisições' },
   { resource: 'request', action: 'read', description: 'Visualizar requisições' },
   { resource: 'request', action: 'update', description: 'Alterar status/dados de requisições (triagem, execução)' },

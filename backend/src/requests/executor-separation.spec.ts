@@ -78,25 +78,17 @@ describe('legacy executor separation from BPM', () => {
   // verificavam deixaram de existir junto do resto do módulo BPM (98dfce5) — o schema não tem
   // mais o campo. O que resta de válido aqui é a mecânica de "categoria sem versão" e "latest
   // version", sem o filtro morto.
-  it('rejects a category with no version through the legacy category detail', async () => {
+  it('rejects an unknown category through the category detail', async () => {
     const prisma: any = {
       requestCategory: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'empty-category', versions: [] }),
+        findUnique: vi.fn().mockResolvedValue(null),
       },
     };
     const service = new RequestCategoriesService(prisma);
-    await expect(service.findOne('empty-category')).rejects.toBeInstanceOf(NotFoundException);
-    expect(prisma.requestCategory.findUnique).toHaveBeenCalledWith({
-      where: { id: 'empty-category' },
-      include: {
-        versions: {
-          orderBy: { version: 'desc' },
-        },
-      },
-    });
+    await expect(service.findOne('missing-category')).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('catalogs a category on its latest version only', async () => {
+  it('catalogs a category on its latest published version only', async () => {
     const prisma: any = {
       requestCategory: {
         findMany: vi.fn().mockResolvedValue([
@@ -112,9 +104,10 @@ describe('legacy executor separation from BPM', () => {
     const result = await service.findAllCatalog('sector-1');
     expect(result[0]).toMatchObject({ currentVersion: { id: 'v1' } });
     expect(prisma.requestCategory.findMany).toHaveBeenCalledWith({
-      where: { active: true, sectorId: 'sector-1', versions: { some: {} } },
+      where: { active: true, sectorId: 'sector-1', versions: { some: { status: 'publicada' } } },
       include: {
         versions: {
+          where: { status: 'publicada' },
           orderBy: { version: 'desc' },
           take: 1,
         },
