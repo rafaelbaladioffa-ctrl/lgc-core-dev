@@ -6,6 +6,16 @@ export const fmtDateTime = (iso?: string | Date | null) =>
 
 export const fmtQty = (v: string | number, max = 6) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: max });
 
+/**
+ * Custo em reais. Vem do backend como string decimal e é omitido por completo para quem não tem
+ * `material:read_cost`, então ausente, nulo ou não numérico vira travessão — nunca R$ 0,00, que
+ * seria lido como "de graça".
+ */
+export const fmtBRL = (v?: string | number | null) =>
+  v === null || v === undefined || v === '' || !Number.isFinite(Number(v))
+    ? '—'
+    : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
 /** Aceita "1,5", "1.5" e "1.234,5"; vazio ou inválido vira null (nunca zero). */
 export function parseQty(text: string): number | null {
   let t = text.trim();

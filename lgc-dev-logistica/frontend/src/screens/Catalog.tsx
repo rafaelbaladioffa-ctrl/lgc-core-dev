@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { call } from '../lib/api';
-import { fmtDateTime, fmtQty } from '../lib/format';
+import { fmtBRL, fmtDateTime, fmtQty } from '../lib/format';
 import { materialsQuery } from '../lib/listing';
 import { MaterialForm, emptyMaterial, valuesFromMaterial } from './MaterialForm';
 import { DataTable, Pager, useDebounced, useLoad, yesNo, type Column } from '../ui';
@@ -11,6 +11,8 @@ interface Material {
   lotControlled: boolean; expiryControlled: boolean; serialControlled: boolean; assetTagged: boolean; requiresCa: boolean; requiresCalibration: boolean;
   hasSizeGrid: boolean; returnable: boolean; repairable: boolean; disposable: boolean; exitMethod: string; criticality: string; riskClass?: string | null;
   storageCondition?: string | null; manufacturer?: string | null; brand?: string | null; model?: string | null; leadTimeDays?: number | null;
+  // Só chegam para quem tem `material:read_cost`; o backend remove os campos dos demais.
+  averageCost?: string | null; lastCost?: string | null;
 }
 interface Page<T> { total: number; page: number; pageSize: number; items: T[] }
 interface Availability { physical: string; reserved: string; blocked: string; available: string; stock_unit: string }
@@ -22,7 +24,7 @@ const STATUS_LABEL: Record<string, string> = { ATIVO: 'Ativo', INATIVO: 'Inativo
 
 const flags = (m: Material) => [m.lotControlled && 'Lote', m.expiryControlled && 'Validade', m.serialControlled && 'Série', m.assetTagged && 'Patrimônio', m.requiresCa && 'CA', m.requiresCalibration && 'Calibração', m.hasSizeGrid && 'Grade', m.returnable && 'Retornável'].filter(Boolean) as string[];
 
-export function Catalog({ warehouseId, canWrite = false }: { warehouseId?: string; canWrite?: boolean }) {
+export function Catalog({ warehouseId, canWrite = false, canReadCost = false }: { warehouseId?: string; canWrite?: boolean; canReadCost?: boolean }) {
   const [creating, setCreating] = useState(false);
   const [q, setQ] = useState('');
   const [type, setType] = useState('');
@@ -37,13 +39,15 @@ export function Catalog({ warehouseId, canWrite = false }: { warehouseId?: strin
   }, [dq, type, category, status, page]);
 
   if (creating) return <section><button className="btn ghost" onClick={() => setCreating(false)}>← Catálogo</button><MaterialForm mode="create" initial={emptyMaterial()} onCancel={() => setCreating(false)} onSaved={() => { setCreating(false); reload(); }} /></section>;
-  if (sel) return <MaterialDetail m={sel} warehouseId={warehouseId} canWrite={canWrite} onBack={() => { setSel(null); reload(); }} />;
+  if (sel) return <MaterialDetail m={sel} warehouseId={warehouseId} canWrite={canWrite} canReadCost={canReadCost} onBack={() => { setSel(null); reload(); }} />;
   const cols: Column<Material>[] = [
     { key: 'code', header: 'Código', render: (m) => <strong>{m.code}</strong> },
     { key: 'desc', header: 'Descrição', render: (m) => m.shortDescription },
     { key: 'type', header: 'Tipo', render: (m) => TYPE_LABEL[m.type] ?? m.type },
     { key: 'cat', header: 'Categoria', render: (m) => m.category },
     { key: 'uom', header: 'Un.', render: (m) => m.stockUom.code },
+    // O custo é o mesmo valor que o Axis usa na alçada de aprovação da requisição.
+    ...(canReadCost ? [{ key: 'cost', header: 'Último custo', render: (m: Material) => fmtBRL(m.lastCost) }] : []),
     { key: 'ctl', header: 'Controles', render: (m) => flags(m).map((f) => <span key={f} className="pill">{f}</span>) },
     { key: 'st', header: 'Situação', render: (m) => <span className={`pill ${m.status === 'ATIVO' ? 'ok' : 'warn'}`}>{STATUS_LABEL[m.status] ?? m.status}</span> },
   ];
@@ -66,7 +70,7 @@ export function Catalog({ warehouseId, canWrite = false }: { warehouseId?: strin
   );
 }
 
-function MaterialDetail({ m: initial, warehouseId, canWrite, onBack }: { m: Material; warehouseId?: string; canWrite: boolean; onBack: () => void }) {
+function MaterialDetail({ m: initial, warehouseId, canWrite, canReadCost, onBack }: { m: Material; warehouseId?: string; canWrite: boolean; canReadCost: boolean; onBack: () => void }) {
   const [m, setM] = useState(initial);
   const [editing, setEditing] = useState(false);
   const [vTick, setVTick] = useState(0);
@@ -110,6 +114,7 @@ function MaterialDetail({ m: initial, warehouseId, canWrite, onBack }: { m: Mate
           {kv('Armazenagem', m.storageCondition)}{kv('Classe de risco', m.riskClass)}
           {kv('Lote', yesNo(m.lotControlled))}{kv('Validade', yesNo(m.expiryControlled))}{kv('Número de série', yesNo(m.serialControlled))}{kv('Patrimônio', yesNo(m.assetTagged))}
           {kv('Exige CA', yesNo(m.requiresCa))}{kv('Exige calibração', yesNo(m.requiresCalibration))}{kv('Retornável', yesNo(m.returnable))}{kv('Descartável', yesNo(m.disposable))}
+          {canReadCost && <>{kv('Último custo', fmtBRL(m.lastCost))}{kv('Custo médio', fmtBRL(m.averageCost))}</>}
         </dl>
       </div>
       <div className="card">

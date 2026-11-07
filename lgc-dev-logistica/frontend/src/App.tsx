@@ -230,7 +230,7 @@ export function App() {
         <main className="page">
           <ErrorBoundary resetKey={tab}>
           {msg && <p className="notice" role="status">{msg}</p>}
-          {tab === 'cat' && <Catalog warehouseId={settings.warehouseId} canWrite={perms?.includes('material:write') ?? false} />}
+          {tab === 'cat' && <Catalog warehouseId={settings.warehouseId} canWrite={perms?.includes('material:write') ?? false} canReadCost={perms?.includes('material:read_cost') ?? false} />}
           {tab === 'est' && settings.warehouseId && <Stock warehouseId={settings.warehouseId} canAdjust={perms?.includes('stock:adjust') ?? false} />}
           {tab === 'rec' && <Receiving warehouseId={settings.warehouseId} />}
           {tab === 'trf' && <Transfers warehouseId={settings.warehouseId} />}

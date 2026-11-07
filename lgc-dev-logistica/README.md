@@ -90,7 +90,7 @@ O frontend ganhou, além do PWA operacional, telas de gestão, cada uma liberada
 | Tela | Arquivo | Permissão |
 |---|---|---|
 | Painel | `Dashboard.tsx` | `dashboard:read` |
-| Catálogo e cadastro de material | `Catalog.tsx`, `MaterialForm.tsx` | `material:read` |
+| Catálogo e cadastro de material | `Catalog.tsx`, `MaterialForm.tsx` | `material:read`; o custo só aparece com `material:read_cost` |
 | Estoque e ajustes | `Stock.tsx`, `StockAdjust.tsx` | `stock:read` |
 | Recebimento | `Receiving.tsx` | `receipt:execute` |
 | Transferências | `Transfers.tsx`, `TransferReceive.tsx` | `transfer:request` |
