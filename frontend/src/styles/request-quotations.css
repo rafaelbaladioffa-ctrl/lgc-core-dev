@@ -1,11 +1,15 @@
-/* Detalhe da requisição: cotações de fornecedores (lista legível + formulário de registro). */
+/* Detalhe da requisição: cotações por item (mapa comparativo, cartões e formulário de registro). */
+.quotation-heading { margin-bottom: var(--space-2); color: var(--foreground-muted); font-size: var(--text-xs); }
+.quotation-subtitle { margin: 0 0 var(--space-2); font-size: var(--text-sm); }
+.quotation-empty { margin: 0; color: var(--foreground-muted); font-size: var(--text-xs); }
+.quotation-hint { color: var(--foreground-muted); font-size: var(--text-xs); }
 .quotations { display: flex; flex-direction: column; gap: var(--space-3); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
 .quotation-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .quotation-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); }
-.quotation-card--selected { border: 2px solid var(--success); background: color-mix(in srgb, var(--success) 8%, var(--surface)); }
 .quotation-card__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .quotation-card__title { font-weight: 600; flex: 1; min-width: 160px; }
-.quotation-badge { padding: 2px 10px; color: var(--success); background: var(--surface); border: 1px solid var(--success); border-radius: 999px; font-size: var(--text-xs); font-weight: 600; }
+.quotation-badge { display: inline-block; padding: 2px 10px; color: var(--success); background: var(--surface); border: 1px solid var(--success); border-radius: 999px; font-size: var(--text-xs); font-weight: 600; }
+.quotation-badge--best { color: var(--info); border-color: var(--info); }
 .quotation-card__grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2) var(--space-3); margin: 0; }
 .quotation-card__grid dt { color: var(--foreground-muted); font-size: var(--text-xs); }
 .quotation-card__grid dd { margin: 0; overflow-wrap: anywhere; }
@@ -19,7 +23,26 @@
 .quotation-form h4 { margin: 0; }
 .quotation-form__grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .quotation-form__full { grid-column: 1 / -1; }
+.quotation-form__items input[type="text"], .quotation-form__items input:not([type]) { width: 120px; }
+.quotation-submit { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
 .quotation-error { margin: 0; color: var(--danger); font-size: var(--text-xs); }
+
+/* Mapa comparativo: uma linha por item, uma coluna por cotação; rola na horizontal em tela estreita. */
+.quotation-map__scroll { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.quotation-map { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.quotation-map th, .quotation-map td { padding: var(--space-2) var(--space-3); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border-subtle); }
+.quotation-map thead th { color: var(--foreground-muted); background: var(--surface-secondary); font-weight: 600; white-space: nowrap; }
+.quotation-map tbody th { min-width: 160px; font-weight: 600; }
+.quotation-map tfoot th, .quotation-map tfoot td { font-weight: 600; background: var(--surface-secondary); border-bottom: 0; }
+.quotation-map__sub { display: block; color: var(--foreground-muted); font-weight: 400; }
+.quotation-map__price { display: block; font-weight: 600; }
+.quotation-map__cell { min-width: 150px; }
+.quotation-map__cell--empty { color: var(--foreground-muted); }
+.quotation-map__cell--best { background: color-mix(in srgb, var(--info) 8%, var(--surface)); }
+.quotation-map__cell--winner { outline: 2px solid var(--success); outline-offset: -2px; background: color-mix(in srgb, var(--success) 10%, var(--surface)); }
+.quotation-map__choice { display: flex; gap: var(--space-2); align-items: flex-start; cursor: pointer; }
+.quotation-decision { display: flex; flex-direction: column; gap: var(--space-2); }
+.quotation-decision__total { margin: 0; font-size: var(--text-sm); }
 @media (max-width: 768px) {
   .quotation-card__grid, .quotation-form__grid { grid-template-columns: 1fr; }
 }

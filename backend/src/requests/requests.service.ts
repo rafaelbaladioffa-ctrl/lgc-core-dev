@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { validateAttachment, generateSafeFilename, MAX_REQUEST_TOTAL_BYTES } from './attachment-security.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../integration/outbox.service.js';
@@ -14,11 +14,10 @@ import { TriageRequestDto } from './dto/triage-request.dto.js';
 import { AssignRequestDto } from './dto/assign-request.dto.js';
 import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
 import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
-import { PurchaseQuotationSelectionDto } from './dto/purchase-quotation-selection.dto.js';
+import { PurchaseDecisionDto } from './dto/purchase-decision.dto.js';
 import { ApproveRequestDto, RejectRequestDto } from './dto/decision.dto.js';
 import { RequestInformationDto, ReturnForAdjustmentDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
-import { ManagementLevel, RequestApprovalCompletionRule, RequestStatus } from '@prisma/client';
-import type { Prisma } from '@prisma/client';
+import { ManagementLevel, Prisma, RequestApprovalCompletionRule, RequestStatus } from '@prisma/client';
 
 type TxClient = Prisma.TransactionClient;
 
@@ -66,7 +65,7 @@ const TERMINAL_STATUSES: RequestStatus[] = ['concluida', 'encerrada', 'cancelada
 const REQUESTER_EDITABLE_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste'];
 /** Chaves de `formData` gravadas só pelo servidor (análise de estoque e cotações do Suprimentos).
  * O cliente nunca as envia (L02) e o reenvio de uma compra devolvida as descarta (ciclo novo). */
-const PROCUREMENT_SERVER_KEYS: readonly string[] = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId'];
+const PROCUREMENT_SERVER_KEYS: readonly string[] = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId', 'procurementSelection'];
 /** Prefixo do comentário público gravado na devolução para ajuste; a tela do solicitante o usa. */
 export const RETURN_FOR_ADJUSTMENT_PREFIX = 'Devolvida para ajuste: ';
 
@@ -421,60 +420,235 @@ export class RequestsService {
     return updated;
   }
 
-  async recordPurchaseQuotation(id: string, actorId: string, dto: PurchaseQuotationDto) {
+  /** Contexto comum dos comandos de cotação do Suprimentos: compra, `em_atendimento`, análise feita. */
+  private async purchaseQuotationContext(id: string, actorId: string, actorRoles: string[], action: string) {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
-    const isPurchaseRequest = isPurchase(categoryVersion.category);
-    if (!isPurchaseRequest) throw new BadRequestException('Esta requisição não é de compras.');
-    if (request.status !== 'em_atendimento') throw new BadRequestException('A cotação só pode ser registrada durante o atendimento do Suprimentos.');
+    if (!categoryVersion.category || !isPurchase(categoryVersion.category)) throw new BadRequestException('Esta requisição não é de compras.');
+    await this.assertPurchaseOperator(request, actorRoles);
+    if (request.status !== 'em_atendimento') throw new BadRequestException(`${action} só é possível durante o atendimento do Suprimentos.`);
     const formData = (request.formData as Record<string, unknown> | null) ?? {};
     if (!formData.procurementAnalysis) throw new BadRequestException('Registre a análise de estoque antes da cotação.');
-    const totalValue = Number(dto.totalValue);
-    if (!Number.isFinite(totalValue) || totalValue <= 0) throw new BadRequestException('Informe um valor total de cotação válido.');
-    if (!request.costCenterId) throw new BadRequestException('A compra não possui centro de custo.');
-    const costCenter = await this.prisma.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } });
-    const responsibleCollaboratorId = costCenter?.responsibleCollaboratorId;
-    if (!responsibleCollaboratorId) throw new BadRequestException('O centro de custo não possui responsável pela aprovação final.');
-    const legacyQuotation = formData.procurementQuotation && typeof formData.procurementQuotation === 'object' ? formData.procurementQuotation as Record<string, unknown> : null;
-    const existingQuotations = Array.isArray(formData.procurementQuotations) ? formData.procurementQuotations as Array<Record<string, unknown>> : legacyQuotation ? [{ ...legacyQuotation, quotationId: 'legacy-1' }] : [];
-    const quotationId = dto.quotationId?.trim() || `cotacao-${Date.now()}`;
-    const newQuotation = { quotationId, supplier: dto.supplier.trim(), quoteNumber: dto.quoteNumber?.trim() ?? '', totalValue: dto.totalValue, notes: dto.notes?.trim() ?? '', attachmentIds: dto.attachmentIds ?? [], selected: dto.selected ?? true, recordedBy: actorId, recordedAt: new Date().toISOString() };
-    const quotations = existingQuotations.some((quotation) => quotation.quotationId === quotationId)
-      ? existingQuotations.map((quotation) => quotation.quotationId === quotationId ? { ...quotation, ...newQuotation } : { ...quotation, selected: dto.selected ? false : quotation.selected })
-      : [...existingQuotations.map((quotation) => dto.selected === false ? quotation : { ...quotation, selected: false }), newQuotation];
-    const updatedFormData = { ...formData, procurementQuotations: quotations, procurementQuotation: newQuotation };
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const existingCostCenterApproval = await tx.requestApproval.findFirst({ where: { requestId: id, approvalSource: 'centro_custo', status: { not: 'devolvido' } }, select: { status: true } });
-      const nextStatus = existingCostCenterApproval?.status === 'aprovado' ? request.status : 'aguardando_aprovacao';
-      const saved = await tx.request.update({ where: { id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue, estimatedValue: dto.totalValue, assigneeId: actorId, status: nextStatus } });
-      if (!existingCostCenterApproval) {
-        await tx.requestApproval.create({ data: { requestId: id, stepOrder: 1, approverId: responsibleCollaboratorId, completionRule: 'todos', approvalSource: 'centro_custo' } });
-      }
-      await this.audit(tx, { aggregateId: id, event: 'request.purchase_quotation_recorded', actorId, after: { supplier: dto.supplier, totalValue: dto.totalValue, status: nextStatus } });
-      return saved;
-    });
-    return updated;
+    return { request, formData };
   }
 
-  async selectPurchaseQuotation(id: string, actorId: string, dto: PurchaseQuotationSelectionDto) {
-    const request = await this.getOrThrow(id);
-    const costCenter = request.costCenterId
-      ? await this.prisma.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } })
-      : null;
-    if (!costCenter?.responsibleCollaboratorId || costCenter.responsibleCollaboratorId !== actorId) {
-      throw new ForbiddenException('Somente o responsável pelo centro de custo pode escolher a cotação.');
+  /** Itens da requisição (`purchaseItems`) com a quantidade pedida. */
+  private purchaseItemsOf(formData: Record<string, unknown>): Array<Record<string, unknown>> {
+    return Array.isArray(formData.purchaseItems) ? (formData.purchaseItems as Array<Record<string, unknown>>) : [];
+  }
+
+  /** `materialId` dos itens que precisam de cotação (a análise não marcou `needsQuotation=false`). */
+  private itemsNeedingQuotation(formData: Record<string, unknown>): string[] {
+    const analysis = formData.procurementAnalysis as { items?: Array<{ materialId: string; needsQuotation?: boolean }> } | undefined;
+    const analysisItems = Array.isArray(analysis?.items) ? analysis.items : [];
+    return this.purchaseItemsOf(formData)
+      .map((item) => String(item.materialId))
+      .filter((materialId) => analysisItems.find((row) => row.materialId === materialId)?.needsQuotation !== false);
+  }
+
+  /** Cotações gravadas (formato antigo, sem `items`, incluído só para exibição). */
+  private quotationsOf(formData: Record<string, unknown>): Array<Record<string, unknown>> {
+    if (Array.isArray(formData.procurementQuotations)) return formData.procurementQuotations as Array<Record<string, unknown>>;
+    const legacy = formData.procurementQuotation && typeof formData.procurementQuotation === 'object' ? (formData.procurementQuotation as Record<string, unknown>) : null;
+    return legacy ? [{ ...legacy, quotationId: 'legacy-1' }] : [];
+  }
+
+  private quotationItems(quotation: Record<string, unknown>): Array<{ materialId: string; unitPrice: string }> | null {
+    return Array.isArray(quotation.items) ? (quotation.items as Array<{ materialId: string; unitPrice: string }>) : null;
+  }
+
+  /** Cotação por item: o Suprimentos registra (ou edita) quantas cotações quiser enquanto a compra
+   * está em `em_atendimento`. Não cria aprovação nem muda o status — isso é `submitPurchaseForApproval`. */
+  async recordPurchaseQuotation(id: string, actorId: string, dto: PurchaseQuotationDto, actorRoles: string[] = []) {
+    const { request, formData } = await this.purchaseQuotationContext(id, actorId, actorRoles, 'A cotação');
+    const supplier = dto.supplier?.trim();
+    if (!supplier) throw new BadRequestException('Informe o fornecedor.');
+    if (!Array.isArray(dto.items) || dto.items.length === 0) throw new BadRequestException('Informe ao menos um item cotado.');
+
+    const purchaseItems = this.purchaseItemsOf(formData);
+    const needing = new Set(this.itemsNeedingQuotation(formData));
+    const seen = new Set<string>();
+    let total = new Prisma.Decimal(0);
+    const items: Array<{ materialId: string; unitPrice: string }> = [];
+    for (const row of dto.items) {
+      const purchaseItem = purchaseItems.find((item) => item.materialId === row.materialId);
+      if (!purchaseItem) throw new BadRequestException('A cotação tem um item que não pertence a esta requisição.');
+      if (!needing.has(row.materialId)) throw new BadRequestException('O item informado não precisa de cotação (a análise de estoque o marcou como atendido).');
+      if (seen.has(row.materialId)) throw new BadRequestException('O mesmo item foi informado mais de uma vez na cotação.');
+      seen.add(row.materialId);
+      let unitPrice: Prisma.Decimal;
+      try {
+        unitPrice = new Prisma.Decimal(row.unitPrice);
+      } catch {
+        throw new BadRequestException('Preço unitário inválido.');
+      }
+      if (!unitPrice.isFinite() || unitPrice.lte(0) || unitPrice.decimalPlaces() > 4) throw new BadRequestException('O preço unitário deve ser maior que zero, com até 4 casas decimais.');
+      total = total.plus(unitPrice.times(new Prisma.Decimal(String(purchaseItem.quantity))));
+      items.push({ materialId: row.materialId, unitPrice: unitPrice.toFixed(4) });
     }
+
+    const attachmentIds = [...new Set(dto.attachmentIds ?? [])];
+    if (attachmentIds.length > 0) {
+      const owned = await this.prisma.requestAttachment.findMany({ where: { id: { in: attachmentIds }, requestId: id }, select: { id: true } });
+      if (owned.length !== attachmentIds.length) throw new BadRequestException('Algum anexo informado não pertence a esta requisição.');
+    }
+
+    const existing = this.quotationsOf(formData);
+    const editing = dto.quotationId ? existing.find((quotation) => quotation.quotationId === dto.quotationId) : undefined;
+    if (dto.quotationId && !editing) throw new BadRequestException('Cotação não encontrada nesta requisição.');
+    if (editing && !this.quotationItems(editing)) throw new BadRequestException('Esta cotação está no formato antigo e não pode ser editada. Exclua e registre novamente.');
+
+    const now = new Date().toISOString();
+    const quotationId = editing ? String(editing.quotationId) : randomUUID();
+    const quotation: Record<string, unknown> = {
+      quotationId,
+      supplier,
+      quoteNumber: dto.quoteNumber?.trim() ?? '',
+      notes: dto.notes?.trim() ?? '',
+      attachmentIds,
+      recordedAt: editing ? editing.recordedAt : now,
+      recordedBy: editing ? editing.recordedBy : actorId,
+      ...(editing ? { updatedAt: now, updatedBy: actorId } : {}),
+      items,
+      totalValue: total.toFixed(2),
+    };
+    const quotations = editing ? existing.map((row) => (row.quotationId === quotationId ? quotation : row)) : [...existing, quotation];
+    const { procurementQuotation: legacyQuotation, ...rest } = formData;
+    void legacyQuotation;
+    const updatedFormData = { ...rest, procurementQuotations: quotations };
+    return this.prisma.$transaction(async (tx) => {
+      const saved = await tx.request.update({ where: { id: request.id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue } });
+      await this.audit(tx, { aggregateId: id, event: 'request.purchase_quotation_recorded', actorId, after: { quotationId, supplier, totalValue: quotation.totalValue, itemCount: items.length, edited: !!editing } });
+      return saved;
+    });
+  }
+
+  async deletePurchaseQuotation(id: string, actorId: string, quotationId: string, actorRoles: string[] = []) {
+    const { request, formData } = await this.purchaseQuotationContext(id, actorId, actorRoles, 'A exclusão de cotação');
+    const existing = this.quotationsOf(formData);
+    const target = existing.find((quotation) => quotation.quotationId === quotationId);
+    if (!target) throw new NotFoundException('Cotação não encontrada nesta requisição.');
+    const { procurementQuotation: legacyQuotation, ...rest } = formData;
+    void legacyQuotation;
+    const updatedFormData = { ...rest, procurementQuotations: existing.filter((quotation) => quotation.quotationId !== quotationId) };
+    return this.prisma.$transaction(async (tx) => {
+      const saved = await tx.request.update({ where: { id: request.id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue } });
+      await this.audit(tx, { aggregateId: id, event: 'request.purchase_quotation_deleted', actorId, before: { quotationId, supplier: target.supplier } });
+      return saved;
+    });
+  }
+
+  /** "Enviar para aprovação": só agora nasce a aprovação do responsável do centro de custo. A cada
+   * ciclo (envio, devolução ao Suprimentos, novo envio) entra uma linha nova; as antigas ficam `devolvido`. */
+  async submitPurchaseForApproval(id: string, actorId: string, actorRoles: string[] = []) {
+    const { request, formData } = await this.purchaseQuotationContext(id, actorId, actorRoles, 'O envio para aprovação');
+    const quotations = this.quotationsOf(formData).filter((quotation) => this.quotationItems(quotation));
+    const uncovered = this.itemsNeedingQuotation(formData).filter(
+      (materialId) => !quotations.some((quotation) => this.quotationItems(quotation)!.some((row) => row.materialId === materialId)),
+    );
+    if (uncovered.length > 0) {
+      const names = uncovered.map((materialId) => String((this.purchaseItemsOf(formData).find((item) => item.materialId === materialId)?.item as string | undefined) ?? materialId));
+      throw new BadRequestException(`Falta ao menos uma cotação para: ${names.join(', ')}.`);
+    }
+    if (!request.costCenterId) throw new BadRequestException('A compra não possui centro de custo.');
+    const costCenter = await this.prisma.costCenter.findUnique({ where: { id: request.costCenterId }, select: { responsibleCollaboratorId: true } });
+    const responsibleId = costCenter?.responsibleCollaboratorId;
+    if (!responsibleId) throw new BadRequestException('O centro de custo não possui responsável pela aprovação final. Cadastre o responsável antes de enviar.');
+    if (responsibleId === request.requesterId || responsibleId === request.beneficiaryId) {
+      throw new BadRequestException('O responsável pelo centro de custo é o próprio solicitante e não pode aprovar esta compra. Ajuste o responsável do centro de custo.');
+    }
+    return this.prisma.$transaction(async (tx) => {
+      await tx.requestApproval.create({ data: { requestId: id, stepOrder: 1, approverId: responsibleId, completionRule: 'todos', approvalSource: 'centro_custo' } });
+      const updated = await tx.request.update({ where: { id }, data: { status: 'aguardando_aprovacao' } });
+      await this.audit(tx, { aggregateId: id, event: 'request.purchase_submitted_for_approval', actorId, before: { status: request.status }, after: { status: 'aguardando_aprovacao', approverId: responsibleId } });
+      await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      return updated;
+    });
+  }
+
+  /** Decisão do responsável do centro de custo (ou delegado): aprova escolhendo o vencedor de cada
+   * item, reprova, ou devolve ao Suprimentos para cotar mais. */
+  async decidePurchase(id: string, approverId: string, dto: PurchaseDecisionDto) {
+    const request = await this.getPendingApproval(id);
+    this.assertNotRequester(request, approverId);
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    if (!categoryVersion.category || !isPurchase(categoryVersion.category)) throw new BadRequestException('Esta requisição não é de compras.');
+    const stepRows = this.activeStepRows(request.approvals);
+    const { row: myRow, onBehalfOf } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
+    if (myRow.approvalSource !== 'centro_custo') throw new BadRequestException('A decisão de compra cabe ao responsável do centro de custo.');
+    const reason = dto.reason?.trim() ?? '';
     const formData = (request.formData as Record<string, unknown> | null) ?? {};
-    const quotations = Array.isArray(formData.procurementQuotations) ? formData.procurementQuotations as Array<Record<string, unknown>> : [];
-    if (quotations.length === 0) throw new BadRequestException('Não existem cotações para selecionar.');
-    if (!quotations.some((quotation) => quotation.quotationId === dto.quotationId)) throw new BadRequestException('Cotação não encontrada nesta requisição.');
-    const updatedQuotations = quotations.map((quotation) => ({ ...quotation, selected: quotation.quotationId === dto.quotationId }));
-    const selected = quotations.find((quotation) => quotation.quotationId === dto.quotationId);
-    const updatedFormData = { ...formData, procurementQuotations: updatedQuotations, procurementQuotation: selected, selectedQuotationId: dto.quotationId };
-    const updated = await this.prisma.request.update({ where: { id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue } });
-    await this.prisma.auditEvent.create({ data: { aggregateType: 'request', aggregateId: id, event: 'request.purchase_quotation_selected', actorId, afterJson: { quotationId: dto.quotationId } } });
-    return updated;
+    const audited = { stepOrder: myRow.stepOrder, onBehalfOf: onBehalfOf ? myRow.approverId : undefined };
+
+    if (dto.decision === 'reprovar') {
+      if (reason.length < 5) throw new BadRequestException('Informe o motivo da reprovação (mínimo de 5 caracteres).');
+      return this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        await tx.requestApproval.update({ where: { id: myRow.id }, data: { status: 'reprovado', decidedAt: now, comment: reason } });
+        await tx.requestApproval.updateMany({ where: { requestId: id, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
+        const updated = await tx.request.update({ where: { id }, data: { status: 'reprovada' } });
+        await tx.requestComment.create({ data: { requestId: id, authorId: approverId, visibility: 'publico', body: `Compra reprovada: ${reason}` } });
+        await this.audit(tx, { aggregateId: id, event: 'request.rejected', actorId: approverId, after: { status: 'reprovada', comment: reason, ...audited } });
+        await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+        return updated;
+      });
+    }
+
+    if (dto.decision === 'devolver_suprimentos') {
+      if (!reason) throw new BadRequestException('Informe o motivo da devolução ao Suprimentos.');
+      return this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        await tx.requestApproval.update({ where: { id: myRow.id }, data: { status: 'devolvido', decidedAt: now, comment: reason } });
+        await tx.requestApproval.updateMany({ where: { requestId: id, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
+        const updated = await tx.request.update({ where: { id }, data: { status: 'em_atendimento' } });
+        await tx.requestComment.create({ data: { requestId: id, authorId: approverId, visibility: 'publico', body: `Devolvida ao Suprimentos: ${reason}` } });
+        await this.audit(tx, { aggregateId: id, event: 'request.purchase_returned_to_procurement', actorId: approverId, before: { status: request.status }, after: { status: 'em_atendimento', reason, ...audited } });
+        await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+        return updated;
+      });
+    }
+
+    // aprovar
+    if (!formData.procurementAnalysis) throw new BadRequestException('A análise de estoque do Suprimentos precisa ser registrada antes da aprovação.');
+    const needing = this.itemsNeedingQuotation(formData);
+    const selections = dto.selections ?? [];
+    const chosenIds = selections.map((row) => row.materialId);
+    if (new Set(chosenIds).size !== chosenIds.length) throw new BadRequestException('O mesmo item foi escolhido mais de uma vez.');
+    if (chosenIds.length !== needing.length || needing.some((materialId) => !chosenIds.includes(materialId))) {
+      throw new BadRequestException('Escolha o fornecedor vencedor de todos os itens que precisam de cotação.');
+    }
+    const quotations = this.quotationsOf(formData);
+    const purchaseItems = this.purchaseItemsOf(formData);
+    let grandTotal = new Prisma.Decimal(0);
+    const procurementSelection = selections.map((row) => {
+      const quotation = quotations.find((q) => q.quotationId === row.quotationId);
+      const quoted = quotation ? this.quotationItems(quotation)?.find((item) => item.materialId === row.materialId) : undefined;
+      if (!quotation || !quoted) throw new BadRequestException('A cotação escolhida não existe ou não cobre o item selecionado.');
+      const quantity = new Prisma.Decimal(String((purchaseItems.find((item) => item.materialId === row.materialId)?.quantity as string | number | undefined) ?? 0));
+      const total = new Prisma.Decimal(quoted.unitPrice).times(quantity).toDecimalPlaces(2);
+      grandTotal = grandTotal.plus(total);
+      return { materialId: row.materialId, quotationId: row.quotationId, supplier: String(quotation.supplier), unitPrice: quoted.unitPrice, quantity: quantity.toNumber(), total: total.toFixed(2) };
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      const now = new Date();
+      await tx.requestApproval.update({ where: { id: myRow.id }, data: { status: 'aprovado', decidedAt: now, comment: reason || undefined } });
+      await tx.requestApproval.updateMany({ where: { requestId: id, stepOrder: myRow.stepOrder, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
+      await tx.request.update({
+        where: { id },
+        data: { estimatedValue: grandTotal.toFixed(2), formData: { ...formData, procurementSelection } as unknown as Prisma.InputJsonValue },
+      });
+      if (reason) await tx.requestComment.create({ data: { requestId: id, authorId: approverId, visibility: 'publico', body: reason } });
+      await this.audit(tx, {
+        aggregateId: id,
+        event: 'approval.decided',
+        actorId: approverId,
+        after: { decision: 'aprovado', total: grandTotal.toFixed(2), suppliers: [...new Set(procurementSelection.map((row) => row.supplier))], ...audited },
+      });
+      const version = await tx.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
+      return this.finalizeApproval(tx, id, version, approverId);
+    });
   }
 
   /** §9.1: a etapa ativa pode ter vários aprovadores em paralelo no mesmo stepOrder — `approve`
@@ -482,6 +656,7 @@ export class RequestsService {
    * (todos aprovados / qualquer um / N de M); até lá, fica aguardando os demais do mesmo nó. */
   async approve(id: string, approverId: string, dto: ApproveRequestDto) {
     const request = await this.getPendingApproval(id);
+    await this.assertNotPurchase(request.categoryVersionId);
     // resolveApprovalChain já exclui requester/beneficiary da cadeia; isto cobre o único caso que
     // escapa disso — o responsável do centro de custo (approvalSource 'centro_custo') ser a mesma
     // pessoa que abriu a requisição.
@@ -526,6 +701,7 @@ export class RequestsService {
    * não há "maioria reprova" nesta versão (simplificação documentada no hand-off). */
   async reject(id: string, approverId: string, dto: RejectRequestDto) {
     const request = await this.getPendingApproval(id);
+    await this.assertNotPurchase(request.categoryVersionId);
     this.assertNotRequester(request, approverId);
     const stepRows = this.activeStepRows(request.approvals);
     const { row: myRow } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
@@ -1027,6 +1203,7 @@ export class RequestsService {
       .filter((a) => activeByRequest.get(a.requestId) === a.stepOrder)
       .map((a) => ({
         approvalId: a.id,
+        approvalSource: a.approvalSource,
         requestId: a.requestId,
         code: a.request.code,
         stepOrder: a.stepOrder,
@@ -1245,6 +1422,12 @@ export class RequestsService {
     if (!actorRoles.includes('analista_suprimentos') && !actorRoles.includes('admin')) {
       throw new ForbiddenException('Somente o Suprimentos pode executar esta ação na compra.');
     }
+  }
+
+  /** Compra se decide por `decidePurchase` (escolha do vencedor por item); as rotas genéricas não servem. */
+  private async assertNotPurchase(categoryVersionId: string) {
+    const version = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: categoryVersionId }, include: { category: true } });
+    if (version.category && isPurchase(version.category)) throw new BadRequestException('Use a decisão de compra.');
   }
 
   private async getPendingApproval(id: string) {

@@ -121,6 +121,48 @@ export interface PurchaseAnalysisItem {
   needsQuotation?: boolean;
 }
 
+export interface PurchaseQuotationItem {
+  materialId: string;
+  unitPrice: string;
+}
+
+/** Cotação gravada em formData.procurementQuotations. Cotações do formato antigo não têm `items` (só leitura). */
+export interface PurchaseQuotation {
+  quotationId: string;
+  supplier: string;
+  quoteNumber?: string;
+  notes?: string;
+  attachmentIds?: string[];
+  recordedAt?: string;
+  updatedAt?: string;
+  items?: PurchaseQuotationItem[];
+  totalValue?: string | number;
+}
+
+export interface PurchaseSelectionRow {
+  materialId: string;
+  quotationId: string;
+  supplier: string;
+  unitPrice: string;
+  quantity: number;
+  total: string;
+}
+
+export interface PurchaseQuotationInput {
+  quotationId?: string;
+  supplier: string;
+  quoteNumber?: string;
+  notes?: string;
+  attachmentIds?: string[];
+  items: PurchaseQuotationItem[];
+}
+
+export interface PurchaseDecisionInput {
+  decision: 'aprovar' | 'reprovar' | 'devolver_suprimentos';
+  selections?: Array<{ materialId: string; quotationId: string }>;
+  reason?: string;
+}
+
 export interface CreateRequestInput {
   categoryId: string;
   beneficiaryId?: string;
@@ -141,6 +183,8 @@ export type UpdateRequestInput = Partial<Omit<CreateRequestInput, 'categoryId' |
 
 export interface MyApproval {
   approvalId: string;
+  /** `centro_custo` = aprovação de compra (decidida na tela da requisição). */
+  approvalSource?: string;
   requestId: string;
   code: string;
   stepOrder: number;
@@ -208,8 +252,10 @@ export const requestsApi = {
   cancel: (id: string, reason: string) => api.post<AxisRequest>(`/requests/${id}/cancel`, { reason }).then((r) => r.data),
   comment: (id: string, body: string, visibility?: 'publico' | 'interno') => api.post(`/requests/${id}/comments`, { body, visibility }).then((r) => r.data),
   purchaseAnalysis: (id: string, items: PurchaseAnalysisItem[], notes?: string) => api.post(`/requests/${id}/purchase-analysis`, { items, notes }).then((r) => r.data),
-  purchaseQuotation: (id: string, input: { quotationId?: string; supplier: string; quoteNumber?: string; totalValue: string; notes?: string; selected?: boolean; attachmentIds?: string[] }) => api.post(`/requests/${id}/purchase-quotation`, input).then((r) => r.data),
-  selectPurchaseQuotation: (id: string, quotationId: string) => api.post(`/requests/${id}/purchase-quotation-selection`, { quotationId }).then((r) => r.data),
+  purchaseQuotation: (id: string, input: PurchaseQuotationInput) => api.post(`/requests/${id}/purchase-quotation`, input).then((r) => r.data),
+  deletePurchaseQuotation: (id: string, quotationId: string) => api.delete(`/requests/${id}/purchase-quotation/${quotationId}`).then((r) => r.data),
+  submitPurchaseForApproval: (id: string) => api.post(`/requests/${id}/purchase-quotation/submit`).then((r) => r.data),
+  decidePurchase: (id: string, input: PurchaseDecisionInput) => api.post<AxisRequest>(`/requests/${id}/purchase-decision`, input).then((r) => r.data),
   downloadAttachment: (id: string, attachmentId: string) => api.get<Blob>(`/requests/${id}/attachments/${attachmentId}`, { responseType: 'blob' }).then((r) => r.data),
   attachment: (id: string, input: { filename: string; contentBase64: string }) => api.post<{ id: string }>(`/requests/${id}/attachments`, input).then((r) => r.data),
 };

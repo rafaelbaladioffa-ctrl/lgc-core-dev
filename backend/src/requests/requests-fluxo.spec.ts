@@ -283,6 +283,7 @@ describe('compra — ciclo novo no reenvio e formData de servidor', () => {
     procurementQuotations: [{ quotationId: 'c1' }],
     procurementQuotation: { quotationId: 'c1' },
     selectedQuotationId: 'c1',
+    procurementSelection: [{ materialId: 'm1' }],
   };
   const items = [{ materialId: 'm1', quantity: 2, unitPrice: 10 }];
 

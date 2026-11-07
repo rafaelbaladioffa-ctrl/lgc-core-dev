@@ -4,8 +4,9 @@ import { AppLayout } from '../components/layout/AppLayout';
 import { StatusBadge } from '../components/DataTable';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { PurchaseQuotations } from '../components/PurchaseQuotations';
 import { useAuth } from '../context/AuthContext';
-import { requestsApi, type PurchaseAnalysisItem, type RequestAttachmentMeta, type RequestDetail, type RequestStatus } from '../api/requests';
+import { requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
 import { formatBRL } from '../utils/format';
 import { translateApiError } from '../utils/apiError';
@@ -17,12 +18,6 @@ import { translateApiError } from '../utils/apiError';
 const RETURN_REASON_PREFIX = 'Devolvida para ajuste: ';
 
 const REQUESTER_TURN_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante'];
-
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
 
 function nextResponsibleLabel(status: RequestStatus, approvals: RequestDetail['approvals']): string {
   if (status === 'aguardando_aprovacao') {
@@ -82,13 +77,6 @@ export function RequestDetailPage() {
   const [analysisRows, setAnalysisRows] = useState<PurchaseAnalysisItem[]>([]);
   const [analysisNotes, setAnalysisNotes] = useState('');
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [supplier, setSupplier] = useState('');
-  const [quoteNumber, setQuoteNumber] = useState('');
-  const [quoteTotal, setQuoteTotal] = useState('');
-  const [quoteNotes, setQuoteNotes] = useState('');
-  const [quoteError, setQuoteError] = useState<string | null>(null);
-  const [quoteId, setQuoteId] = useState('');
-  const [quoteFiles, setQuoteFiles] = useState<File[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [returnOpen, setReturnOpen] = useState(false);
@@ -117,12 +105,6 @@ export function RequestDetailPage() {
     const items = data.purchaseItems ?? [];
     setAnalysisRows(data.procurementAnalysis?.items ?? items.map((item) => ({ materialId: item.materialId, stockStatus: 'indisponivel', availableQuantity: 0, needsQuotation: true })));
     setAnalysisNotes(data.procurementAnalysis?.notes ?? '');
-    setQuoteId('');
-    setSupplier('');
-    setQuoteNumber('');
-    setQuoteTotal('');
-    setQuoteNotes('');
-    setQuoteFiles([]);
   }, [request?.id]);
 
   if (!request) {
@@ -156,58 +138,15 @@ export function RequestDetailPage() {
   const staffActionsAllowed = canUpdate && !requesterLocked && (!isPurchaseRequest || Boolean(canProcure));
   const canTriage = canUpdate && !isRequesterOrBeneficiary && (!purchaseItems.length || canProcure);
   const hasAnalysis = Boolean(request.formData && typeof request.formData === 'object' && (request.formData as { procurementAnalysis?: unknown }).procurementAnalysis);
-  const quotationData = request.formData && typeof request.formData === 'object' ? request.formData as { procurementQuotation?: Record<string, unknown>; procurementQuotations?: Array<Record<string, unknown>>; selectedQuotationId?: string } : {};
-  const quotations = quotationData.procurementQuotations ?? (quotationData.procurementQuotation ? [quotationData.procurementQuotation] : []);
-  const selectedQuotationId = quotationData.selectedQuotationId ?? String(quotations.find((quotation) => quotation.selected)?.quotationId ?? '');
   const canProcureQuotation = Boolean(canProcure) && !requesterLocked && request.status === 'em_atendimento';
-  const canSelect = user?.collaboratorId === request.costCenter?.responsibleCollaborator?.id && !requesterLocked;
+  // Quem decide a compra: o responsável do CC com a aprovação `centro_custo` pendente em seu nome.
+  const canDecidePurchase = isPurchaseRequest && canApprove && !requesterLocked && request.status === 'aguardando_aprovacao'
+    && request.approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'pendente' && a.approverId === user?.collaboratorId);
+  const hasQuotations = Boolean(request.formData && typeof request.formData === 'object' && (
+    (Array.isArray((request.formData as { procurementQuotations?: unknown }).procurementQuotations) && (request.formData as { procurementQuotations: unknown[] }).procurementQuotations.length > 0)
+    || (request.formData as { procurementQuotation?: unknown }).procurementQuotation
+  ));
   const saveAnalysis = async () => { setAnalysisError(null); try { await requestsApi.purchaseAnalysis(request.id, analysisRows, analysisNotes); await refresh(); } catch { setAnalysisError('Não foi possível registrar a análise de Suprimentos.'); } };
-  const resetQuoteForm = () => { setQuoteId(''); setSupplier(''); setQuoteNumber(''); setQuoteTotal(''); setQuoteNotes(''); setQuoteFiles([]); setQuoteError(null); };
-  const isQuotationSelected = (q: Record<string, unknown>) => (selectedQuotationId ? String(q.quotationId) === selectedQuotationId : Boolean(q.selected));
-  const editQuotation = (q: Record<string, unknown>) => {
-    setQuoteError(null);
-    setQuoteId(String(q.quotationId ?? ''));
-    setSupplier(String(q.supplier ?? ''));
-    setQuoteNumber(String(q.quoteNumber ?? ''));
-    setQuoteTotal(q.totalValue != null ? String(q.totalValue) : '');
-    setQuoteNotes(String(q.notes ?? ''));
-    setQuoteFiles([]);
-  };
-  const saveQuotation = async () => {
-    setQuoteError(null);
-    try {
-      const editing = quoteId ? quotations.find((q) => String(q.quotationId) === quoteId) : undefined;
-      const currentId = quoteId || `cotacao-${Date.now()}`;
-      const uploaded = await Promise.all(quoteFiles.map(async (file) => {
-        const contentBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = reject; reader.readAsDataURL(file); });
-        return requestsApi.attachment(request.id, { filename: file.name, contentBase64 });
-      }));
-      const keptIds = Array.isArray(editing?.attachmentIds) ? (editing.attachmentIds as string[]) : [];
-      await requestsApi.purchaseQuotation(request.id, { quotationId: currentId, supplier, quoteNumber, totalValue: quoteTotal, notes: quoteNotes, attachmentIds: [...keptIds, ...uploaded.map((item) => item.id)], ...(editing ? { selected: isQuotationSelected(editing) } : {}) });
-      resetQuoteForm();
-      await refresh();
-    } catch {
-      setQuoteError('Não foi possível registrar a cotação. Verifique os dados e os anexos.');
-    }
-  };
-  const downloadAttachment = async (attachment: RequestAttachmentMeta) => {
-    setQuoteError(null);
-    try {
-      const blob = await requestsApi.downloadAttachment(request.id, attachment.id);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = attachment.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    } catch {
-      setQuoteError(`Não foi possível baixar o anexo "${attachment.filename}".`);
-    }
-  };
-  const selectQuotation = async (quotationId: string) => { setQuoteError(null); try { await requestsApi.selectPurchaseQuotation(request.id, quotationId); await refresh(); } catch { setQuoteError('Não foi possível selecionar esta cotação.'); } };
-
   // Toda ação do fluxo passa por aqui: erro do servidor (validação, permissão, status que mudou
   // enquanto a tela estava aberta) aparece ao lado dos botões em vez de sumir em silêncio.
   const run = async (action: () => Promise<unknown>) => {
@@ -391,78 +330,8 @@ export function RequestDetailPage() {
           </div>
         )}
 
-        {purchaseItems.length > 0 && hasAnalysis && (canProcureQuotation || quotations.length > 0) && (
-          <div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Cotações de fornecedores ({quotations.length})</div>
-            <div className="quotations">
-              {quotations.length === 0 && <p style={{ margin: 0, fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma cotação registrada ainda.</p>}
-              {quotations.length > 0 && (
-                <div className="quotation-list">
-                  {quotations.map((q, index) => {
-                    const quotationId = String(q.quotationId ?? index);
-                    const isSelected = isQuotationSelected(q);
-                    const ids = Array.isArray(q.attachmentIds) ? (q.attachmentIds as string[]) : [];
-                    const files = ids.map((attId) => ({ id: attId, meta: (request.attachments ?? []).find((a) => a.id === attId) }));
-                    const recordedAt = typeof q.recordedAt === 'string' ? q.recordedAt : null;
-                    return (
-                      <article key={quotationId} className={`quotation-card${isSelected ? ' quotation-card--selected' : ''}`}>
-                        <div className="quotation-card__head">
-                          <span className="quotation-card__title">Cotação {index + 1}</span>
-                          {isSelected && <span className="quotation-badge">Fornecedor escolhido</span>}
-                        </div>
-                        <dl className="quotation-card__grid">
-                          <div><dt>Fornecedor</dt><dd>{String(q.supplier ?? '') || '—'}</dd></div>
-                          <div><dt>Nº da cotação</dt><dd>{String(q.quoteNumber ?? '') || '—'}</dd></div>
-                          <div><dt>Valor total</dt><dd><strong>{formatBRL(q.totalValue as string | number | null | undefined)}</strong></dd></div>
-                          {recordedAt && <div><dt>Registrada em</dt><dd>{formatDateTime(recordedAt)}</dd></div>}
-                          <div className="quotation-card__full"><dt>Observações</dt><dd className="quotation-card__notes">{String(q.notes ?? '') || '—'}</dd></div>
-                          <div className="quotation-card__full">
-                            <dt>Anexos</dt>
-                            <dd>
-                              {files.length === 0 ? '—' : (
-                                <ul className="quotation-attachments">
-                                  {files.map(({ id: attId, meta }) => (
-                                    <li key={attId}>
-                                      {meta
-                                        ? <button type="button" className="quotation-attachment" onClick={() => void downloadAttachment(meta)}>{meta.filename}{meta.sizeBytes ? ` (${formatFileSize(meta.sizeBytes)})` : ''}</button>
-                                        : <span className="quotation-attachment">Anexo indisponível</span>}
-                                    </li>
-                                  ))}
-                                </ul>
-                              )}
-                            </dd>
-                          </div>
-                        </dl>
-                        {((canSelect && !isSelected) || canProcureQuotation) && (
-                          <div className="quotation-card__actions">
-                            {canSelect && !isSelected && <Button variant="positive" onClick={() => void selectQuotation(quotationId)}>Escolher este fornecedor</Button>}
-                            {canProcureQuotation && <Button onClick={() => editQuotation(q)}>Editar</Button>}
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-              {quoteError && <p role="alert" className="quotation-error">{quoteError}</p>}
-              {canProcureQuotation && (
-                <form className="quotation-form" onSubmit={(e) => { e.preventDefault(); void saveQuotation(); }}>
-                  <h4>{quoteId ? 'Editar cotação' : 'Registrar cotação'}</h4>
-                  <div className="quotation-form__grid">
-                    <div className="request-form-field"><label htmlFor="quote-supplier">Fornecedor</label><input id="quote-supplier" value={supplier} onChange={(e) => setSupplier(e.target.value)} /></div>
-                    <div className="request-form-field"><label htmlFor="quote-number">Nº da cotação</label><input id="quote-number" value={quoteNumber} onChange={(e) => setQuoteNumber(e.target.value)} /></div>
-                    <div className="request-form-field"><label htmlFor="quote-total">Valor total (R$)</label><input id="quote-total" type="number" min="0.01" step="0.01" placeholder="0,00" value={quoteTotal} onChange={(e) => setQuoteTotal(e.target.value)} /></div>
-                    <div className="request-form-field"><label htmlFor="quote-files">Anexos</label><input id="quote-files" key={quoteFiles.length === 0 ? 'empty' : 'filled'} type="file" multiple onChange={(e) => setQuoteFiles(Array.from(e.target.files ?? []))} /><small style={{ color: 'var(--text-muted)' }}>{quoteFiles.length ? `${quoteFiles.length} arquivo(s) selecionado(s)` : 'Proposta, orçamento ou documento do fornecedor.'}</small></div>
-                    <div className="request-form-field quotation-form__full"><label htmlFor="quote-notes">Observações</label><textarea id="quote-notes" value={quoteNotes} onChange={(e) => setQuoteNotes(e.target.value)} rows={3} /></div>
-                  </div>
-                  <div className="quotation-card__actions">
-                    <Button type="submit" variant="positive">{quoteId ? 'Salvar alterações' : 'Registrar cotação'}</Button>
-                    {quoteId && <Button type="button" onClick={resetQuoteForm}>Cancelar edição</Button>}
-                  </div>
-                </form>
-              )}
-            </div>
-          </div>
+        {purchaseItems.length > 0 && hasAnalysis && (canProcureQuotation || hasQuotations) && (
+          <PurchaseQuotations key={request.id} request={request} purchaseItems={purchaseItems} canQuote={canProcureQuotation} canDecide={canDecidePurchase} onChanged={refresh} />
         )}
 
         <div>
@@ -561,7 +430,7 @@ export function RequestDetailPage() {
               Devolver ao solicitante para ajuste
             </Button>
           )}
-          {canApprove && !requesterLocked && request.status === 'aguardando_aprovacao' && (
+          {canApprove && !requesterLocked && !isPurchaseRequest && request.status === 'aguardando_aprovacao' && (
             <>
               <Button variant="positive" onClick={() => decide('approve')}>
                 Aprovar

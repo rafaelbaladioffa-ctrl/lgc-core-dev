@@ -64,12 +64,20 @@ export function MyRequestApprovalsPage() {
                 {a.categoryName} • Solicitante: {a.requesterName}
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                <Button variant="positive" onClick={() => void approve(a.requestId)}>
-                  Aprovar
-                </Button>
-                <Button variant="danger" onClick={() => void reject(a.requestId)}>
-                  Reprovar
-                </Button>
+                {a.approvalSource === 'centro_custo' ? (
+                  <Button variant="positive" onClick={() => navigate(`/requests/${a.requestId}`)}>
+                    Abrir e decidir a compra
+                  </Button>
+                ) : (
+                  <>
+                    <Button variant="positive" onClick={() => void approve(a.requestId)}>
+                      Aprovar
+                    </Button>
+                    <Button variant="danger" onClick={() => void reject(a.requestId)}>
+                      Reprovar
+                    </Button>
+                  </>
+                )}
               </div>
             </div>
           ))}

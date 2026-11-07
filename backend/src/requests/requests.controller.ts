@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Post, Put, Query, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { RequestsService } from './requests.service.js';
 import { CreateRequestDto } from './dto/create-request.dto.js';
@@ -11,7 +11,7 @@ import { CreateRequestCommentDto } from './dto/create-comment.dto.js';
 import { CreateRequestAttachmentDto } from './dto/create-attachment.dto.js';
 import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
 import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
-import { PurchaseQuotationSelectionDto } from './dto/purchase-quotation-selection.dto.js';
+import { PurchaseDecisionDto } from './dto/purchase-decision.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
@@ -127,14 +127,28 @@ export class RequestsController {
   @RequirePermissions('request:update')
   @AuditAction({ action: 'record_purchase_quotation', resourceType: 'request', resourceIdParam: 'id' })
   purchaseQuotation(@Param('id') id: string, @Body() dto: PurchaseQuotationDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.recordPurchaseQuotation(id, requireProcurementRole(user), dto);
+    return this.requestsService.recordPurchaseQuotation(id, requireProcurementRole(user), dto, user.roles);
   }
 
-  @Post(':id/purchase-quotation-selection')
-  @RequirePermissions('request:read')
-  @AuditAction({ action: 'select_purchase_quotation', resourceType: 'request', resourceIdParam: 'id' })
-  purchaseQuotationSelection(@Param('id') id: string, @Body() dto: PurchaseQuotationSelectionDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.selectPurchaseQuotation(id, requireCollaboratorId(user), dto);
+  @Delete(':id/purchase-quotation/:quotationId')
+  @RequirePermissions('request:update')
+  @AuditAction({ action: 'delete_purchase_quotation', resourceType: 'request', resourceIdParam: 'id' })
+  deletePurchaseQuotation(@Param('id') id: string, @Param('quotationId') quotationId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.deletePurchaseQuotation(id, requireProcurementRole(user), quotationId, user.roles);
+  }
+
+  @Post(':id/purchase-quotation/submit')
+  @RequirePermissions('request:update')
+  @AuditAction({ action: 'submit_purchase_for_approval', resourceType: 'request', resourceIdParam: 'id' })
+  submitPurchase(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.submitPurchaseForApproval(id, requireProcurementRole(user), user.roles);
+  }
+
+  @Post(':id/purchase-decision')
+  @RequirePermissions('request:approve')
+  @AuditAction({ action: 'decide_purchase', resourceType: 'request', resourceIdParam: 'id' })
+  purchaseDecision(@Param('id') id: string, @Body() dto: PurchaseDecisionDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.decidePurchase(id, requireCollaboratorId(user), dto);
   }
 
   @Post(':id/return-for-adjustment')
