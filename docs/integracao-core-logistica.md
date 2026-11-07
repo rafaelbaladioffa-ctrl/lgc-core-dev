@@ -59,8 +59,9 @@ chaves por emissor. Revisar o mapeamento de papéis com o negócio.
   `material:read`, sem paginação. O Core grava `materialId` e `unitPrice` enviados pelo cliente sem
   conferir na Logística (`backend/src/requests/requests.service.ts:165-174`), e o valor alimenta a
   alçada de aprovação.
-- `SEED_REVISED_CATALOG=true` no compose da Logística esconde do catálogo todo material cujo código
-  não começa com `REV-` e sobrescreve custo/status desses itens a cada partida.
+- `SEED_REVISED_CATALOG` voltou a ser só uma flag de seed: ela ainda sobrescreve custo e status dos
+  itens `REV-` a cada partida, mas não filtra mais a listagem nem o `purchase-catalog`, que escondiam
+  todo material cujo código não começasse com `REV-`. O compose agora a define como `false`.
 
 ## 3. Eventos Core → Logística
 
@@ -98,6 +99,8 @@ vazio, as mensagens ficam `PENDING`. Eventos produzidos: `receipt.divergent`,
 3. Criar o receptor de eventos da Logística no Core (`POST /integration/inbound`, HMAC, idempotência).
 4. Validar preço e material no servidor (o Core consulta a Logística com credencial de serviço).
 5. Proteger custo no `purchase-catalog` (`material:read_cost`) e paginar.
-6. Remover `SEED_REVISED_CATALOG` do runtime e do compose.
+6. ~~Remover `SEED_REVISED_CATALOG` do runtime~~ (feito: o filtro saiu da listagem e do
+   `purchase-catalog`, e o compose a define como `false`). Falta aposentar o seed `REV-` em si:
+   `prisma/revised-catalog.ts` e `syncRevisedCatalog`, hoje redundantes com `prisma/materiais-lgc.csv`.
 7. Extrair os tipos de contrato (envelope, eventos, DTOs de catálogo/disponibilidade, claims do JWT)
    para um pacote compartilhado e validar nos dois lados no CI.

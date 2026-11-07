@@ -33,6 +33,19 @@ function enumDe<T extends Record<string, string>>(alvo: T, valor: string, coluna
   return v as T[keyof T];
 }
 
+/**
+ * Compara o que está no banco com o que o CSV traz. Trata os dois descasamentos de tipo que
+ * aparecem aqui: custo volta como Prisma.Decimal e não como number, e campo de texto em branco
+ * vira `undefined` no CSV mas é `null` na coluna.
+ */
+function mesmoValor(noBanco: unknown, doCsv: unknown): boolean {
+  const vazio = (v: unknown) => v === null || v === undefined;
+  if (vazio(noBanco) && vazio(doCsv)) return true;
+  if (vazio(noBanco) || vazio(doCsv)) return false;
+  if (noBanco instanceof Prisma.Decimal) return noBanco.equals(new Prisma.Decimal(doCsv as number));
+  return noBanco === doCsv;
+}
+
 interface Row { [k: string]: string }
 
 function parseCsv(raw: string): Row[] {
@@ -117,14 +130,22 @@ async function main() {
 
   let criados = 0;
   let atualizados = 0;
+  let inalterados = 0;
   for (const dados of materiais) {
     await prisma.$transaction(async (tx) => {
-      const existente = await tx.material.findUnique({ where: { code: dados.code }, select: { id: true } });
+      const existente = await tx.material.findUnique({ where: { code: dados.code } });
       if (existente) {
         const { createdBy: _ignora, ...campos } = dados;
-        const material = await tx.material.update({ where: { id: existente.id }, data: campos });
-        const ultima = await tx.materialVersion.findFirst({ where: { materialId: material.id }, orderBy: { version: 'desc' }, select: { version: true } });
-        await tx.materialVersion.create({ data: { materialId: material.id, version: (ultima?.version ?? 0) + 1, snapshot: JSON.parse(JSON.stringify(material)) as Prisma.InputJsonValue, changedBy: 'import-materiais', changeReason: 'Carga do catálogo da LGC' } });
+        // Reexecutar a carga não pode encher o histórico de versões idênticas.
+        const mudou = Object.entries(campos).some(([k, novo]) => !mesmoValor((existente as Record<string, unknown>)[k], novo));
+        if (!mudou) {
+          inalterados += 1;
+          return;
+        }
+        // Mesmo passo a passo do MaterialsService.update: versão nova, currentVersion e updatedBy juntos.
+        const proxima = existente.currentVersion + 1;
+        const material = await tx.material.update({ where: { id: existente.id }, data: { ...campos, currentVersion: proxima, updatedBy: 'import-materiais' } });
+        await tx.materialVersion.create({ data: { materialId: material.id, version: proxima, snapshot: JSON.parse(JSON.stringify(material)) as Prisma.InputJsonValue, changedBy: 'import-materiais', changeReason: 'Carga do catálogo da LGC' } });
         atualizados += 1;
       } else {
         const material = await tx.material.create({ data: dados });
@@ -133,7 +154,7 @@ async function main() {
       }
     });
   }
-  console.log(`Criados: ${criados}. Atualizados: ${atualizados}.`);
+  console.log(`Criados: ${criados}. Atualizados: ${atualizados}. Sem mudança: ${inalterados}.`);
 
   const porFamilia = await prisma.material.groupBy({ by: ['type'], _count: true, where: { createdBy: 'import-materiais' } });
   for (const g of porFamilia) console.log(`  ${g.type}: ${g._count}`);

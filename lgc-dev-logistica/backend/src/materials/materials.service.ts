@@ -35,12 +35,10 @@ export class MaterialsService {
   async list(query: ListMaterialsQuery, user: AuthenticatedUser) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const useRevisedCatalog = process.env.SEED_REVISED_CATALOG === 'true';
     const where: Prisma.MaterialWhereInput = {
       ...(query.type && { type: query.type }),
       ...(query.category && { category: query.category }),
       status: query.status ?? 'ATIVO',
-      ...(useRevisedCatalog ? { code: { startsWith: 'REV-' } } : {}),
       ...(query.q && {
         OR: [
           { code: { contains: query.q, mode: 'insensitive' } },
@@ -58,12 +56,8 @@ export class MaterialsService {
   }
 
   async purchaseCatalog() {
-    const useRevisedCatalog = process.env.SEED_REVISED_CATALOG === 'true';
     const items = await this.prisma.material.findMany({
-      where: {
-        status: 'ATIVO',
-        ...(useRevisedCatalog ? { code: { startsWith: 'REV-' } } : {}),
-      },
+      where: { status: 'ATIVO' },
       orderBy: [{ category: 'asc' }, { subcategory: 'asc' }, { shortDescription: 'asc' }],
       select: {
         id: true, code: true, shortDescription: true, technicalDescription: true,

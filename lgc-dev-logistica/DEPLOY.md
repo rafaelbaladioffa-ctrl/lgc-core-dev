@@ -7,7 +7,7 @@
 > **Revisão de 2026-11-07:**
 > - **Testes:** hoje são 417 unitários no backend e 98 no frontend.
 > - **Eventos (§3):** o Core **não emite** `user.*`, `ticket.status_changed`, `material_request.*` nem `purchase_order.*`, e não tem receptor para `AXIS_EVENTS_URL`. Assinar esses eventos não tem efeito até o contrato ser fechado; veja [../docs/integracao-core-logistica.md](../docs/integracao-core-logistica.md).
-> - **Seed:** com `SEED_REVISED_CATALOG=true` (padrão do compose), o seed **sobrescreve** custo e status dos itens `REV-` a cada partida. Desligue antes de produção.
+> - **Seed:** `SEED_REVISED_CATALOG` agora é `false` no compose. Ligada, ela **sobrescreve** custo e status dos itens `REV-` a cada partida — e esses itens são os mesmos produtos que já estão em `prisma/materiais-lgc.csv`, então ligá-la duplica o catálogo. Ela também filtrava a listagem e o `purchase-catalog` por código `REV-`; esse filtro foi removido.
 
 ## 1. O que sobe
 

@@ -27,7 +27,9 @@ services:
     environment:
       DATABASE_URL: postgresql://logistica:${LOGISTICA_DB_PASSWORD:-logistica}@logistica-postgres:5432/axis_logistica?schema=public
       SCHEDULER_ENABLED: "true" # exatamente UMA instância do backend com o agendador ligado
-      SEED_REVISED_CATALOG: "true" # ambiente de teste usa a planilha revisada da Logística
+      # Semeia os itens "REV-" da planilha revisada, sobrescrevendo custo e status a cada partida.
+      # Fica desligado: o catálogo da LGC está em prisma/materiais-lgc.csv e ligar isto duplica os itens.
+      SEED_REVISED_CATALOG: "false"
     depends_on:
       logistica-postgres:
         condition: service_healthy

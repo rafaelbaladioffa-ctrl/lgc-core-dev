@@ -102,9 +102,7 @@ O frontend ganhou, além do PWA operacional, telas de gestão, cada uma liberada
 O Core consome `GET /materials/purchase-catalog` e `POST /materials/availability:batch` na tela "Nova requisição".
 
 ## Pontos de atenção conhecidos
-- **Catálogo revisado:** `SEED_REVISED_CATALOG=true` (definido no `docker-compose.yml`) faz duas coisas:
-  - o seed sobrescreve custo e status dos itens `REV-` a cada partida, sem versão nem auditoria;
-  - a listagem do catálogo esconde todo material cujo código não começa com `REV-`.
+- **Catálogo revisado:** `SEED_REVISED_CATALOG=true` faz o seed sobrescrever custo e status dos itens `REV-` a cada partida, sem versão nem auditoria. Fica `false` no `docker-compose.yml`, porque o catálogo da LGC agora está em `prisma/materiais-lgc.csv` e ligar a flag duplicaria os mesmos produtos. A flag já filtrava também a listagem e o catálogo de compra, escondendo todo material cujo código não começasse com `REV-`; esse filtro foi removido do runtime (`test/unit/materials.catalogo-completo.spec.ts` impede que volte).
 - **Custo exposto:** `GET /materials/purchase-catalog` devolve custo a quem tem só `material:read`.
 - **SSO e permissões:**
   - `POST /auth/exchange` aceita qualquer access token do Core, não só o do launcher;
@@ -116,4 +114,5 @@ O Core consome `GET /materials/purchase-catalog` e `POST /materials/availability
 ## Desenvolvimento e testes
 - **Banco de testes separado:** copie `backend/.env.test.example` para `.env.test` (outro banco, `axis_logistica_test`); `npm run test:e2e:setup` migra e `npm run test:e2e` roda. O banco de desenvolvimento não acumula lixo de teste.
 - **Catálogo inicial:** `prisma/catalog-data.ts` é gerado por `python scripts/generate-catalog.py <PLANNING_LOGISTICA.md>` (101 SKUs das tabelas 8.1–8.8; 8.9 químicos não é carregado — exige validação técnica e de HSE). O seed só cria o que ainda não existe e `SEED_CATALOG=false` desliga. A exceção é `SEED_REVISED_CATALOG=true`, que sobrescreve os itens `REV-` (ver "Pontos de atenção").
+- **Catálogo da LGC:** `prisma/materiais-lgc.csv` tem os materiais levantados com a operação (ferramental, EPI e uniforme). `prisma/import-materiais.ts` faz a carga aplicando as mesmas regras do `MaterialsService.create` e gravando a versão 1 de cada item; é idempotente e recusa banco cujo nome não termine em `_test` sem `IMPORT_ALLOW_NON_TEST=true`. Itens com grade viram um material por tamanho, com o tamanho no sequencial do código (`EPI-BOT-0040` é a numeração 40; `UNI-POL-0004` é o tamanho G), o que pela API exige a permissão `material:set_code`.
 - **Perfil por usuário:** além do mapeamento por role do Axis, `PUT /rbac/users/:axisUserId/roles` concede perfis de Logística a um usuário específico (ex.: um colaborador que atua como almoxarife); o acesso a almoxarifados continua em `PUT /rbac/users/:axisUserId/warehouses`.
