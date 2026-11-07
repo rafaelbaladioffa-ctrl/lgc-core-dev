@@ -23,7 +23,7 @@ function legacyService(overrides: Record<string, any> = {}) {
     service: new RequestsService(
       prisma,
       { record: vi.fn() } as any,
-      {} as any,
+      { findActiveDelegationsOf: vi.fn().mockResolvedValue([]) } as any,
       {} as any,
       {} as any,
     ),

@@ -139,9 +139,10 @@ export function RequestDetailPage() {
   const canTriage = canUpdate && !isRequesterOrBeneficiary && (!purchaseItems.length || canProcure);
   const hasAnalysis = Boolean(request.formData && typeof request.formData === 'object' && (request.formData as { procurementAnalysis?: unknown }).procurementAnalysis);
   const canProcureQuotation = Boolean(canProcure) && !requesterLocked && request.status === 'em_atendimento';
-  // Quem decide a compra: o responsável do CC com a aprovação `centro_custo` pendente em seu nome.
-  const canDecidePurchase = isPurchaseRequest && canApprove && !requesterLocked && request.status === 'aguardando_aprovacao'
-    && request.approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'pendente' && a.approverId === user?.collaboratorId);
+  // Quem decide (titular ou delegado ativo) vem calculado do servidor em `viewer`; na compra o
+  // servidor já restringe à linha `centro_custo`.
+  const canDecideApproval = Boolean(request.viewer?.canDecideApproval) && canApprove && !requesterLocked && request.status === 'aguardando_aprovacao';
+  const canDecidePurchase = isPurchaseRequest && canDecideApproval;
   const hasQuotations = Boolean(request.formData && typeof request.formData === 'object' && (
     (Array.isArray((request.formData as { procurementQuotations?: unknown }).procurementQuotations) && (request.formData as { procurementQuotations: unknown[] }).procurementQuotations.length > 0)
     || (request.formData as { procurementQuotation?: unknown }).procurementQuotation
@@ -430,8 +431,11 @@ export function RequestDetailPage() {
               Devolver ao solicitante para ajuste
             </Button>
           )}
-          {canApprove && !requesterLocked && !isPurchaseRequest && request.status === 'aguardando_aprovacao' && (
+          {canDecideApproval && !isPurchaseRequest && (
             <>
+              {request.viewer?.decidingAsDelegateOf && (
+                <p className="delegate-notice" role="note">Você está decidindo como delegado de {request.viewer.decidingAsDelegateOf.fullName}.</p>
+              )}
               <Button variant="positive" onClick={() => decide('approve')}>
                 Aprovar
               </Button>

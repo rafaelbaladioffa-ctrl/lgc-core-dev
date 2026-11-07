@@ -331,6 +331,9 @@ export function PurchaseQuotations({ request, purchaseItems, canQuote, canDecide
             <p className="quotation-decision__total" role="status">
               Total aprovado: <strong>{formatBRL(chosenTotal)}</strong> — {chosenSuppliers.size} {chosenSuppliers.size === 1 ? 'fornecedor' : 'fornecedores'}
             </p>
+            {request.viewer?.decidingAsDelegateOf && (
+              <p className="delegate-notice" role="note">Você está decidindo como delegado de {request.viewer.decidingAsDelegateOf.fullName}.</p>
+            )}
             <div className="quotation-card__actions">
               <Button variant="positive" onClick={() => void approve()} disabled={dialogBusy || chosen.some(({ quotationId }) => !quotationId)}>Aprovar compra</Button>
               <Button variant="danger" onClick={() => openDecision('reprovar')} disabled={dialogBusy}>Reprovar</Button>

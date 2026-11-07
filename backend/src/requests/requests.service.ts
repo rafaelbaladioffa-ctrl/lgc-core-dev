@@ -1034,7 +1034,9 @@ export class RequestsService {
     // Participante real desta requisição — nunca uma permissão genérica de papel (ter
     // `request:approve` não torna alguém aprovador desta requisição específica).
     const isParticipant = viewer.collaboratorId !== null && [request.requesterId, request.beneficiaryId, request.assigneeId].includes(viewer.collaboratorId);
-    const isApprover = viewer.collaboratorId !== null && request.approvals.some((a) => a.approverId === viewer.collaboratorId);
+    const approval = await this.computeViewerApproval(request, viewer.collaboratorId, isPurchase(request.categoryVersion.category));
+    // Delegado ativo de um aprovador pendente conta como aprovador (acesso à requisição restrita e notas internas).
+    const isApprover = viewer.collaboratorId !== null && (request.approvals.some((a) => a.approverId === viewer.collaboratorId) || approval.canDecideApproval);
     if (request.confidentiality === 'restrita' && !isParticipant && !isApprover) {
       throw new ForbiddenException('Requisição restrita — acesso não autorizado');
     }
@@ -1043,7 +1045,7 @@ export class RequestsService {
     if (!isApprover && !isExecutor && (!isParticipant || viewer.collaboratorId === request.requesterId || viewer.collaboratorId === request.beneficiaryId)) {
       request.comments = request.comments.filter((c) => c.visibility === 'publico');
     }
-    return this.maskIdentityIfAnonymous(request, viewer.collaboratorId, viewer.canViewWhistleblowerIdentity);
+    return { ...this.maskIdentityIfAnonymous(request, viewer.collaboratorId, viewer.canViewWhistleblowerIdentity), viewer: approval };
   }
 
   /** §7.3: `requesterId` nunca é apagado (auditoria), mas é ocultado de todo mundo que não seja o
@@ -1182,15 +1184,29 @@ export class RequestsService {
     };
   }
 
+  /** Aprovações pendentes da etapa ativa que a pessoa pode decidir: as dela (titular) e as dos
+   * aprovadores que a delegaram (delegação ativa e, se com escopo, do setor da requisição —
+   * mesma regra de `findDecidableRow`). Item de delegado traz `asDelegateOf`. Solicitante e
+   * beneficiário nunca decidem a própria requisição, então ficam de fora. */
   async myApprovals(collaboratorId: string, canViewWhistleblowerIdentity: boolean) {
-    const mine = await this.prisma.requestApproval.findMany({
+    const delegations = await this.delegations.findActiveDelegationsOf(collaboratorId);
+    const delegatorIds = [...new Set(delegations.map((d) => d.delegatorId))];
+    const candidates = await this.prisma.requestApproval.findMany({
       where: {
-        approverId: collaboratorId,
+        approverId: delegatorIds.length ? { in: [collaboratorId, ...delegatorIds] } : collaboratorId,
         status: 'pendente',
         request: { executionMode: 'legacy' },
       },
-      include: { request: { include: { categoryVersion: { include: { category: true } }, requester: { select: { id: true, fullName: true } } } } },
+      include: {
+        approver: { select: { id: true, fullName: true } },
+        request: { include: { categoryVersion: { include: { category: true } }, requester: { select: { id: true, fullName: true } } } },
+      },
       orderBy: { createdAt: 'asc' },
+    });
+    const mine = candidates.filter((a) => {
+      if (a.request.requesterId === collaboratorId || a.request.beneficiaryId === collaboratorId) return false;
+      if (a.approverId === collaboratorId) return true;
+      return delegations.some((d) => d.delegatorId === a.approverId && (d.sectorId === null || d.sectorId === a.request.sectorId));
     });
     const requestIds = [...new Set(mine.map((a) => a.requestId))];
     const allPending = await this.prisma.requestApproval.findMany({ where: { requestId: { in: requestIds }, status: 'pendente' }, select: { requestId: true, stepOrder: true } });
@@ -1212,6 +1228,7 @@ export class RequestsService {
         categoryName: a.request.categoryVersion.category.name,
         requesterName: a.request.anonymous && !canViewWhistleblowerIdentity ? 'Anônimo' : a.request.requester.fullName,
         createdAt: a.createdAt,
+        asDelegateOf: a.approverId === collaboratorId ? undefined : { id: a.approver.id, fullName: a.approver.fullName },
       }));
   }
 
@@ -1463,12 +1480,46 @@ export class RequestsService {
     actorId: string,
     sectorId: string,
   ): Promise<{ row: T; onBehalfOf: boolean }> {
+    const found = await this.resolveDecidableRow(stepRows, actorId, sectorId);
+    if (!found) throw new ForbiddenException('Você não é aprovador da etapa atual, nem delegado por nenhum aprovador dela');
+    return found;
+  }
+
+  /** Versão de leitura de `findDecidableRow` (mesma regra, sem exceção): `null` quando o ator não
+   * pode decidir nenhuma linha. Usada por `findOne` para calcular `viewer.canDecideApproval`. */
+  private async resolveDecidableRow<T extends { id: string; approverId: string }>(
+    stepRows: T[],
+    actorId: string,
+    sectorId: string,
+  ): Promise<{ row: T; onBehalfOf: boolean } | null> {
     const own = stepRows.find((r) => r.approverId === actorId);
     if (own) return { row: own, onBehalfOf: false };
     for (const row of stepRows) {
       if (await this.delegations.findActiveDelegate(row.approverId, actorId, sectorId)) return { row, onBehalfOf: true };
     }
-    throw new ForbiddenException('Você não é aprovador da etapa atual, nem delegado por nenhum aprovador dela');
+    return null;
+  }
+
+  /** Calculado no servidor para a tela não reimplementar a regra: o leitor pode decidir a
+   * aprovação pendente da etapa ativa (titular ou delegado ativo, nunca solicitante/beneficiário)?
+   * Em compra só vale a linha `centro_custo` (mesma exigência de `decidePurchase`). */
+  private async computeViewerApproval(
+    request: { status: string; requesterId: string; beneficiaryId: string; sectorId: string; approvals: Array<{ id: string; approverId: string; stepOrder: number; status: string; approvalSource?: string | null; approver?: { id: string; fullName: string } }> },
+    collaboratorId: string | null,
+    purchase: boolean,
+  ): Promise<{ canDecideApproval: boolean; decidingAsDelegateOf?: { id: string; fullName: string } }> {
+    const no = { canDecideApproval: false };
+    if (!collaboratorId || request.status !== 'aguardando_aprovacao') return no;
+    if (collaboratorId === request.requesterId || collaboratorId === request.beneficiaryId) return no;
+    const pending = request.approvals.filter((a) => a.status === 'pendente');
+    if (pending.length === 0) return no;
+    const minStep = Math.min(...pending.map((a) => a.stepOrder));
+    const found = await this.resolveDecidableRow(pending.filter((a) => a.stepOrder === minStep), collaboratorId, request.sectorId);
+    if (!found) return no;
+    if (purchase && found.row.approvalSource !== 'centro_custo') return no;
+    return found.onBehalfOf && found.row.approver
+      ? { canDecideApproval: true, decidingAsDelegateOf: { id: found.row.approver.id, fullName: found.row.approver.fullName } }
+      : { canDecideApproval: true };
   }
 
   /** §7.3: na categoria "Denúncia/relato ético", o denunciado (`formData.envolvido_id`) e toda a

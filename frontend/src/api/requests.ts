@@ -92,6 +92,8 @@ export interface RequestDetail extends AxisRequest {
   formData?: { purchaseItems?: PurchaseRequestItem[] } | Record<string, unknown> | null;
   costCenter?: { id: string; code: string; name: string; responsibleCollaborator?: { id: string; fullName: string } | null } | null;
   attachments?: RequestAttachmentMeta[];
+  /** Calculado no servidor (mesma regra do `approve`/`purchase-decision`, incluindo delegação ativa). */
+  viewer?: { canDecideApproval: boolean; decidingAsDelegateOf?: { id: string; fullName: string } };
 }
 
 export interface RequestAttachmentMeta {
@@ -193,6 +195,8 @@ export interface MyApproval {
   categoryName: string;
   requesterName: string;
   createdAt: string;
+  /** Presente quando a pessoa decide como delegada do titular da aprovação. */
+  asDelegateOf?: { id: string; fullName: string };
 }
 
 export interface RequestsDashboard {

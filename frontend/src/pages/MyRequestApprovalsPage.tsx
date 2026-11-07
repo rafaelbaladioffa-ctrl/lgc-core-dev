@@ -63,6 +63,7 @@ export function MyRequestApprovalsPage() {
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                 {a.categoryName} • Solicitante: {a.requesterName}
               </div>
+              {a.asDelegateOf && <p className="delegate-notice">Como delegado de {a.asDelegateOf.fullName}</p>}
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                 {a.approvalSource === 'centro_custo' ? (
                   <Button variant="positive" onClick={() => navigate(`/requests/${a.requestId}`)}>

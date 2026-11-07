@@ -33,6 +33,16 @@ export class DelegationsService {
     return this.prisma.delegation.update({ where: { id }, data: { revokedAt: new Date() } });
   }
 
+  /** Delegações em que `delegateId` pode agir agora (não revogadas, dentro da janela) — mesma
+   * regra de `findActiveDelegate`, sem filtrar setor (quem chama compara com o da requisição). */
+  findActiveDelegationsOf(delegateId: string) {
+    const now = new Date();
+    return this.prisma.delegation.findMany({
+      where: { delegateId, revokedAt: null, startsAt: { lte: now }, endsAt: { gte: now } },
+      select: { delegatorId: true, sectorId: true },
+    });
+  }
+
   /** Usado por RequestsService.approve/reject: alguém pode decidir "em nome de" outro aprovador
    * quando existe uma delegação ativa, não revogada, dentro da janela e (se com escopo de setor)
    * o setor da requisição bate (§9.1, §21.2 — expirada/fora de escopo é recusada). */
