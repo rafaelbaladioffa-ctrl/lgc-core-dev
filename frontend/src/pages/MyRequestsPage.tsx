@@ -75,7 +75,7 @@ export function MyRequestsPage() {
   ];
 
   return (
-    <AppLayout breadcrumb={['Axis', 'Requisições', 'Minhas requisições']}>
+    <AppLayout breadcrumb={['Axis', 'Requisições', 'Histórico']}>
       <div style={{ marginBottom: 12, display: 'flex', justifyContent: 'flex-end' }}>
         <Button variant="positive" onClick={() => navigate('/requests/new')}>
           + Nova requisição

@@ -34,7 +34,7 @@ describe('legacy executor separation from BPM', () => {
   it.each([
     ['update', (service: RequestsService) => service.update('bpm-request', 'actor', { title: 'x' } as any)],
     ['submit', (service: RequestsService) => service.submit('bpm-request', 'actor')],
-    ['cancel', (service: RequestsService) => service.cancel('bpm-request', 'actor', { reason: 'x' } as any)],
+    ['cancel', (service: RequestsService) => service.cancel('bpm-request', 'actor', false, { reason: 'x' } as any)],
     ['findOne', (service: RequestsService) => service.findOne('bpm-request', { collaboratorId: 'actor', canViewWhistleblowerIdentity: false })],
   ])('rejects %s for a BPM request without writing', async (_operation, action) => {
     const fixture = legacyService();
@@ -74,45 +74,47 @@ describe('legacy executor separation from BPM', () => {
     );
   });
 
-  it('does not expose a BPM-only category through the legacy category detail', async () => {
+  // `bpmStatus` (CategoryVersion) e o conceito de "categoria BPM-only" que estes dois testes
+  // verificavam deixaram de existir junto do resto do módulo BPM (98dfce5) — o schema não tem
+  // mais o campo. O que resta de válido aqui é a mecânica de "categoria sem versão" e "latest
+  // version", sem o filtro morto.
+  it('rejects a category with no version through the legacy category detail', async () => {
     const prisma: any = {
       requestCategory: {
-        findUnique: vi.fn().mockResolvedValue({ id: 'bpm-category', versions: [] }),
+        findUnique: vi.fn().mockResolvedValue({ id: 'empty-category', versions: [] }),
       },
     };
     const service = new RequestCategoriesService(prisma);
-    await expect(service.findOne('bpm-category')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(service.findOne('empty-category')).rejects.toBeInstanceOf(NotFoundException);
     expect(prisma.requestCategory.findUnique).toHaveBeenCalledWith({
-      where: { id: 'bpm-category' },
+      where: { id: 'empty-category' },
       include: {
         versions: {
-          where: { bpmStatus: null },
           orderBy: { version: 'desc' },
         },
       },
     });
   });
 
-  it('keeps a mixed category cataloged on its latest legacy version only', async () => {
+  it('catalogs a category on its latest version only', async () => {
     const prisma: any = {
       requestCategory: {
         findMany: vi.fn().mockResolvedValue([
           {
-            id: 'mixed-category',
-            name: 'Mista',
-            versions: [{ id: 'legacy-v1', version: 1, bpmStatus: null }],
+            id: 'a-category',
+            name: 'Categoria',
+            versions: [{ id: 'v1', version: 1 }],
           },
         ]),
       },
     };
     const service = new RequestCategoriesService(prisma);
     const result = await service.findAllCatalog('sector-1');
-    expect(result[0]).toMatchObject({ currentVersion: { id: 'legacy-v1', bpmStatus: null } });
+    expect(result[0]).toMatchObject({ currentVersion: { id: 'v1' } });
     expect(prisma.requestCategory.findMany).toHaveBeenCalledWith({
-      where: { active: true, sectorId: 'sector-1', versions: { some: { bpmStatus: null } } },
+      where: { active: true, sectorId: 'sector-1', versions: { some: {} } },
       include: {
         versions: {
-          where: { bpmStatus: null },
           orderBy: { version: 'desc' },
           take: 1,
         },

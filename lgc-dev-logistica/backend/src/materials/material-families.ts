@@ -11,6 +11,7 @@ export const MATERIAL_FAMILIES = [
   { prefix: 'LIM', label: 'LIM — limpeza', type: 'CONSUMO' },
   { prefix: 'ESC', label: 'ESC — escritório', type: 'CONSUMO' },
   { prefix: 'EMB', label: 'EMB — embalagens', type: 'EMBALAGEM' },
+  { prefix: 'UNI', label: 'UNI — uniformes e identificação', type: 'CONSUMO' },
 ] as const;
 
 export const FAMILY_PREFIXES: string[] = MATERIAL_FAMILIES.map((f) => f.prefix);

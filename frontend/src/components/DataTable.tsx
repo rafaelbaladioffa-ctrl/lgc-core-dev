@@ -80,7 +80,7 @@ export function DataTable<T>({
   const selectedRows = rows.filter((row) => selected.has(rowKey(row)));
 
   return (
-    <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
+    <div className="axis-data-table" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
       {(filterableColumns.length > 0 || toolbar || bulkActions) && (
         <div
           style={{
@@ -245,6 +245,7 @@ export function StatusBadge({ label, tone }: { label: string; tone: 'default' | 
   const [color, bg] = colors[tone];
   return (
     <span
+      className={`axis-badge axis-badge--${tone === 'default' ? 'neutral' : tone}`}
       style={{
         display: 'inline-block',
         padding: '2px 9px',

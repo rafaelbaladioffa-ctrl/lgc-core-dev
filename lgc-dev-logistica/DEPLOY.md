@@ -3,6 +3,11 @@
 > **Não foi possível executar o `docker compose` nesta máquina de desenvolvimento (sem Docker).** Os arquivos abaixo foram escritos
 > seguindo o padrão do compose do Axis e a aplicação foi validada rodando direto no Node contra um PostgreSQL 16 real
 > (migrations, seed, 358 testes e2e, 343 unitários, build do frontend). **A primeira subida na VPS deve ser acompanhada** — checklist na seção 6.
+>
+> **Revisão de 2026-11-07:**
+> - **Testes:** hoje são 417 unitários no backend e 98 no frontend.
+> - **Eventos (§3):** o Core **não emite** `user.*`, `ticket.status_changed`, `material_request.*` nem `purchase_order.*`, e não tem receptor para `AXIS_EVENTS_URL`. Assinar esses eventos não tem efeito até o contrato ser fechado; veja [../docs/integracao-core-logistica.md](../docs/integracao-core-logistica.md).
+> - **Seed:** `SEED_REVISED_CATALOG` agora é `false` no compose. Ligada, ela **sobrescreve** custo e status dos itens `REV-` a cada partida — e esses itens são os mesmos produtos que já estão em `prisma/materiais-lgc.csv`, então ligá-la duplica o catálogo. Ela também filtrava a listagem e o `purchase-catalog` por código `REV-`; esse filtro foi removido.
 
 ## 1. O que sobe
 

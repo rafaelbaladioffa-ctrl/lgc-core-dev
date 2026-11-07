@@ -6,6 +6,42 @@ import { Button } from '../components/Button';
 import { useAuth } from '../context/AuthContext';
 import { requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
+import { formatBRL } from '../utils/format';
+import { translateApiError } from '../utils/apiError';
+
+// Fases em que a bola ainda está genuinamente com o solicitante — nas demais, a tela dele fica
+// travada (só informação) assim que ela sai das mãos dele, mesmo que o papel dele também carregue
+// uma permissão operacional (admin, gestor etc. testando a própria requisição).
+const REQUESTER_TURN_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante'];
+
+function nextResponsibleLabel(status: RequestStatus, approvals: RequestDetail['approvals']): string {
+  if (status === 'aguardando_aprovacao') {
+    const pending = approvals.filter((a) => a.status === 'pendente');
+    if (pending.length) {
+      const minStep = Math.min(...pending.map((a) => a.stepOrder));
+      const names = [...new Set(pending.filter((a) => a.stepOrder === minStep).map((a) => a.approver.fullName))];
+      return `aguardando aprovação de ${names.join(', ')}`;
+    }
+    return 'aguardando aprovação';
+  }
+  switch (status) {
+    case 'enviada':
+      return 'aguardando triagem do setor responsável';
+    case 'em_triagem':
+      return 'em triagem';
+    case 'aprovada':
+    case 'planejada':
+      return 'aprovada, aguardando início do atendimento';
+    case 'em_atendimento':
+      return 'em atendimento';
+    case 'aguardando_terceiro':
+      return 'aguardando retorno de terceiro';
+    case 'concluida':
+      return 'concluída, aguardando encerramento';
+    default:
+      return 'em andamento com a equipe responsável';
+  }
+}
 
 const STATUS_LABEL: Record<RequestStatus, string> = {
   rascunho: 'Rascunho',
@@ -43,10 +79,17 @@ export function RequestDetailPage() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteId, setQuoteId] = useState('');
   const [quoteFiles, setQuoteFiles] = useState<File[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = async () => {
     if (!id) return;
-    setRequest(await requestsApi.get(id));
+    try {
+      setRequest(await requestsApi.get(id));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(translateApiError(err, 'Não foi possível carregar esta requisição.'));
+    }
   };
 
   useEffect(() => {
@@ -69,16 +112,29 @@ export function RequestDetailPage() {
     setQuoteNotes(quotation?.notes ?? '');
   }, [request?.id]);
 
-  if (!request) return <AppLayout breadcrumb={['Axis', 'Requisições', 'Detalhe']}><p>Carregando...</p></AppLayout>;
+  if (!request) {
+    return (
+      <AppLayout breadcrumb={['Axis', 'Requisições', 'Detalhe']}>
+        {loadError ? <p role="alert" style={{ color: 'var(--danger)' }}>{loadError}</p> : <p>Carregando...</p>}
+      </AppLayout>
+    );
+  }
 
   const canUpdate = hasPermission('request:update');
   const canApprove = hasPermission('request:approve');
-  const canCreate = hasPermission('request:create');
   const canProcure = user?.roles.includes('analista_suprimentos') || user?.roles.includes('admin');
   const purchaseItems = request.formData && typeof request.formData === 'object' && Array.isArray((request.formData as { purchaseItems?: unknown }).purchaseItems)
     ? ((request.formData as { purchaseItems: Array<{ materialId: string; item: string; category?: string; subcategory?: string | null; unit?: string; quantity: number; unitPrice: string | number }> }).purchaseItems)
     : [];
-  const canTriage = canUpdate && user?.collaboratorId !== request.requesterId && user?.collaboratorId !== request.beneficiaryId && (!purchaseItems.length || canProcure);
+  const isRequesterOrBeneficiary = user?.collaboratorId === request.requesterId || user?.collaboratorId === request.beneficiaryId;
+  const requesterLocked = isRequesterOrBeneficiary && !REQUESTER_TURN_STATUSES.includes(request.status);
+  // Concluída + categoria com aceite ainda pendente é a única exceção para o aviso: aí a vez
+  // volta a ser do solicitante (confirmar o recebimento, painel próprio logo abaixo), então o
+  // aviso "travada" ficaria contraditório ao lado do botão de aceite — mas os painéis de staff
+  // (Encerrar etc.) continuam travados normalmente nesse status.
+  const awaitingRequesterAcceptance = request.categoryVersion.category.requiresAcceptance && request.status === 'concluida' && !request.requesterAcceptedAt;
+  const showLockedBanner = requesterLocked && !awaitingRequesterAcceptance;
+  const canTriage = canUpdate && !isRequesterOrBeneficiary && (!purchaseItems.length || canProcure);
   const hasAnalysis = Boolean(request.formData && typeof request.formData === 'object' && (request.formData as { procurementAnalysis?: unknown }).procurementAnalysis);
   const quotationData = request.formData && typeof request.formData === 'object' ? request.formData as { procurementQuotation?: Record<string, unknown>; procurementQuotations?: Array<Record<string, unknown>>; selectedQuotationId?: string } : {};
   const quotations = quotationData.procurementQuotations ?? (quotationData.procurementQuotation ? [quotationData.procurementQuotation] : []);
@@ -87,9 +143,24 @@ export function RequestDetailPage() {
   const saveQuotation = async () => { setQuoteError(null); try { const currentId = quoteId || `cotacao-${Date.now()}`; const uploaded = await Promise.all(quoteFiles.map(async (file) => { const contentBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = reject; reader.readAsDataURL(file); }); return requestsApi.attachment(request.id, { filename: file.name, contentBase64 }); })); await requestsApi.purchaseQuotation(request.id, { quotationId: currentId, supplier, quoteNumber, totalValue: quoteTotal, notes: quoteNotes, attachmentIds: uploaded.map((item) => item.id) }); setQuoteFiles([]); await refresh(); } catch { setQuoteError('Não foi possível registrar a cotação. Verifique os dados e os anexos.'); } };
   const selectQuotation = async (quotationId: string) => { setQuoteError(null); try { await requestsApi.selectPurchaseQuotation(request.id, quotationId); await refresh(); } catch { setQuoteError('Não foi possível selecionar esta cotação.'); } };
 
+  // Toda ação do fluxo passa por aqui: erro do servidor (validação, permissão, status que mudou
+  // enquanto a tela estava aberta) aparece ao lado dos botões em vez de sumir em silêncio.
   const run = async (action: () => Promise<unknown>) => {
-    await action();
+    setActionError(null);
+    try {
+      await action();
+    } catch (err) {
+      setActionError(translateApiError(err, 'Não foi possível concluir a ação. Atualize a página e tente novamente.'));
+    }
     await refresh();
+  };
+
+  const isRequester = user?.collaboratorId === request.requesterId;
+
+  const answerQuestion = () => {
+    const answer = window.prompt('Sua resposta ao atendente:');
+    if (!answer?.trim()) return;
+    void run(() => requestsApi.resume(request.id, answer));
   };
 
   const triage = (type: 'aceitar' | 'devolver') => {
@@ -139,8 +210,13 @@ export function RequestDetailPage() {
   const addComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentBody.trim()) return;
-    await requestsApi.comment(request.id, commentBody);
-    setCommentBody('');
+    setActionError(null);
+    try {
+      await requestsApi.comment(request.id, commentBody);
+      setCommentBody('');
+    } catch (err) {
+      setActionError(translateApiError(err, 'Não foi possível enviar o comentário.'));
+    }
     await refresh();
   };
 
@@ -166,12 +242,9 @@ export function RequestDetailPage() {
           <div style={{ color: 'var(--text-muted)' }}>{request.description}</div>
           <div>
             <span style={{ color: 'var(--text-muted)' }}>Prioridade:</span> {request.priority} · <span style={{ color: 'var(--text-muted)' }}>Confidencialidade:</span> {request.confidentiality}
-            {request.anonymous && (
-              <>
-                {' · '}
-                <span style={{ color: 'var(--text-muted)' }}>Solicitante:</span> {request.requesterDisplay ?? 'Anônimo'}
-              </>
-            )}
+          </div>
+          <div>
+            <span style={{ color: 'var(--text-muted)' }}>Solicitante:</span> {request.requester?.fullName ?? request.requesterDisplay ?? '—'}
           </div>
           <div>
             <span style={{ color: 'var(--text-muted)' }}>Criada em:</span> {formatDateTime(request.createdAt)}
@@ -206,13 +279,13 @@ export function RequestDetailPage() {
             <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead><tr style={{ borderBottom: '1px solid var(--border)', textAlign: 'left' }}><th style={{ padding: 9 }}>Categoria / subcategoria</th><th style={{ padding: 9 }}>Item</th><th style={{ padding: 9 }}>Quantidade</th><th style={{ padding: 9 }}>Valor unitário</th><th style={{ padding: 9 }}>Total</th></tr></thead>
-                <tbody>{purchaseItems.map((item, index) => <tr key={`${item.item}-${index}`} style={{ borderBottom: index === purchaseItems.length - 1 ? undefined : '1px solid var(--border)' }}><td style={{ padding: 9 }}>{item.category ?? '—'} / {item.subcategory ?? '—'}</td><td style={{ padding: 9, fontWeight: 600 }}>{item.item}</td><td style={{ padding: 9 }}>{item.quantity} {item.unit ?? ''}</td><td style={{ padding: 9 }}>R$ {Number(item.unitPrice).toFixed(2)}</td><td style={{ padding: 9 }}>R$ {(Number(item.unitPrice) * Number(item.quantity)).toFixed(2)}</td></tr>)}</tbody>
+                <tbody>{purchaseItems.map((item, index) => <tr key={`${item.item}-${index}`} style={{ borderBottom: index === purchaseItems.length - 1 ? undefined : '1px solid var(--border)' }}><td style={{ padding: 9 }}>{item.category ?? '—'} / {item.subcategory ?? '—'}</td><td style={{ padding: 9, fontWeight: 600 }}>{item.item}</td><td style={{ padding: 9 }}>{item.quantity} {item.unit ?? ''}</td><td style={{ padding: 9 }}>{formatBRL(item.unitPrice)}</td><td style={{ padding: 9 }}>{formatBRL(Number(item.unitPrice) * Number(item.quantity))}</td></tr>)}</tbody>
               </table>
             </div>
           </div>
         )}
 
-        {purchaseItems.length > 0 && canUpdate && canProcure && (
+        {purchaseItems.length > 0 && canUpdate && canProcure && !requesterLocked && (
           <div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Análise de Suprimentos — estoque e cotação</div>
             <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -224,12 +297,12 @@ export function RequestDetailPage() {
           </div>
         )}
 
-        {purchaseItems.length > 0 && hasAnalysis && (canProcure || quotations.length > 0) && (
+        {purchaseItems.length > 0 && hasAnalysis && ((canProcure && !requesterLocked) || quotations.length > 0) && (
           <div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Cotação de fornecedor</div>
             <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-              {quotations.length > 0 && <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 5 }}>{quotations.map((q, index) => { const quotationId = String(q.quotationId ?? index); const isSelected = quotationId === selectedQuotationId || Boolean(q.selected); const canSelect = user?.collaboratorId === request.costCenter?.responsibleCollaborator?.id; return <div key={quotationId} style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 5, padding: 8, background: isSelected ? 'var(--bg-sidebar-active)' : 'transparent', fontSize: 12 }}><span style={{ flex: 1 }}>#{index + 1} — {String(q.supplier ?? '')} · <strong>R$ {Number(q.totalValue ?? 0).toFixed(2)}</strong>{isSelected ? ' · selecionada' : ''}{Array.isArray(q.attachmentIds) && q.attachmentIds.length ? ` · ${q.attachmentIds.length} anexo(s)` : ''}</span>{canSelect && <Button variant={isSelected ? 'positive' : 'secondary'} onClick={() => void selectQuotation(quotationId)}>{isSelected ? 'Fornecedor escolhido' : 'Escolher fornecedor'}</Button>}</div>; })}</div>}
-              {canProcure && request.status === 'em_atendimento' && <><input placeholder="Fornecedor" value={supplier} onChange={(e) => setSupplier(e.target.value)} /><input placeholder="Número da cotação" value={quoteNumber} onChange={(e) => setQuoteNumber(e.target.value)} /><label style={{ fontSize: 12 }}>Valor total (R$)<input type="number" min="0.01" step="0.01" placeholder="0,00" value={quoteTotal} onChange={(e) => setQuoteTotal(e.target.value)} /></label><textarea placeholder="Observações da cotação" value={quoteNotes} onChange={(e) => setQuoteNotes(e.target.value)} rows={2} /><label style={{ fontSize: 12, gridColumn: '1 / -1' }}>Anexos da cotação<input type="file" multiple onChange={(e) => setQuoteFiles(Array.from(e.target.files ?? []))} /><small style={{ display: 'block', color: 'var(--text-muted)' }}>{quoteFiles.length ? `${quoteFiles.length} arquivo(s) selecionado(s)` : 'Anexe proposta, orçamento ou documento do fornecedor.'}</small></label>{quoteError && <p style={{ color: 'var(--danger)', margin: 0, fontSize: 12, gridColumn: '1 / -1' }}>{quoteError}</p>}<div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}><Button variant="positive" onClick={() => void saveQuotation()}>Adicionar/atualizar cotação</Button><Button onClick={() => { setQuoteId(''); setSupplier(''); setQuoteNumber(''); setQuoteTotal(''); setQuoteNotes(''); setQuoteFiles([]); }}>Nova cotação</Button></div></>}
+              {quotations.length > 0 && <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 5 }}>{quotations.map((q, index) => { const quotationId = String(q.quotationId ?? index); const isSelected = quotationId === selectedQuotationId || Boolean(q.selected); const canSelect = user?.collaboratorId === request.costCenter?.responsibleCollaborator?.id && !requesterLocked; return <div key={quotationId} style={{ display: 'flex', alignItems: 'center', gap: 8, border: '1px solid var(--border)', borderRadius: 5, padding: 8, background: isSelected ? 'var(--bg-sidebar-active)' : 'transparent', fontSize: 12 }}><span style={{ flex: 1 }}>#{index + 1} — {String(q.supplier ?? '')} · <strong>R$ {Number(q.totalValue ?? 0).toFixed(2)}</strong>{isSelected ? ' · selecionada' : ''}{Array.isArray(q.attachmentIds) && q.attachmentIds.length ? ` · ${q.attachmentIds.length} anexo(s)` : ''}</span>{canSelect && <Button variant={isSelected ? 'positive' : 'secondary'} onClick={() => void selectQuotation(quotationId)}>{isSelected ? 'Fornecedor escolhido' : 'Escolher fornecedor'}</Button>}</div>; })}</div>}
+              {canProcure && !requesterLocked && request.status === 'em_atendimento' && <><input placeholder="Fornecedor" value={supplier} onChange={(e) => setSupplier(e.target.value)} /><input placeholder="Número da cotação" value={quoteNumber} onChange={(e) => setQuoteNumber(e.target.value)} /><label style={{ fontSize: 12 }}>Valor total (R$)<input type="number" min="0.01" step="0.01" placeholder="0,00" value={quoteTotal} onChange={(e) => setQuoteTotal(e.target.value)} /></label><textarea placeholder="Observações da cotação" value={quoteNotes} onChange={(e) => setQuoteNotes(e.target.value)} rows={2} /><label style={{ fontSize: 12, gridColumn: '1 / -1' }}>Anexos da cotação<input type="file" multiple onChange={(e) => setQuoteFiles(Array.from(e.target.files ?? []))} /><small style={{ display: 'block', color: 'var(--text-muted)' }}>{quoteFiles.length ? `${quoteFiles.length} arquivo(s) selecionado(s)` : 'Anexe proposta, orçamento ou documento do fornecedor.'}</small></label>{quoteError && <p style={{ color: 'var(--danger)', margin: 0, fontSize: 12, gridColumn: '1 / -1' }}>{quoteError}</p>}<div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8 }}><Button variant="positive" onClick={() => void saveQuotation()}>Adicionar/atualizar cotação</Button><Button onClick={() => { setQuoteId(''); setSupplier(''); setQuoteNumber(''); setQuoteTotal(''); setQuoteNotes(''); setQuoteFiles([]); }}>Nova cotação</Button></div></>}
             </div>
           </div>
         )}
@@ -237,12 +310,14 @@ export function RequestDetailPage() {
         <div>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
             <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Subtarefas</div>
-            <button
-              onClick={() => navigate(`/requests/new?parentRequestId=${request.id}`)}
-              style={{ fontSize: 11, padding: '3px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)' }}
-            >
-              + Nova subtarefa
-            </button>
+            {!requesterLocked && (
+              <button
+                onClick={() => navigate(`/requests/new?parentRequestId=${request.id}`)}
+                style={{ fontSize: 11, padding: '3px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--bg)' }}
+              >
+                + Nova subtarefa
+              </button>
+            )}
           </div>
           {request.relationsAsTarget.length === 0 ? (
             <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>Nenhuma subtarefa.</p>
@@ -278,7 +353,29 @@ export function RequestDetailPage() {
           </div>
         )}
 
+        {showLockedBanner && (
+          <div style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 8, padding: 12, fontSize: 13 }}>
+            Esta requisição está {nextResponsibleLabel(request.status, request.approvals)} — a partir de agora, só o próximo responsável pode agir sobre ela. Você pode acompanhar o andamento aqui e comentar, mas não alterar nada.
+          </div>
+        )}
+
+        {actionError && (
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>
+            {actionError}
+          </p>
+        )}
+
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {isRequester && ['rascunho', 'devolvida_ajuste'].includes(request.status) && (
+            <Button variant="positive" onClick={() => void run(() => requestsApi.submit(request.id))}>
+              {request.status === 'devolvida_ajuste' ? 'Reenviar para triagem' : 'Enviar requisição'}
+            </Button>
+          )}
+          {isRequesterOrBeneficiary && request.status === 'aguardando_solicitante' && (
+            <Button variant="positive" onClick={answerQuestion}>
+              Responder ao atendente
+            </Button>
+          )}
           {canTriage && request.status === 'enviada' && (
             <>
               <Button variant="positive" onClick={() => triage('aceitar')}>
@@ -289,7 +386,7 @@ export function RequestDetailPage() {
               </Button>
             </>
           )}
-          {canApprove && request.status === 'aguardando_aprovacao' && (
+          {canApprove && !requesterLocked && request.status === 'aguardando_aprovacao' && (
             <>
               <Button variant="positive" onClick={() => decide('approve')}>
                 Aprovar
@@ -299,12 +396,12 @@ export function RequestDetailPage() {
               </Button>
             </>
           )}
-          {canUpdate && ['aprovada', 'planejada'].includes(request.status) && (
+          {canUpdate && !requesterLocked && ['aprovada', 'planejada'].includes(request.status) && (
             <Button variant="positive" onClick={() => void run(() => requestsApi.start(request.id))}>
               Iniciar atendimento
             </Button>
           )}
-          {canUpdate && request.status === 'em_atendimento' && (
+          {canUpdate && !requesterLocked && request.status === 'em_atendimento' && (
             <>
               <Button variant="secondary" onClick={requestInfo}>
                 Pedir informação ao solicitante
@@ -314,26 +411,32 @@ export function RequestDetailPage() {
               </Button>
             </>
           )}
-          {canUpdate && ['aguardando_solicitante', 'aguardando_terceiro'].includes(request.status) && (
+          {canUpdate && !requesterLocked && ['aguardando_solicitante', 'aguardando_terceiro'].includes(request.status) && (
             <Button variant="secondary" onClick={() => void run(() => requestsApi.resume(request.id))}>
               Retomar atendimento
             </Button>
           )}
-          {canUpdate && request.status === 'concluida' && (
+          {canUpdate && !requesterLocked && request.status === 'concluida' && (
             <Button variant="positive" onClick={() => void run(() => requestsApi.close(request.id))}>
               Encerrar
             </Button>
           )}
-          {canUpdate && ['concluida', 'encerrada', 'reprovada'].includes(request.status) && (
+          {/* Reabrir é legitimamente do solicitante também (RequestsService.reopen já permite
+              actorId === requesterId OU request:update) — nunca trava para ele aqui. */}
+          {(canUpdate || isRequesterOrBeneficiary) && ['concluida', 'encerrada', 'reprovada'].includes(request.status) && (
             <Button variant="secondary" onClick={reopen}>
               Reabrir
             </Button>
           )}
-          {canCreate && !['concluida', 'encerrada', 'cancelada'].includes(request.status) && (
-            <Button variant="danger" onClick={cancel}>
-              Cancelar
-            </Button>
-          )}
+          {/* Cancelar: o solicitante só enquanto a requisição ainda é dele de fato
+              (rascunho/devolvida para ajuste); dali em diante, só quem gerencia o fluxo
+              (request:update) — mesmo critério aplicado em RequestsService.cancel. */}
+          {!['concluida', 'encerrada', 'cancelada'].includes(request.status) &&
+            ((isRequesterOrBeneficiary && ['rascunho', 'devolvida_ajuste'].includes(request.status)) || (!isRequesterOrBeneficiary && canUpdate)) && (
+              <Button variant="danger" onClick={cancel}>
+                Cancelar
+              </Button>
+            )}
         </div>
 
         <div>

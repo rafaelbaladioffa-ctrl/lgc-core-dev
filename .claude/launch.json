@@ -9,8 +9,8 @@
     },
     {
       "name": "axis-backend",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "backend", "run", "start:dev"],
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["--exec", "bash", "-c", "cd /mnt/c/Users/servidor/Documents/orca-dev/lgc-dev-core/backend && npm run start:dev"],
       "port": 3000
     },
     {

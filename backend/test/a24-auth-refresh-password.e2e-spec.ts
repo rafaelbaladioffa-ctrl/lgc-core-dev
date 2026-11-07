@@ -4,16 +4,16 @@ import * as bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
 import { JwtService } from '@nestjs/jwt';
 import { AuthService } from '../src/auth/auth.service.js';
-import { requireBpmTestDatabaseUrl } from './support/bpm-test-database.js';
+import { requireTestDatabaseUrl } from './support/test-database.js';
 
 /**
  * A24 authentication fixture.
  *
  * This suite deliberately exercises the service contract instead of the running
- * Axis instance. It only runs when BPM_TEST_DATABASE_URL points at a local
- * database ending in _bpm_test; every record is synthetic and uniquely named.
+ * Axis instance. It only runs when TEST_DATABASE_URL points at a local
+ * database ending in _test; every record is synthetic and uniquely named.
  */
-describe.skipIf(!process.env.BPM_TEST_DATABASE_URL)(
+describe.skipIf(!process.env.TEST_DATABASE_URL)(
   'A24 — isolated login, refresh and password-change smoke',
   () => {
     let prisma: PrismaClient;
@@ -23,7 +23,7 @@ describe.skipIf(!process.env.BPM_TEST_DATABASE_URL)(
     const nextPassword = 'A24-next-password';
 
     beforeAll(async () => {
-      const url = requireBpmTestDatabaseUrl();
+      const url = requireTestDatabaseUrl();
       prisma = new PrismaClient({ datasources: { db: { url } } });
       await prisma.$connect();
 

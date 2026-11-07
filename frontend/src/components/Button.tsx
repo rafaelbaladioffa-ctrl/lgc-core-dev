@@ -6,12 +6,15 @@ import type { ButtonHTMLAttributes } from 'react';
  * everything else, info blue/cyan for configure-type actions, danger red for destructive ones —
  * always with confirmation + permission already enforced by the caller.
  */
-export type ButtonVariant = 'primary' | 'positive' | 'secondary' | 'info' | 'danger';
+export type ButtonVariant = 'primary' | 'positive' | 'secondary' | 'tertiary' | 'ghost' | 'outline' | 'info' | 'danger';
 
 const VARIANT_STYLES: Record<ButtonVariant, React.CSSProperties> = {
-  primary: { background: 'var(--bg-topbar)', color: '#fff', border: 'none' },
-  positive: { background: 'var(--success)', color: '#fff', border: 'none' },
-  secondary: { background: 'var(--bg-elevated)', color: 'var(--text)', border: '1px solid var(--border)' },
+  primary: { background: 'var(--primary)', color: 'var(--primary-foreground)', border: '1px solid var(--primary)' },
+  positive: { background: 'var(--primary)', color: 'var(--primary-foreground)', border: '1px solid var(--primary)' },
+  secondary: { background: 'var(--surface)', color: 'var(--foreground)', border: '1px solid var(--border)' },
+  tertiary: { background: 'var(--surface-secondary)', color: 'var(--foreground)', border: '1px solid var(--border-subtle)' },
+  ghost: { background: 'transparent', color: 'var(--primary)', border: '1px solid transparent' },
+  outline: { background: 'transparent', color: 'var(--primary)', border: '1px solid var(--primary)' },
   info: { background: 'var(--accent)', color: '#fff', border: 'none' },
   danger: { background: 'var(--danger)', color: '#fff', border: 'none' },
 };
@@ -28,8 +31,8 @@ export function Button({ variant = 'secondary', style, children, ...rest }: Butt
         height: 'var(--control-height)',
         padding: '0 14px',
         borderRadius: 'var(--radius)',
-        fontSize: 12,
-        fontWeight: variant === 'secondary' ? 400 : 600,
+        fontSize: 'var(--text-sm)',
+        fontWeight: variant === 'secondary' || variant === 'tertiary' ? 500 : 600,
         whiteSpace: 'nowrap',
         ...VARIANT_STYLES[variant],
         ...style,

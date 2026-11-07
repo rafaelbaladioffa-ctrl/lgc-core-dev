@@ -1,0 +1,41 @@
+# Documentação do Axis
+
+Índice da documentação do Core e do satélite Logística. Reorganizada em 2026-11-07: cada
+documento abaixo foi conferido contra o código da branch `rafaelbaladioffa-ctrl/minhas-atividades`.
+O que descreve código removido ou entregas passadas está em [arquivo/](arquivo/README.md).
+
+## Comece aqui
+
+- [avaliacao-2026-11-07.md](avaliacao-2026-11-07.md) — diagnóstico do código, riscos e prioridades.
+- [arquitetura.md](arquitetura.md) — visão geral, módulos, segurança, integração e decisões.
+- [operacao.md](operacao.md) — como subir, variáveis de ambiente, migrações, backup.
+- [diretrizes-desenvolvimento.md](diretrizes-desenvolvimento.md) — padrões obrigatórios e Definition of Done.
+- [integracao-core-logistica.md](integracao-core-logistica.md) — contratos entre Core e Logística.
+
+## Domínio
+
+| Documento | Natureza |
+|---|---|
+| [dominio/cadastros.md](dominio/cadastros.md) | Como o código funciona hoje (colaboradores, setores, CC, clientes, projetos, usuários) |
+| [dominio/requisicoes-estado-atual.md](dominio/requisicoes-estado-atual.md) | Como o módulo Requisições funciona **hoje** |
+| [dominio/requisicoes-spec.md](dominio/requisicoes-spec.md) | Especificação funcional **alvo** (nem tudo está implementado) |
+| [dominio/requisicoes-regras-motor.md](dominio/requisicoes-regras-motor.md) | Regras normativas para a reescrita do motor de processos |
+| [dominio/requisicoes-roadmap.md](dominio/requisicoes-roadmap.md) | Pré-requisitos, entregas E0–E6, lacunas e critérios de aceite |
+| [dominio/decisoes-negocio.md](dominio/decisoes-negocio.md) | Decisões tomadas e pendentes do negócio |
+
+## Design
+
+- [design/identidade-visual.md](design/identidade-visual.md) — marca, tokens reais do app e pendências.
+- [design/checklist-qa-rotas.md](design/checklist-qa-rotas.md) — checklist de QA por rota do frontend.
+
+## Logística
+
+- [../lgc-dev-logistica/README.md](../lgc-dev-logistica/README.md) — como rodar e o que foi entregue.
+- [../lgc-dev-logistica/docs/especificacao.md](../lgc-dev-logistica/docs/especificacao.md) — especificação do satélite.
+- [../lgc-dev-logistica/DEPLOY.md](../lgc-dev-logistica/DEPLOY.md) — implantação.
+
+## Convenções desta pasta
+
+- Documentos de **estado atual** citam arquivos do código e precisam ser atualizados no mesmo PR que mudar o comportamento descrito.
+- Documentos de **especificação/alvo** dizem explicitamente o que ainda não existe.
+- Nada é apagado por ficar velho: vai para `arquivo/` com data no nome.

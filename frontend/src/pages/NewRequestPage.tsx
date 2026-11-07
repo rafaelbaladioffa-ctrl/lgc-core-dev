@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { FormPage, FormSection } from '../components/layout/FormPage';
+import { FormPage, FormSection, fieldStyle, labelStyle } from '../components/layout/FormPage';
+import { formatBRL } from '../utils/format';
 import { requestCategoriesApi, type RequestCategory, type RequestFormField, type RequestFieldOptionsSource } from '../api/requestCategories';
 import { requestsApi, type CreateRequestInput } from '../api/requests';
 import { projectsApi, type Project } from '../api/projects';
@@ -55,12 +56,15 @@ export function NewRequestPage() {
   const [requester, setRequester] = useState<CollaboratorSafe | null>(null);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [purchaseCatalog, setPurchaseCatalog] = useState<LogisticsCatalogItem[]>([]);
+  // Disponível em estoque por materialId — ver logisticsCatalogApi.availability.
+  const [stockAvailability, setStockAvailability] = useState<Record<string, string>>({});
   const [purchaseRows, setPurchaseRows] = useState<PurchaseRow[]>([]);
   const [purchaseSearch, setPurchaseSearch] = useState('');
   const [purchaseCategory, setPurchaseCategory] = useState('');
   const [purchaseSubcategory, setPurchaseSubcategory] = useState('');
   const [purchaseItemSelection, setPurchaseItemSelection] = useState('');
   const [categoryId, setCategoryId] = useState(searchParams.get('categoryId') ?? '');
+  const [pickerSectorId, setPickerSectorId] = useState('');
   const parentRequestId = searchParams.get('parentRequestId') ?? undefined;
   const [form, setForm] = useState(emptyForm);
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
@@ -77,6 +81,17 @@ export function NewRequestPage() {
     );
   }, []);
 
+  // Setor → requisição em cascata (em vez de uma lista única com todas as categorias): só setores
+  // com ao menos uma categoria publicada aparecem no primeiro select.
+  const sectorsWithCategories = useMemo(
+    () => sectors.filter((s) => categories.some((c) => c.sectorId === s.id)).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [sectors, categories],
+  );
+  const categoriesForSector = useMemo(
+    () => categories.filter((c) => c.sectorId === pickerSectorId).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+    [categories, pickerSectorId],
+  );
+
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const customFields: RequestFormField[] = useMemo(() => selectedCategory?.currentVersion?.formSchema ?? [], [selectedCategory]);
   const isPurchaseRequest = selectedCategory?.code === 'SUP-COMPRA' || selectedCategory?.name.toLowerCase() === 'compra de material';
@@ -85,9 +100,25 @@ export function NewRequestPage() {
   const purchaseTitle = requesterSector ? `Compra de Materiais - ${requesterParentSector ? `${requesterParentSector.name}/${requesterSector.name}` : requesterSector.name}` : 'Compra de Materiais';
 
   useEffect(() => {
-    if (!isPurchaseRequest) { setPurchaseCatalog([]); setPurchaseRows([]); return; }
-    void logisticsCatalogApi.list().then(setPurchaseCatalog).catch(() => setError('Não foi possível carregar o catálogo da Logística.'));
+    if (!isPurchaseRequest) { setPurchaseCatalog([]); setStockAvailability({}); setPurchaseRows([]); return; }
+    void logisticsCatalogApi
+      .list()
+      .then((items) => {
+        setPurchaseCatalog(items);
+        return logisticsCatalogApi.availability(items.map((item) => item.id));
+      })
+      .then((rows) => setStockAvailability(Object.fromEntries(rows.map((row) => [row.material_id, row.available]))))
+      .catch(() => setError('Não foi possível carregar o catálogo da Logística.'));
   }, [isPurchaseRequest]);
+
+  /** "3 disponíveis em estoque" / "1 disponível em estoque" — vazio enquanto a consulta de
+   * disponibilidade (segunda chamada, depois do catálogo) ainda não voltou para este item. */
+  function stockLabel(materialId: string): string {
+    const raw = stockAvailability[materialId];
+    if (raw === undefined) return '';
+    const n = Number(raw);
+    return `${n.toLocaleString('pt-BR')} ${n === 1 ? 'disponível' : 'disponíveis'} em estoque`;
+  }
 
   function pickCategory(id: string) {
     setCategoryId(id);
@@ -100,15 +131,19 @@ export function NewRequestPage() {
     () => [...new Set(purchaseCatalog.filter((item) => !purchaseCategory || item.category === purchaseCategory).map((item) => item.subcategory || 'Sem subcategoria'))].sort(),
     [purchaseCatalog, purchaseCategory],
   );
+  // Um item já adicionado some das três listas (busca, categoria/subcategoria/item): além de não
+  // ter sentido escolhê-lo de novo (vira no-op silencioso — addPurchaseRow ignora duplicata), ele
+  // já está visível na lista de itens adicionados logo abaixo, com seu campo de quantidade.
+  const addedMaterialIds = useMemo(() => new Set(purchaseRows.map((row) => row.materialId)), [purchaseRows]);
   const purchaseItems = useMemo(
-    () => purchaseCatalog.filter((item) => (!purchaseCategory || item.category === purchaseCategory) && (!purchaseSubcategory || (item.subcategory || 'Sem subcategoria') === purchaseSubcategory)),
-    [purchaseCatalog, purchaseCategory, purchaseSubcategory],
+    () => purchaseCatalog.filter((item) => !addedMaterialIds.has(item.id) && (!purchaseCategory || item.category === purchaseCategory) && (!purchaseSubcategory || (item.subcategory || 'Sem subcategoria') === purchaseSubcategory)),
+    [purchaseCatalog, purchaseCategory, purchaseSubcategory, addedMaterialIds],
   );
   const purchaseSearchResults = useMemo(() => {
     const query = purchaseSearch.trim().toLowerCase();
     if (!query) return [];
-    return purchaseCatalog.filter((item) => `${item.code} ${item.shortDescription} ${item.category} ${item.subcategory ?? ''}`.toLowerCase().includes(query)).slice(0, 20);
-  }, [purchaseCatalog, purchaseSearch]);
+    return purchaseCatalog.filter((item) => !addedMaterialIds.has(item.id) && `${item.code} ${item.shortDescription} ${item.category} ${item.subcategory ?? ''}`.toLowerCase().includes(query)).slice(0, 20);
+  }, [purchaseCatalog, purchaseSearch, addedMaterialIds]);
 
   function addPurchaseRow(materialId: string) {
     if (!materialId || purchaseRows.some((row) => row.materialId === materialId)) return;
@@ -126,6 +161,10 @@ export function NewRequestPage() {
 
     if (!categoryId) {
       setError('Selecione uma categoria.');
+      return;
+    }
+    if (!form.costCenterId) {
+      setError('Selecione o centro de custo.');
       return;
     }
     if (isPurchaseRequest && purchaseRows.length === 0) {
@@ -157,14 +196,36 @@ export function NewRequestPage() {
     <FormPage breadcrumb={['Axis', 'Requisições', 'Nova']} onSubmit={onSubmit} onCancel={() => navigate('/requests')} error={error} submitLabel="Enviar requisição">
       {!categoryId && (
         <FormSection title="Categoria">
-          <select value={categoryId} onChange={(e) => pickCategory(e.target.value)} required>
-            <option value="">Selecione a categoria</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name} ({c.code})
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={fieldStyle}>
+              <label style={labelStyle}>Setor</label>
+              <select
+                value={pickerSectorId}
+                onChange={(e) => setPickerSectorId(e.target.value)}
+                required
+              >
+                <option value="">Selecione o setor</option>
+                {sectorsWithCategories.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {pickerSectorId && (
+              <div style={fieldStyle}>
+                <label style={labelStyle}>Requisição</label>
+                <select value={categoryId} onChange={(e) => pickCategory(e.target.value)} required>
+                  <option value="">Selecione a requisição</option>
+                  {categoriesForSector.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
         </FormSection>
       )}
 
@@ -172,6 +233,10 @@ export function NewRequestPage() {
         <FormSection title="Dados da requisição">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {isPurchaseRequest ? <input value={purchaseTitle} readOnly aria-label="Título da requisição" /> : <input placeholder="Título (10-120 caracteres)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={10} maxLength={120} />}
+            <div style={fieldStyle}>
+              <label style={labelStyle}>Solicitante</label>
+              <input value={requester?.fullName ?? ''} readOnly aria-label="Solicitante" />
+            </div>
             <textarea placeholder="Descrição/justificativa" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} required />
             <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as CreateRequestInput['priority'] })}>
               <option value="baixa">Prioridade: Baixa</option>
@@ -181,7 +246,15 @@ export function NewRequestPage() {
             </select>
             <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>Data necessária</label>
             <input type="date" value={form.neededBy ?? ''} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} />
-            {isPurchaseRequest && <select value={form.costCenterId ?? ''} onChange={(e) => setForm({ ...form, costCenterId: e.target.value || undefined })} required><option value="">Selecione o centro de custo *</option>{optionData.cost_centers.map((cc) => <option key={cc.id} value={cc.id}>{cc.code} — {cc.name}</option>)}</select>}
+            {/* Toda requisição exige centro de custo, não só compras — RequestsService.create valida de novo no servidor. */}
+            <select value={form.costCenterId ?? ''} onChange={(e) => setForm({ ...form, costCenterId: e.target.value || undefined })} required>
+              <option value="">Selecione o centro de custo *</option>
+              {optionData.cost_centers.map((cc) => (
+                <option key={cc.id} value={cc.id}>
+                  {cc.code} — {cc.name}
+                </option>
+              ))}
+            </select>
           </div>
         </FormSection>
       )}
@@ -214,10 +287,13 @@ export function NewRequestPage() {
               disabled={purchaseCatalog.length === 0}
               aria-label="Pesquisar item da Logística"
             />
+            {/* Não limpa purchaseSearch ao adicionar: a lista continua na tela com o mesmo termo,
+                pra dar pra escolher outro item sem redigitar a busca inteira de novo — o item
+                recém-adicionado já some da lista por addedMaterialIds. */}
             {purchaseSearch.trim() && (
-              <select value="" onChange={(e) => { addPurchaseRow(e.target.value); setPurchaseSearch(''); }} disabled={purchaseSearchResults.length === 0} aria-label="Resultado da pesquisa de item">
+              <select value="" onChange={(e) => addPurchaseRow(e.target.value)} disabled={purchaseSearchResults.length === 0} aria-label="Resultado da pesquisa de item">
                 <option value="">{purchaseSearchResults.length ? 'Selecione o item encontrado' : 'Nenhum item encontrado — use os filtros abaixo'}</option>
-                {purchaseSearchResults.map((item) => <option key={item.id} value={item.id}>{item.category} / {item.subcategory || 'Sem subcategoria'} / {item.shortDescription} — R$ {Number(item.unitPrice).toFixed(2)} / {item.unit}</option>)}
+                {purchaseSearchResults.map((item) => <option key={item.id} value={item.id}>{item.category} / {item.subcategory || 'Sem subcategoria'} / {item.shortDescription} — {formatBRL(item.unitPrice)} / {item.unit} — {stockLabel(item.id)}</option>)}
               </select>
             )}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto', gap: 10, alignItems: 'center' }}>
@@ -231,14 +307,14 @@ export function NewRequestPage() {
               </select>
               <select value={purchaseItemSelection} onChange={(e) => setPurchaseItemSelection(e.target.value)} disabled={!purchaseSubcategory || purchaseItems.length === 0} aria-label="Item da Logística">
                 <option value="">{purchaseSubcategory ? 'Item' : 'Selecione categoria e subcategoria'}</option>
-                {purchaseItems.map((item) => <option key={item.id} value={item.id}>{item.shortDescription} — R$ {Number(item.unitPrice).toFixed(2)} / {item.unit}</option>)}
+                {purchaseItems.map((item) => <option key={item.id} value={item.id}>{item.shortDescription} — {formatBRL(item.unitPrice)} / {item.unit} — {stockLabel(item.id)}</option>)}
               </select>
               <button type="button" onClick={() => addPurchaseRow(purchaseItemSelection)} disabled={!purchaseItemSelection || purchaseRows.some((row) => row.materialId === purchaseItemSelection)}>Adicionar item</button>
             </div>
             <small style={{ color: 'var(--text-muted)' }}>{purchaseRows.length ? `${purchaseRows.length} item(ns) adicionado(s). Selecione outro item e clique em “Adicionar item”.` : 'Você pode adicionar vários itens diferentes na mesma requisição.'}</small>
             {purchaseRows.map((row) => {
               const item = purchaseCatalog.find((candidate) => candidate.id === row.materialId)!;
-              return <div key={row.materialId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px auto', gap: 8, alignItems: 'center' }}><span>{item.category} / {item.subcategory ?? '—'} / <strong>{item.shortDescription}</strong><br /><small>R$ {Number(item.unitPrice).toFixed(2)} por {item.unit}</small></span><input type="number" min="1" step="1" value={row.quantity} aria-label={`Quantidade de ${item.shortDescription}`} onChange={(e) => setPurchaseRows((rows) => rows.map((current) => current.materialId === row.materialId ? { ...current, quantity: Math.max(1, Number(e.target.value) || 1) } : current))} /><button type="button" onClick={() => setPurchaseRows((rows) => rows.filter((current) => current.materialId !== row.materialId))}>Remover</button></div>;
+              return <div key={row.materialId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px auto', gap: 8, alignItems: 'center' }}><span>{item.category} / {item.subcategory ?? '—'} / <strong>{item.shortDescription}</strong><br /><small>{formatBRL(item.unitPrice)} por {item.unit} — {stockLabel(item.id)}</small></span><input type="number" min="1" step="1" value={row.quantity} aria-label={`Quantidade de ${item.shortDescription}`} onChange={(e) => setPurchaseRows((rows) => rows.map((current) => current.materialId === row.materialId ? { ...current, quantity: Math.max(1, Number(e.target.value) || 1) } : current))} /><button type="button" onClick={() => setPurchaseRows((rows) => rows.filter((current) => current.materialId !== row.materialId))}>Remover</button></div>;
             })}
           </div>
         </FormSection>

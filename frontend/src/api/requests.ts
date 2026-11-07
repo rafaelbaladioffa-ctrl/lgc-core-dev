@@ -47,6 +47,13 @@ export interface AxisRequest {
   createdAt: string;
 }
 
+/** Linha da fila (`GET /requests/queue`): só cabeçalho, sem descrição/formulário, e com a
+ * identidade mascarada (`null`) quando a requisição é anônima e o leitor não pode vê-la. */
+export type QueueRequest = Pick<
+  AxisRequest,
+  'id' | 'code' | 'title' | 'sectorId' | 'queueId' | 'categoryVersionId' | 'assigneeId' | 'priority' | 'confidentiality' | 'anonymous' | 'status' | 'slaDueResolutionAt' | 'createdAt'
+> & { requesterId: string | null; beneficiaryId: string | null; requesterDisplay: string | null };
+
 export interface RequestApproval {
   id: string;
   stepOrder: number;
@@ -80,6 +87,8 @@ export interface RequestDetail extends AxisRequest {
   // Null unless a denúncia (§7.3) is marked anônima; "Anônimo" when the viewer lacks
   // request:view_whistleblower_identity (requesterId also comes back null in that case).
   requesterDisplay: string | null;
+  // Ausente (não null) quando mascarado por denúncia anônima — ver requesterDisplay acima.
+  requester?: { id: string; fullName: string };
   formData?: { purchaseItems?: PurchaseRequestItem[] } | Record<string, unknown> | null;
   costCenter?: { id: string; code: string; name: string; responsibleCollaborator?: { id: string; fullName: string } | null } | null;
 }
@@ -139,12 +148,35 @@ export interface RequestsDashboard {
   loadByAssignee: Array<{ assigneeId: string; count: number }>;
 }
 
+export type MyActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao';
+export type MyActivityBucket = 'no_prazo' | 'em_alerta' | 'atrasado';
+
+/** Um item da tela "Minhas atividades" (§15.1, tela inicial do módulo) — uma requisição que
+ * precisa de alguma ação da pessoa logada, venha ela de onde vier (própria, triagem, aprovação
+ * ou execução). `dueAt`/`bucket` só existem de verdade quando o relógio de SLA de solução já
+ * está rodando (depois da aprovação) — antes disso `bucket` sempre vem `no_prazo`. */
+export interface MyActivity {
+  kind: MyActivityKind;
+  requestId: string;
+  code: string;
+  title: string;
+  status: RequestStatus;
+  categoryId: string;
+  categoryName: string;
+  categoryVersionNumber: number;
+  dueAt: string | null;
+  bucket: MyActivityBucket;
+  createdAt: string;
+  approvalId?: string;
+}
+
 export const requestsApi = {
   create: (input: CreateRequestInput) => api.post<AxisRequest>('/requests', input).then((r) => r.data),
   mine: () => api.get<AxisRequest[]>('/requests/mine').then((r) => r.data),
-  queue: (params?: { sectorId?: string; status?: RequestStatus }) => api.get<AxisRequest[]>('/requests/queue', { params }).then((r) => r.data),
+  queue: (params?: { sectorId?: string; status?: RequestStatus }) => api.get<QueueRequest[]>('/requests/queue', { params }).then((r) => r.data),
   dashboard: () => api.get<RequestsDashboard>('/requests/dashboard').then((r) => r.data),
   myApprovals: () => api.get<MyApproval[]>('/requests/my-approvals').then((r) => r.data),
+  myActivities: () => api.get<MyActivity[]>('/requests/my-activities').then((r) => r.data),
   get: (id: string) => api.get<RequestDetail>(`/requests/${id}`).then((r) => r.data),
   submit: (id: string) => api.post<AxisRequest>(`/requests/${id}/submit`).then((r) => r.data),
   triage: (id: string, action: 'aceitar' | 'devolver' | 'recategorizar', reason?: string, newCategoryId?: string) =>

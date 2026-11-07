@@ -32,13 +32,15 @@ export class RequestCategoriesService {
     });
   }
 
-  /** Catalog for the portal/new-request screen: active categories with their latest version. */
+  /** Catalog for the portal/new-request screen: active categories with their latest version.
+   * `bpmStatus` filtered the pilot's BPM-only versions out of this legacy catalog — removed
+   * along with the rest of the BPM module (98dfce5); every version here is a legacy one now, so
+   * "has at least one version" is already the right condition. */
   async findAllCatalog(sectorId?: string) {
     const categories = await this.prisma.requestCategory.findMany({
-      where: { active: true, sectorId, versions: { some: { bpmStatus: null } } },
+      where: { active: true, sectorId, versions: { some: {} } },
       include: {
         versions: {
-          where: { bpmStatus: null },
           orderBy: { version: 'desc' },
           take: 1,
         },
@@ -53,7 +55,6 @@ export class RequestCategoriesService {
       where: { id },
       include: {
         versions: {
-          where: { bpmStatus: null },
           orderBy: { version: 'desc' },
         },
       },
@@ -65,7 +66,7 @@ export class RequestCategoriesService {
 
   async latestVersion(categoryId: string) {
     const version = await this.prisma.categoryVersion.findFirst({
-      where: { categoryId, bpmStatus: null },
+      where: { categoryId },
       orderBy: { version: 'desc' },
     });
     if (!version) throw new NotFoundException('Categoria sem versão publicada');

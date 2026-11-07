@@ -22,9 +22,6 @@ import { HolidaysModule } from './holidays/holidays.module.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { UsersModule } from './users/users.module.js';
 import { AuditLogInterceptor } from './audit/audit-log.interceptor.js';
-import { RequestProcessesModule } from './request-processes/request-processes.module.js';
-import { RequestRuntimeModule } from './request-runtime/request-runtime.module.js';
-
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
@@ -48,8 +45,6 @@ import { RequestRuntimeModule } from './request-runtime/request-runtime.module.j
     HolidaysModule,
     IntegrationModule,
     UsersModule,
-    RequestProcessesModule,
-    RequestRuntimeModule,
   ],
   providers: [{ provide: APP_INTERCEPTOR, useClass: AuditLogInterceptor }],
 })

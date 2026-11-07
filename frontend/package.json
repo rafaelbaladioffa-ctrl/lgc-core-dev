@@ -6,12 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test:journey": "vitest run --config vitest.config.ts",
-    "test:a23": "playwright test e2e/a23-mobile.spec.ts",
+    "test": "vitest run --config vitest.config.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@xyflow/react": "^12.12.1",
     "axios": "^1.21.0",
     "jwt-decode": "^4.0.0",
     "react": "^19.3.1",

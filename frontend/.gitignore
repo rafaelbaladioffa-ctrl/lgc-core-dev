@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cache do Vite (vite.config.ts → cacheDir)
+.vite-codex-cache

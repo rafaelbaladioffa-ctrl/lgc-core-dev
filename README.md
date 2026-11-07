@@ -1,144 +1,81 @@
 # Axis
 
-Sistema core corporativo — ver [PLANNING.md](./PLANNING.md) para o documento de arquitetura completo.
+ERP interno da **LGC Instalações e Projetos** (Sumaré-SP), usado pelas equipes de campo e de escritório.
+O Axis é organizado em um **Core** (identidade, cadastros, requisições, integração) e **satélites**
+especializados. Este repositório contém o Core e o satélite **Logística** (almoxarifado/WMS).
 
-Este repositório cobre as **Fases 1 a 6** do roadmap (Sprints 1–9):
-auth/RBAC, Setores, Centros de Custo, audit log, CRUD de Colaboradores com criptografia de campos
-sensíveis, hierarquia/organograma, certificações técnicas (NR-10/35/12/18), Clientes e Projetos com
-códigos sequenciais atômicos, chamados com motor de SLA/escalonamento, integração com satélites
-(outbox transacional, webhooks assinados, API de consulta síncrona), e hardening (revisão de
-segurança, backup automatizado, documentação de deploy).
+| Parte | Pasta | Stack | Porta (dev) |
+|---|---|---|---|
+| Core — API | [`backend/`](backend/) | NestJS 12 · Prisma 5 · PostgreSQL 16 · TypeScript (ESM) | 3000 (`/api/v1`) |
+| Core — Web | [`frontend/`](frontend/) | React 19 · Vite 8 · React Router 7 · TypeScript | 5173 |
+| Logística — API | [`lgc-dev-logistica/backend/`](lgc-dev-logistica/backend/) | NestJS 12 · Prisma 5 · PostgreSQL 16 (banco próprio) | 3100 (`/api/v1`) |
+| Logística — PWA | [`lgc-dev-logistica/frontend/`](lgc-dev-logistica/frontend/) | React 19 · Vite 8 · PWA offline | 5174 |
 
-## Estrutura
+> **Estado em 2026-11-07:** o motor BPM (P01–P04) foi removido em 02/11 para reescrita; o módulo
+> Requisições segue no fluxo "legado" em evolução. Antes de qualquer deploy novo, leia
+> [docs/avaliacao-2026-11-07.md](docs/avaliacao-2026-11-07.md) — há bloqueios conhecidos
+> (migrações que não rodam em banco vazio, testes quebrados, vazamento de dados na fila de requisições).
 
-- `backend/` — API NestJS + Prisma + PostgreSQL
-- `frontend/` — SPA React (Vite) — login + tela de colaboradores/organograma
-- `docker-compose.yml` — orquestra postgres + backend + frontend
+## O que o Core faz hoje
 
-## Rodando com Docker
+- **Acesso:** login JWT (access 15 min + refresh 7 dias com rotação), troca obrigatória de senha, RBAC por permissões `recurso:ação`, papéis `admin`, `rh`, `gestor`, `tecnico`, `analista_suprimentos`, `colaborador`, `compliance`.
+- **Cadastros:** colaboradores (dados sensíveis criptografados + log de acesso LGPD, organograma, desligamento), certificações NR, setores e centros de custo hierárquicos, cargos, jornadas, clientes, projetos, usuários e grupos.
+- **Requisições:** catálogo por setor/categoria versionada, Minhas atividades, triagem, cadeia de aprovação hierárquica com alçada por valor e delegação, compra de material com itens da Logística, SLA com calendário de feriados, anexos, comentários, painel.
+- **Integração:** outbox transacional + webhooks assinados (HMAC), API de consulta para satélites (API key), launcher de satélites com token de 90 s.
+
+Detalhes em [docs/](docs/README.md).
+
+## Começando (Docker)
+
+Pré-requisitos: Docker com Compose v2.
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+Edite `backend/.env`: gere `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET` e `FIELD_ENCRYPTION_KEY`
+(64 caracteres hex) e defina `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`. Sem senha definida, o seed
+gera uma aleatória e a imprime no log do container `backend`.
+
+O compose do Core depende da rede da Logística (`lgc-dev-logistica_default`, declarada como
+`external`). Suba a Logística primeiro:
+
+```bash
+docker compose -f lgc-dev-logistica/docker-compose.yml up -d --build
+```
 
 ```bash
 docker compose up --build
 ```
 
-Isso irá:
-1. Subir o PostgreSQL 16.
-2. Aplicar as migrations do Prisma (`prisma migrate deploy`).
-3. Rodar o seed de roles/permissions/usuário admin padrão.
-4. Iniciar a API em `http://localhost:3000/api/v1`.
-5. Servir o frontend em `http://localhost:5173`.
-6. Subir o serviço `backup`, que grava um dump do PostgreSQL ao iniciar e a cada 24h (ver
-   [Backup e restauração](#backup-e-restauração)).
+- API: http://localhost:3000/api/v1
+- Web: http://localhost:5173 (o nginx faz proxy de `/logistica-api/` para a Logística)
+- Postgres: localhost:5432 (`axis`/`axis`, só para desenvolvimento)
+- Backup diário automático no volume `axis_backups`
 
-Usuário admin padrão (definido em `backend/.env`): `admin@axis.local` / `ChangeMe123!`
-— **troque a senha e os segredos (`JWT_*_SECRET`, `FIELD_ENCRYPTION_KEY`) antes de qualquer uso real.**
+Variáveis, backup/restauração, desenvolvimento sem Docker e cuidados com migrações:
+[docs/operacao.md](docs/operacao.md).
 
-## Variáveis de ambiente (`backend/.env`)
+## Mapa do repositório
 
-| Variável | Descrição |
+```
+backend/                 API do Core (src/<módulo>, prisma/schema.prisma, prisma/migrations, prisma/seed*.ts)
+frontend/                Web do Core (src/pages, src/components, src/api, src/styles/axis-tokens.css)
+lgc-dev-logistica/       Satélite Logística (backend/, frontend/, docs/especificacao.md, DEPLOY.md)
+branding/                Assets de marca (logos, ícones, social) — regras em docs/design/identidade-visual.md
+docs/                    Documentação (índice em docs/README.md); docs/arquivo/ guarda material histórico
+docker-compose.yml       Postgres + backend + frontend + backup do Core
+AGENTS.md                Regras para agentes de IA e desenvolvedores
+```
+
+## Documentação
+
+| Documento | Para quê |
 |---|---|
-| `DATABASE_URL` | String de conexão do Postgres (sobrescrita pelo `docker-compose.yml` para apontar ao serviço `postgres`) |
-| `JWT_ACCESS_SECRET` / `JWT_REFRESH_SECRET` | Segredos de assinatura dos tokens JWT — **gerar valores aleatórios únicos por ambiente**, nunca reaproveitar os de desenvolvimento |
-| `JWT_ACCESS_TTL` / `JWT_REFRESH_TTL` | Tempo de vida dos tokens (ex.: `15m`, `7d`) |
-| `FIELD_ENCRYPTION_KEY` | Chave AES-256 em hex, **exatamente 64 caracteres** (32 bytes) — usada para criptografar CPF/RG/CTPS/PIS e o `hmac_secret` dos satélites. Gerar com `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. **Trocar essa chave sem migrar os dados já gravados torna os campos criptografados irrecuperáveis.** |
-| `PORT` | Porta da API (padrão `3000`) |
-| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | Credenciais do usuário admin criado pelo seed |
-
-Os segredos de cada satélite (API key e HMAC secret) são gerados pela própria API no momento do
-registro (`POST /integration/satellites`) e devolvidos em texto puro **uma única vez** — não ficam
-em variável de ambiente.
-
-## Backup e restauração
-
-O serviço `backup` (ver `docker-compose.yml` e `backend/scripts/backup-postgres.sh`) gera um dump
-comprimido do PostgreSQL em `/backups` (volume `axis_backups`) ao iniciar e a cada 24h, mantendo os
-últimos `RETENTION_DAYS` dias (padrão 30, conforme seção 7 do PLANNING.md) e removendo os mais antigos.
-
-Backup manual, a qualquer momento:
-```bash
-docker compose exec backup sh /scripts/backup-postgres.sh
-```
-
-Listar backups disponíveis:
-```bash
-docker compose exec backup ls -la /backups
-```
-
-Restaurar um dump (sobrescreve os dados atuais do banco):
-```bash
-docker compose exec backup sh /scripts/restore-postgres.sh /backups/axis_<timestamp>.sql.gz
-```
-
-Para agendar em horário fixo em vez do laço de 24h do container, substitua o `command` do serviço
-`backup` por um cron do host/CI chamando `docker compose exec backup sh /scripts/backup-postgres.sh`.
-
-## Rodando sem Docker (desenvolvimento local)
-
-Requer Node 20+ e um PostgreSQL 16 acessível.
-
-```bash
-cd backend
-npm install
-npx prisma migrate deploy   # ou: npx prisma migrate dev
-npm run prisma:seed
-npm run start:dev
-```
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-## Verificando a criptografia dos campos sensíveis
-
-Os campos CPF/RG/CTPS/PIS de `collaborators` são criptografados em repouso na camada de aplicação
-(AES-256-GCM, chave em `FIELD_ENCRYPTION_KEY`). Para confirmar que ficam ilegíveis em consulta SQL direta:
-
-```sql
-SELECT full_name, rg_enc, cpf_enc, cpf_hash, ctps_enc, pis_enc FROM collaborators;
-```
-
-Os valores `*_enc` devem aparecer como base64 opaco (não o CPF/RG em texto puro). A descriptografia só
-ocorre na aplicação, via `GET /collaborators/:id/sensitive`, que exige a permissão
-`collaborator:read_sensitive` (papéis `admin`/`rh`) e grava uma linha em `sensitive_data_access_logs`
-a cada acesso.
-
-## Papéis seedados
-
-`admin`, `rh`, `gestor`, `tecnico`, `colaborador` — ver `backend/prisma/seed.ts` para as permissões de cada um.
-
-## Integração com satélites
-
-Sistemas externos ("satélites") consomem a API Axis de duas formas, ambas autenticadas por API key
-(não pelo JWT de usuário final) e com rate limit por satélite (100 req/min):
-- **Eventos assíncronos**: mudanças de estado (criação de colaborador, projeto, chamado, etc.)
-  geram um evento no outbox transacional e são entregues via webhook assinado
-  (`X-Axis-Signature: sha256=<hmac>`), com retry exponencial (1min/5min/30min/2h) e falha
-  permanente na 5ª tentativa.
-- **Consulta síncrona**: `GET /integration/{collaborators,clients,projects,sectors,cost-centers}`
-  (paginado, envelope `{data, meta}`), apenas campos não sensíveis.
-
-Satélites são registrados via `POST /integration/satellites` (permissão `integration:manage`), que
-devolve a API key e o HMAC secret em texto puro **uma única vez**.
-
-## Revisão de segurança (Sprint 9)
-
-- **RBAC**: todo endpoint que não seja `POST /auth/login`, `POST /auth/refresh` ou as rotas
-  `/integration/*` autenticadas por API key exige `JwtAuthGuard` + `PermissionsGuard` com uma
-  `@RequirePermissions` específica — verificado controlador por controlador.
-- **Criptografia**: os campos `*_enc`/`*Hash` de `collaborators` só são decriptados dentro de
-  `CollaboratorsService` (view "full", atrás de `collaborator:read_sensitive` + log de acesso em
-  `sensitive_data_access_logs`); nenhuma resposta de API, log de auditoria ou payload de evento do
-  outbox contém CPF/RG/CTPS/PIS em texto puro.
-- **Rate limiting**: rotas de satélite usam `@nestjs/throttler` com tracker por `satellite.id`
-  (não por IP, já que satélites podem compartilhar IP de saída).
-
-## Nota sobre o ambiente de codificação
-
-Este código foi escrito sem acesso a Docker/PostgreSQL no ambiente de desenvolvimento usado para
-gerar os arquivos, em todas as fases (1 a 6). Build e type-check (`npm run build`/`tsc --noEmit` no
-backend e no frontend) passam limpos, e cada schema do Prisma foi validado (`prisma validate`) com
-as migrations geradas via `prisma migrate diff` contra snapshots do schema anterior. Cada fase foi
-validada end-to-end por uma sessão de testes com Docker/WSL2 real antes de ser considerada concluída
-— ver as notas de teste no histórico do projeto para o detalhe de cada rodada.
+| [docs/avaliacao-2026-11-07.md](docs/avaliacao-2026-11-07.md) | Diagnóstico atual do código, riscos e prioridades |
+| [docs/arquitetura.md](docs/arquitetura.md) | Visão, módulos, segurança, integração, decisões |
+| [docs/operacao.md](docs/operacao.md) | Variáveis, Docker, migrações, backup, troubleshooting |
+| [docs/diretrizes-desenvolvimento.md](docs/diretrizes-desenvolvimento.md) | Padrões obrigatórios e Definition of Done |
+| [docs/integracao-core-logistica.md](docs/integracao-core-logistica.md) | Contratos Core ↔ Logística e o que ainda não fecha |
+| [docs/dominio/](docs/README.md#domínio) | Cadastros, Requisições (estado atual, especificação, regras do motor, roadmap), decisões de negócio |
+| [lgc-dev-logistica/README.md](lgc-dev-logistica/README.md) | Satélite Logística |
