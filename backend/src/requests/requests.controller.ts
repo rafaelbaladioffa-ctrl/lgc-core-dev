@@ -6,7 +6,7 @@ import { UpdateRequestDto } from './dto/update-request.dto.js';
 import { TriageRequestDto } from './dto/triage-request.dto.js';
 import { AssignRequestDto } from './dto/assign-request.dto.js';
 import { ApproveRequestDto, RejectRequestDto } from './dto/decision.dto.js';
-import { RequestInformationDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
+import { RequestInformationDto, ReturnForAdjustmentDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
 import { CreateRequestCommentDto } from './dto/create-comment.dto.js';
 import { CreateRequestAttachmentDto } from './dto/create-attachment.dto.js';
 import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
@@ -137,6 +137,13 @@ export class RequestsController {
     return this.requestsService.selectPurchaseQuotation(id, requireCollaboratorId(user), dto);
   }
 
+  @Post(':id/return-for-adjustment')
+  @RequirePermissions('request:update')
+  @AuditAction({ action: 'return_request_for_adjustment', resourceType: 'request', resourceIdParam: 'id' })
+  returnForAdjustment(@Param('id') id: string, @Body() dto: ReturnForAdjustmentDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.returnForAdjustment(id, requireProcurementRole(user), dto);
+  }
+
   @Post(':id/approve')
   @RequirePermissions('request:approve')
   @AuditAction({ action: 'approve_request', resourceType: 'request', resourceIdParam: 'id' })
@@ -155,14 +162,14 @@ export class RequestsController {
   @RequirePermissions('request:update')
   @AuditAction({ action: 'start_request', resourceType: 'request', resourceIdParam: 'id' })
   start(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.start(id, requireCollaboratorId(user));
+    return this.requestsService.start(id, requireCollaboratorId(user), user.roles);
   }
 
   @Post(':id/request-information')
   @RequirePermissions('request:update')
   @AuditAction({ action: 'request_information', resourceType: 'request', resourceIdParam: 'id' })
   requestInformation(@Param('id') id: string, @Body() dto: RequestInformationDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.requestInformation(id, requireCollaboratorId(user), dto);
+    return this.requestsService.requestInformation(id, requireCollaboratorId(user), dto, user.roles);
   }
 
   // request:create na rota (todo papel solicitante tem): o solicitante responde à pergunta do
@@ -171,14 +178,14 @@ export class RequestsController {
   @RequirePermissions('request:create')
   @AuditAction({ action: 'resume_request', resourceType: 'request', resourceIdParam: 'id' })
   resume(@Param('id') id: string, @Body() dto: ResumeRequestDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.resume(id, requireCollaboratorId(user), user.permissions.includes('request:update'), dto);
+    return this.requestsService.resume(id, requireCollaboratorId(user), user.permissions.includes('request:update'), dto, user.roles);
   }
 
   @Post(':id/complete')
   @RequirePermissions('request:update')
   @AuditAction({ action: 'complete_request', resourceType: 'request', resourceIdParam: 'id' })
   complete(@Param('id') id: string, @Body() dto: CompleteRequestDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.complete(id, requireCollaboratorId(user), dto);
+    return this.requestsService.complete(id, requireCollaboratorId(user), dto, user.roles);
   }
 
   // request:create (not update): só o solicitante aceita (RequestsService.accept checa dono).
@@ -193,7 +200,7 @@ export class RequestsController {
   @RequirePermissions('request:update')
   @AuditAction({ action: 'close_request', resourceType: 'request', resourceIdParam: 'id' })
   close(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.close(id, requireCollaboratorId(user));
+    return this.requestsService.close(id, requireCollaboratorId(user), user.roles);
   }
 
   // request:create (not update) at the route level — every requesting role already has it, and
@@ -210,7 +217,7 @@ export class RequestsController {
   @RequirePermissions('request:create')
   @AuditAction({ action: 'cancel_request', resourceType: 'request', resourceIdParam: 'id' })
   cancel(@Param('id') id: string, @Body() dto: CancelRequestDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.cancel(id, requireCollaboratorId(user), user.permissions.includes('request:update'), dto);
+    return this.requestsService.cancel(id, requireCollaboratorId(user), user.permissions.includes('request:update'), dto, user.roles);
   }
 
   @Post(':id/comments')

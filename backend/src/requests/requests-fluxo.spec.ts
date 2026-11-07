@@ -153,7 +153,7 @@ describe('complete — compra exige aprovação do centro de custo', () => {
 
   it('compra em atendimento sem aprovação não conclui e não grava nada', async () => {
     const { prisma, outbox, service } = completeFixture('compra_material', []);
-    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any)).rejects.toThrow(
+    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos'])).rejects.toThrow(
       'A compra só pode ser concluída depois da aprovação do responsável do centro de custo.',
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
@@ -164,20 +164,20 @@ describe('complete — compra exige aprovação do centro de custo', () => {
 
   it('compra com aprovação do centro de custo pendente não conclui', async () => {
     const { prisma, service } = completeFixture('compra_material', [{ approvalSource: 'centro_custo', status: 'pendente' }]);
-    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any)).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos'])).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.request.update).not.toHaveBeenCalled();
   });
 
   it('compra com aprovação do centro de custo aprovada conclui', async () => {
     const { prisma, service } = completeFixture('compra_material', [{ approvalSource: 'centro_custo', status: 'aprovado' }]);
-    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any);
+    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos']);
     expect(updated.status).toBe('concluida');
     expect(prisma.request.update).toHaveBeenCalled();
   });
 
   it('categoria padrão em atendimento sem aprovações conclui (regressão)', async () => {
     const { service } = completeFixture('padrao', []);
-    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any);
+    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos']);
     expect(updated.status).toBe('concluida');
   });
 });
@@ -209,5 +209,191 @@ describe('resume — resposta do solicitante', () => {
     const { service } = fixture(baseRequest({ status: 'aguardando_terceiro' }));
     const updated = await service.resume('req-1', STAFF, true, {});
     expect(updated.status).toBe('em_atendimento');
+  });
+});
+
+describe('returnForAdjustment — devolução da compra ao solicitante', () => {
+  function returnFixture(
+    status: string,
+    approvals: Array<{ approvalSource: string; status: string }> = [],
+    kind: 'padrao' | 'compra_material' = 'compra_material',
+  ) {
+    const f = fixture(baseRequest({ status, assigneeId: STAFF }));
+    f.prisma.categoryVersion.findUniqueOrThrow.mockResolvedValue({ id: 'cv-1', formSchema: [], category: { kind } });
+    f.prisma.requestApproval = {
+      findMany: vi.fn().mockResolvedValue(approvals),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
+    return f;
+  }
+
+  it('devolve em em_atendimento: status, comentário com prefixo, auditoria e outbox', async () => {
+    const { prisma, outbox, service, auditEvents } = returnFixture('em_atendimento');
+    const updated = await service.returnForAdjustment('req-1', STAFF, { reason: 'Faltou o item X' });
+    expect(updated.status).toBe('devolvida_ajuste');
+    expect(prisma.requestComment.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ authorId: STAFF, visibility: 'publico', body: 'Devolvida para ajuste: Faltou o item X' }),
+    });
+    expect(auditEvents()).toEqual(['request.returned_for_adjustment']);
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'request.status_changed', { request_id: 'req-1', code: 'REQ-000001', status: 'devolvida_ajuste' });
+  });
+
+  it('devolve em aguardando_aprovacao e marca a aprovação pendente como devolvido', async () => {
+    const { prisma, outbox, service } = returnFixture('aguardando_aprovacao', [{ approvalSource: 'centro_custo', status: 'pendente' }]);
+    const updated = await service.returnForAdjustment('req-1', STAFF, { reason: 'Quantidade errada' });
+    expect(updated.status).toBe('devolvida_ajuste');
+    expect(prisma.requestApproval.updateMany).toHaveBeenCalledWith({
+      where: { requestId: 'req-1', status: 'pendente' },
+      data: expect.objectContaining({ status: 'devolvido' }),
+    });
+    expect(outbox.record).toHaveBeenCalled();
+  });
+
+  it('recusa depois da aprovação do centro de custo', async () => {
+    const { prisma, outbox, service } = returnFixture('em_atendimento', [{ approvalSource: 'centro_custo', status: 'aprovado' }]);
+    await expect(service.returnForAdjustment('req-1', STAFF, { reason: 'Tarde demais' })).rejects.toThrow(
+      'A compra já foi aprovada e não pode mais ser devolvida para ajuste.',
+    );
+    expect(prisma.request.update).not.toHaveBeenCalled();
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
+
+  it('recusa categoria que não é compra', async () => {
+    const { prisma, service } = returnFixture('em_atendimento', [], 'padrao');
+    await expect(service.returnForAdjustment('req-1', STAFF, { reason: 'Qualquer motivo' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it('recusa o próprio solicitante', async () => {
+    const { prisma, service } = returnFixture('em_atendimento');
+    await expect(service.returnForAdjustment('req-1', REQUESTER, { reason: 'Qualquer motivo' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it.each(['enviada', 'aprovada', 'concluida', 'devolvida_ajuste'])('recusa a partir de %s', async (status) => {
+    const { prisma, service } = returnFixture(status);
+    await expect(service.returnForAdjustment('req-1', STAFF, { reason: 'Qualquer motivo' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('compra — ciclo novo no reenvio e formData de servidor', () => {
+  const serverKeys = {
+    procurementAnalysis: { notes: 'x' },
+    procurementQuotations: [{ quotationId: 'c1' }],
+    procurementQuotation: { quotationId: 'c1' },
+    selectedQuotationId: 'c1',
+  };
+  const items = [{ materialId: 'm1', quantity: 2, unitPrice: 10 }];
+
+  function purchaseFixture(status: string, formData: Record<string, unknown>) {
+    const f = fixture(baseRequest({ status, formData }));
+    f.prisma.categoryVersion.findUniqueOrThrow.mockResolvedValue({ id: 'cv-1', formSchema: [], category: { kind: 'compra_material' } });
+    return f;
+  }
+
+  it('reenvio de compra devolvida remove análise, cotações e escolha, mantendo os itens', async () => {
+    const { prisma, service } = purchaseFixture('devolvida_ajuste', { purchaseItems: items, ...serverKeys });
+    await service.submit('req-1', REQUESTER);
+    expect(prisma.request.update.mock.calls[0][0].data.formData).toEqual({ purchaseItems: items });
+    expect(prisma.request.update.mock.calls[0][0].data.status).toBe('enviada');
+  });
+
+  it('primeiro envio de compra não mexe no formData', async () => {
+    const { prisma, service } = purchaseFixture('rascunho', { purchaseItems: items });
+    await service.submit('req-1', REQUESTER);
+    expect(prisma.request.update.mock.calls[0][0].data.formData).toBeUndefined();
+  });
+
+  it('create recusa formData com procurementAnalysis vindo do cliente', async () => {
+    const { prisma, service } = fixture();
+    prisma.requestCategory = { findUnique: vi.fn().mockResolvedValue({ id: 'cat', active: true, kind: 'compra_material' }) };
+    prisma.categoryVersion.findFirst = vi.fn().mockResolvedValue({ id: 'cv-1', formSchema: [] });
+    prisma.costCenter = { findUnique: vi.fn().mockResolvedValue({ id: 'cc' }) };
+    await expect(
+      service.create(REQUESTER, { categoryId: 'cat', description: 'x', costCenterId: 'cc', formData: { purchaseItems: items, procurementAnalysis: {} } } as any),
+    ).rejects.toThrow(BadRequestException);
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it.each(Object.keys(serverKeys))('update recusa %s no formData do cliente', async (key) => {
+    const { prisma, service } = purchaseFixture('devolvida_ajuste', { purchaseItems: items });
+    await expect(service.update('req-1', REQUESTER, { formData: { purchaseItems: items, [key]: 'forjado' } } as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it('update de compra revalida os itens', async () => {
+    const { service } = purchaseFixture('devolvida_ajuste', { purchaseItems: items });
+    await expect(service.update('req-1', REQUESTER, { formData: { purchaseItems: [] } } as any)).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('update de compra recalcula estimatedValue e ignora o valor enviado', async () => {
+    const { prisma, service } = purchaseFixture('devolvida_ajuste', { purchaseItems: items, ...serverKeys });
+    await service.update('req-1', REQUESTER, {
+      estimatedValue: '1.00',
+      title: 'Titulo forjado aqui',
+      formData: { purchaseItems: [{ materialId: 'm1', quantity: 3, unitPrice: 5.5 }] },
+    } as any);
+    const data = prisma.request.update.mock.calls[0][0].data;
+    expect(data.estimatedValue).toBe('16.50');
+    expect(data.title).toBeUndefined();
+    // chaves de servidor persistidas são preservadas no merge
+    expect(data.formData.procurementAnalysis).toEqual(serverKeys.procurementAnalysis);
+    expect(data.formData.purchaseItems).toHaveLength(1);
+  });
+});
+
+describe('compra — só o Suprimentos age depois da triagem', () => {
+  const MANAGER_ROLES = ['gestor'];
+  const ANALYST_ROLES = ['analista_suprimentos'];
+
+  function opsFixture(kind: 'padrao' | 'compra_material', status = 'aprovada') {
+    const f = fixture(baseRequest({ status, assigneeId: STAFF }));
+    f.prisma.categoryVersion.findUniqueOrThrow.mockResolvedValue({ id: 'cv-1', formSchema: [], category: { kind } });
+    f.prisma.requestApproval = { findMany: vi.fn().mockResolvedValue([{ approvalSource: 'centro_custo', status: 'aprovado' }]) };
+    f.prisma.requestRelation = { findMany: vi.fn().mockResolvedValue([]) };
+    return f;
+  }
+
+  it('gestor com request:update não inicia compra aprovada (403)', async () => {
+    const { prisma, service } = opsFixture('compra_material');
+    await expect(service.start('req-1', 'col-gestor', MANAGER_ROLES)).rejects.toThrow('Somente o Suprimentos pode executar esta ação na compra.');
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it('gestor não cancela compra aprovada como staff (403)', async () => {
+    const { prisma, service } = opsFixture('compra_material');
+    await expect(service.cancel('req-1', 'col-gestor', true, { reason: 'x' } as any, MANAGER_ROLES)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['requestInformation', 'em_atendimento', (s: RequestsService) => s.requestInformation('req-1', 'col-gestor', { question: 'q' } as any, MANAGER_ROLES)],
+    ['complete', 'em_atendimento', (s: RequestsService) => s.complete('req-1', 'col-gestor', { resolution: 'r' } as any, MANAGER_ROLES)],
+    ['close', 'concluida', (s: RequestsService) => s.close('req-1', 'col-gestor', MANAGER_ROLES)],
+    ['resume', 'aguardando_terceiro', (s: RequestsService) => s.resume('req-1', 'col-gestor', true, {}, MANAGER_ROLES)],
+  ])('gestor não executa %s em compra (403)', async (_name, status, act) => {
+    const { prisma, service } = opsFixture('compra_material', status);
+    await expect(act(service)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it('analista de suprimentos inicia e cancela a compra', async () => {
+    const a = opsFixture('compra_material');
+    expect((await a.service.start('req-1', STAFF, ANALYST_ROLES)).status).toBe('em_atendimento');
+    const b = opsFixture('compra_material');
+    expect((await b.service.cancel('req-1', STAFF, true, { reason: 'x' } as any, ANALYST_ROLES)).status).toBe('cancelada');
+  });
+
+  it('solicitante ainda cancela a própria compra devolvida para ajuste', async () => {
+    const { service } = opsFixture('compra_material', 'devolvida_ajuste');
+    expect((await service.cancel('req-1', REQUESTER, false, { reason: 'x' } as any, [])).status).toBe('cancelada');
+  });
+
+  it('categoria padrão: gestor inicia e cancela normalmente (regressão)', async () => {
+    const a = opsFixture('padrao');
+    expect((await a.service.start('req-1', 'col-gestor', MANAGER_ROLES)).status).toBe('em_atendimento');
+    const b = opsFixture('padrao');
+    expect((await b.service.cancel('req-1', 'col-gestor', true, { reason: 'x' } as any, MANAGER_ROLES)).status).toBe('cancelada');
   });
 });

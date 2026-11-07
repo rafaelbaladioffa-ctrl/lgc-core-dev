@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { FormPage, FormSection, fieldStyle, labelStyle } from '../components/layout/FormPage';
 import { formatBRL } from '../utils/format';
 import { requestCategoriesApi, type RequestCategory, type RequestFormField, type RequestFieldOptionsSource } from '../api/requestCategories';
-import { requestsApi, type CreateRequestInput } from '../api/requests';
+import { requestsApi, type CreateRequestInput, type RequestDetail } from '../api/requests';
 import { projectsApi, type Project } from '../api/projects';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { clientsApi, type Client } from '../api/clients';
@@ -42,6 +42,9 @@ function isFieldEmpty(value: unknown): boolean {
 
 const emptyForm: Omit<CreateRequestInput, 'categoryId'> = { title: '', description: '', priority: 'normal' };
 
+/** Chaves de `formData` que só o servidor grava (análise/cotações do Suprimentos); nunca vão no PUT. */
+const SERVER_FORM_KEYS = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId'];
+
 interface PurchaseRow { materialId: string; quantity: number; }
 
 /** "Nova requisição" — simplificada em uma única página (categoria + dados + campos dinâmicos),
@@ -50,6 +53,11 @@ interface PurchaseRow { materialId: string; quantity: number; }
  * em requests.service.ts); o stepper visual fica para a Fase 2. */
 export function NewRequestPage() {
   const navigate = useNavigate();
+  // Com `:id` na rota (`/requests/:id/edit`) a página edita e reenvia uma requisição em
+  // rascunho/devolvida para ajuste: categoria fixa, `PUT` e depois `submit`.
+  const { id: editId } = useParams<{ id: string }>();
+  const isEditing = Boolean(editId);
+  const [editLoaded, setEditLoaded] = useState(!editId);
   const [searchParams] = useSearchParams();
   const [categories, setCategories] = useState<RequestCategory[]>([]);
   const [optionData, setOptionData] = useState<OptionSourceData>({ projects: [], collaborators: [], clients: [], cost_centers: [], job_titles: [] });
@@ -69,6 +77,36 @@ export function NewRequestPage() {
   const [form, setForm] = useState(emptyForm);
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
   const [error, setError] = useState<string | null>(null);
+  const [editRequest, setEditRequest] = useState<RequestDetail | null>(null);
+
+  useEffect(() => {
+    if (!editId) return;
+    void requestsApi
+      .get(editId)
+      .then((request) => {
+        if (!['rascunho', 'devolvida_ajuste'].includes(request.status)) {
+          setError('Só é possível editar uma requisição em rascunho ou devolvida para ajuste.');
+          return;
+        }
+        setEditRequest(request);
+        setCategoryId(request.categoryVersion.category.id);
+        setForm({
+          title: request.title,
+          description: request.description,
+          priority: request.priority,
+          neededBy: request.neededBy ? request.neededBy.slice(0, 10) : undefined,
+          costCenterId: request.costCenter?.id,
+        });
+        const data = request.formData && typeof request.formData === 'object' ? { ...(request.formData as Record<string, unknown>) } : {};
+        for (const key of SERVER_FORM_KEYS) delete data[key];
+        const rows = Array.isArray(data.purchaseItems) ? (data.purchaseItems as Array<{ materialId: string; quantity: number }>) : [];
+        setPurchaseRows(rows.map((row) => ({ materialId: row.materialId, quantity: Number(row.quantity) || 1 })));
+        delete data.purchaseItems;
+        setFormValues(data);
+        setEditLoaded(true);
+      })
+      .catch((err) => setError(translateApiError(err, 'Não foi possível carregar a requisição para edição.')));
+  }, [editId]);
 
   useEffect(() => {
     void Promise.all([requestCategoriesApi.list(), projectsApi.list(), collaboratorsApi.list(), clientsApi.list(), costCentersApi.list(), jobTitlesApi.list(), collaboratorsApi.me(), sectorsApi.list()]).then(
@@ -100,7 +138,7 @@ export function NewRequestPage() {
   const purchaseTitle = requesterSector ? `Compra de Materiais - ${requesterParentSector ? `${requesterParentSector.name}/${requesterSector.name}` : requesterSector.name}` : 'Compra de Materiais';
 
   useEffect(() => {
-    if (!isPurchaseRequest) { setPurchaseCatalog([]); setStockAvailability({}); setPurchaseRows([]); return; }
+    if (!isPurchaseRequest) { setPurchaseCatalog([]); setStockAvailability({}); if (!isEditing) setPurchaseRows([]); return; }
     void logisticsCatalogApi
       .list()
       .then((items) => {
@@ -109,7 +147,7 @@ export function NewRequestPage() {
       })
       .then((rows) => setStockAvailability(Object.fromEntries(rows.map((row) => [row.material_id, row.available]))))
       .catch(() => setError('Não foi possível carregar o catálogo da Logística.'));
-  }, [isPurchaseRequest]);
+  }, [isPurchaseRequest, isEditing]);
 
   /** "3 disponíveis em estoque" / "1 disponível em estoque" — vazio enquanto a consulta de
    * disponibilidade (segunda chamada, depois do catálogo) ainda não voltou para este item. */
@@ -178,13 +216,45 @@ export function NewRequestPage() {
       }
     }
 
+    if (isPurchaseRequest && purchaseRows.some((row) => !purchaseCatalog.some((item) => item.id === row.materialId))) {
+      setError('Aguarde o catálogo da Logística carregar ou remova itens que não estão mais disponíveis.');
+      return;
+    }
+
     try {
       const items = purchaseRows.map((row) => {
         const material = purchaseCatalog.find((item) => item.id === row.materialId)!;
         return { materialId: material.id, code: material.code, item: material.shortDescription, category: material.category, subcategory: material.subcategory, unit: material.unit, quantity: row.quantity, unitPrice: material.unitPrice };
       });
       const purchaseTotal = items.reduce((total, item) => total + item.quantity * Number(item.unitPrice ?? 0), 0).toFixed(2);
-      const created = await requestsApi.create({ ...form, categoryId, title: isPurchaseRequest ? purchaseTitle : form.title, estimatedValue: isPurchaseRequest ? purchaseTotal : form.estimatedValue, parentRequestId, formData: isPurchaseRequest ? { purchaseItems: items } : customFields.length > 0 ? formValues : undefined });
+      const formData = isPurchaseRequest ? { purchaseItems: items } : customFields.length > 0 ? formValues : undefined;
+      if (editId) {
+        // Salvar e reenviar: se o envio falhar depois do PUT, os dados já estão salvos e o erro
+        // fica na tela (o botão tenta o envio de novo, regravando os mesmos dados).
+        try {
+          await requestsApi.update(editId, {
+            title: isPurchaseRequest ? undefined : form.title,
+            description: form.description,
+            priority: form.priority,
+            neededBy: form.neededBy || undefined,
+            costCenterId: form.costCenterId,
+            estimatedValue: isPurchaseRequest ? undefined : form.estimatedValue,
+            formData,
+          });
+        } catch (err) {
+          setError(translateApiError(err, 'Não foi possível salvar as alterações.'));
+          return;
+        }
+        try {
+          await requestsApi.submit(editId);
+        } catch (err) {
+          setError(`As alterações foram salvas, mas o reenvio falhou. ${translateApiError(err, 'Tente reenviar novamente.')}`);
+          return;
+        }
+        navigate(`/requests/${editId}`);
+        return;
+      }
+      const created = await requestsApi.create({ ...form, categoryId, title: isPurchaseRequest ? purchaseTitle : form.title, estimatedValue: isPurchaseRequest ? purchaseTotal : form.estimatedValue, parentRequestId, formData });
       await requestsApi.submit(created.id);
       navigate(`/requests/${created.id}`);
     } catch (err) {
@@ -193,8 +263,15 @@ export function NewRequestPage() {
   };
 
   return (
-    <FormPage breadcrumb={['Axis', 'Requisições', 'Nova']} onSubmit={onSubmit} onCancel={() => navigate('/requests')} error={error} submitLabel="Enviar requisição">
-      {!categoryId && (
+    <FormPage
+      breadcrumb={isEditing ? ['Axis', 'Requisições', editRequest?.code ?? 'Editar'] : ['Axis', 'Requisições', 'Nova']}
+      onSubmit={onSubmit}
+      onCancel={() => navigate(isEditing ? `/requests/${editId}` : '/requests')}
+      error={error}
+      submitLabel={isEditing ? 'Salvar e reenviar' : 'Enviar requisição'}
+    >
+      {isEditing && !editLoaded && !error && <p>Carregando...</p>}
+      {!categoryId && !isEditing && (
         <FormSection title="Categoria">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={fieldStyle}>
@@ -229,8 +306,8 @@ export function NewRequestPage() {
         </FormSection>
       )}
 
-      {categoryId && (
-        <FormSection title="Dados da requisição">
+      {categoryId && editLoaded && (
+        <FormSection title={isEditing && editRequest ? `Dados da requisição — ${editRequest.categoryVersion.category.name}` : 'Dados da requisição'}>
           <div className="request-form">
             {isPurchaseRequest ? <input value={purchaseTitle} readOnly aria-label="Título da requisição" /> : <input placeholder="Título (10-120 caracteres)" aria-label="Título da requisição" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={10} maxLength={120} />}
             <div className="request-form-grid">
@@ -323,7 +400,8 @@ export function NewRequestPage() {
             </div>
             <small style={{ color: 'var(--text-muted)' }}>{purchaseRows.length ? `${purchaseRows.length} item(ns) adicionado(s). Selecione outro item e clique em “Adicionar item”.` : 'Você pode adicionar vários itens diferentes na mesma requisição.'}</small>
             {purchaseRows.map((row) => {
-              const item = purchaseCatalog.find((candidate) => candidate.id === row.materialId)!;
+              const item = purchaseCatalog.find((candidate) => candidate.id === row.materialId);
+              if (!item) return null;
               return <div key={row.materialId} style={{ display: 'grid', gridTemplateColumns: '1fr 100px auto', gap: 8, alignItems: 'center' }}><span>{item.category} / {item.subcategory ?? '—'} / <strong>{item.shortDescription}</strong><br /><small>{formatBRL(item.unitPrice)} por {item.unit} — {stockLabel(item.id)}</small></span><input type="number" min="1" step="1" value={row.quantity} aria-label={`Quantidade de ${item.shortDescription}`} onChange={(e) => setPurchaseRows((rows) => rows.map((current) => current.materialId === row.materialId ? { ...current, quantity: Math.max(1, Number(e.target.value) || 1) } : current))} /><button type="button" onClick={() => setPurchaseRows((rows) => rows.filter((current) => current.materialId !== row.materialId))}>Remover</button></div>;
             })}
           </div>

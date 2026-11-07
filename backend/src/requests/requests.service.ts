@@ -16,7 +16,7 @@ import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
 import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
 import { PurchaseQuotationSelectionDto } from './dto/purchase-quotation-selection.dto.js';
 import { ApproveRequestDto, RejectRequestDto } from './dto/decision.dto.js';
-import { RequestInformationDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
+import { RequestInformationDto, ReturnForAdjustmentDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
 import { ManagementLevel, RequestApprovalCompletionRule, RequestStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 
@@ -64,6 +64,11 @@ const AUTO_CLOSE_AFTER_DAYS = 3;
 const TERMINAL_STATUSES: RequestStatus[] = ['concluida', 'encerrada', 'cancelada', 'reprovada'];
 /** Status em que a requisição está nas mãos do solicitante: pode editar e (re)enviar. */
 const REQUESTER_EDITABLE_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste'];
+/** Chaves de `formData` gravadas só pelo servidor (análise de estoque e cotações do Suprimentos).
+ * O cliente nunca as envia (L02) e o reenvio de uma compra devolvida as descarta (ciclo novo). */
+const PROCUREMENT_SERVER_KEYS: readonly string[] = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId'];
+/** Prefixo do comentário público gravado na devolução para ajuste; a tela do solicitante o usa. */
+export const RETURN_FOR_ADJUSTMENT_PREFIX = 'Devolvida para ajuste: ';
 
 /** Horário comercial único e global (§10.2) — Axis não modela empresa/unidade/turno como
  * entidades separadas ainda, então "por empresa/unidade"/plantões do documento não se aplicam
@@ -106,6 +111,7 @@ export class RequestsService {
     const costCenter = await this.prisma.costCenter.findUnique({ where: { id: dto.costCenterId } });
     if (!costCenter) throw new BadRequestException('Centro de custo não encontrado.');
 
+    this.assertNoServerFormDataKeys(dto.formData);
     const isPurchaseRequest = isPurchase(category);
     if (isPurchaseRequest) {
       this.assertPurchaseItems(dto.formData);
@@ -172,6 +178,15 @@ export class RequestsService {
     }
   }
 
+  /** L02: análise/cotações/escolha são do servidor; o cliente não pode forjá-las no `formData`. */
+  private assertNoServerFormDataKeys(formData: Record<string, unknown> | undefined) {
+    if (!formData) return;
+    const forbidden = PROCUREMENT_SERVER_KEYS.filter((key) => key in formData);
+    if (forbidden.length > 0) {
+      throw new BadRequestException(`Os campos ${forbidden.join(', ')} são preenchidos pelo Suprimentos e não podem ser enviados pelo solicitante.`);
+    }
+  }
+
   private purchaseTotal(formData: Record<string, unknown> | undefined): string {
     const items = formData?.purchaseItems as Array<Record<string, unknown>>;
     return items.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unitPrice), 0).toFixed(2);
@@ -190,19 +205,40 @@ export class RequestsService {
       throw new BadRequestException('Só é possível editar uma requisição em rascunho ou devolvida para ajuste');
     }
     if (request.requesterId !== actorId) throw new ForbiddenException('Somente o solicitante pode editar esta requisição');
+    this.assertNoServerFormDataKeys(dto.formData);
+
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    const isPurchaseRequest = !!categoryVersion.category && isPurchase(categoryVersion.category);
+    let formData: Record<string, unknown> | undefined = dto.formData;
+    let estimatedValue: string | undefined = dto.estimatedValue;
+    if (isPurchaseRequest) {
+      // Compra: itens revalidados e valor sempre recalculado no servidor (L03); título é gerado.
+      if (dto.formData) {
+        this.assertPurchaseItems(dto.formData);
+        estimatedValue = this.purchaseTotal(dto.formData);
+      } else {
+        estimatedValue = undefined;
+      }
+    }
+    if (formData) {
+      // Merge sobre o persistido: chaves de servidor já gravadas não se perdem na edição.
+      const persisted = (request.formData as Record<string, unknown> | null) ?? {};
+      const preserved = Object.fromEntries(PROCUREMENT_SERVER_KEYS.filter((key) => key in persisted).map((key) => [key, persisted[key]]));
+      formData = { ...formData, ...preserved };
+    }
 
     return this.prisma.request.update({
       where: { id },
       data: {
-        title: dto.title,
+        title: isPurchaseRequest ? undefined : dto.title,
         description: dto.description,
         priority: dto.priority,
         confidentiality: dto.confidentiality,
         neededBy: dto.neededBy ? new Date(dto.neededBy) : undefined,
         projectId: dto.projectId,
         costCenterId: dto.costCenterId,
-        estimatedValue: dto.estimatedValue,
-        formData: dto.formData as Prisma.InputJsonValue | undefined,
+        estimatedValue,
+        formData: formData as Prisma.InputJsonValue | undefined,
         lockVersion: { increment: 1 },
       },
     });
@@ -219,8 +255,14 @@ export class RequestsService {
     if (request.requesterId !== actorId) throw new ForbiddenException('Somente o solicitante pode enviar esta requisição');
     const isResubmission = request.status === 'devolvida_ajuste';
 
-    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
     const requestData = (request.formData as Record<string, unknown> | null) ?? undefined;
+    // Compra reenviada = ciclo novo: análise e cotações eram do pedido anterior.
+    const resetProcurement = isResubmission && !!categoryVersion.category && isPurchase(categoryVersion.category);
+    let cleanedFormData: Record<string, unknown> | undefined;
+    if (resetProcurement && requestData && PROCUREMENT_SERVER_KEYS.some((key) => key in requestData)) {
+      cleanedFormData = Object.fromEntries(Object.entries(requestData).filter(([key]) => !PROCUREMENT_SERVER_KEYS.includes(key)));
+    }
     // Compras usam a estrutura própria purchaseItems; não devem ser validadas pelos
     // campos legados da categoria (itens/especificação, quantidade e valor).
     if (!Array.isArray(requestData?.purchaseItems)) {
@@ -231,7 +273,11 @@ export class RequestsService {
       const updated = await tx.request.update({
         where: { id },
         // submittedAt marca o primeiro envio; o reenvio fica registrado na auditoria.
-        data: { status: 'enviada', submittedAt: isResubmission ? undefined : new Date() },
+        data: {
+          status: 'enviada',
+          submittedAt: isResubmission ? undefined : new Date(),
+          ...(cleanedFormData ? { formData: cleanedFormData as Prisma.InputJsonValue } : {}),
+        },
       });
       await this.audit(tx, {
         aggregateId: id,
@@ -399,7 +445,7 @@ export class RequestsService {
       : [...existingQuotations.map((quotation) => dto.selected === false ? quotation : { ...quotation, selected: false }), newQuotation];
     const updatedFormData = { ...formData, procurementQuotations: quotations, procurementQuotation: newQuotation };
     const updated = await this.prisma.$transaction(async (tx) => {
-      const existingCostCenterApproval = await tx.requestApproval.findFirst({ where: { requestId: id, approvalSource: 'centro_custo' }, select: { status: true } });
+      const existingCostCenterApproval = await tx.requestApproval.findFirst({ where: { requestId: id, approvalSource: 'centro_custo', status: { not: 'devolvido' } }, select: { status: true } });
       const nextStatus = existingCostCenterApproval?.status === 'aprovado' ? request.status : 'aguardando_aprovacao';
       const saved = await tx.request.update({ where: { id }, data: { formData: updatedFormData as unknown as Prisma.InputJsonValue, estimatedValue: dto.totalValue, assigneeId: actorId, status: nextStatus } });
       if (!existingCostCenterApproval) {
@@ -498,9 +544,10 @@ export class RequestsService {
   /** O início do atendimento é o "primeiro atendimento humano válido" (§10.1) para fins do
    * relógio de primeira resposta — encerra esse clock aqui (único lugar do fluxo onde ele era
    * criado e nunca parado). */
-  async start(id: string, actorId: string) {
+  async start(id: string, actorId: string, actorRoles: string[] = []) {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
+    await this.assertPurchaseOperator(request, actorRoles);
     if (!['aprovada', 'planejada'].includes(request.status)) throw new BadRequestException('A requisição precisa estar aprovada para iniciar o atendimento');
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -510,9 +557,38 @@ export class RequestsService {
     });
   }
 
-  async requestInformation(id: string, actorId: string, dto: RequestInformationDto) {
+  /** Compra já aceita pelo Suprimentos devolvida ao solicitante para ajuste, enquanto o
+   * responsável do centro de custo ainda não aprovou. O reenvio abre um ciclo novo (ver submit). */
+  async returnForAdjustment(id: string, actorId: string, dto: ReturnForAdjustmentDto) {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    if (!isPurchase(categoryVersion.category)) throw new BadRequestException('Esta requisição não é de compras.');
+    if (!['em_atendimento', 'aguardando_aprovacao'].includes(request.status)) {
+      throw new BadRequestException('A compra só pode ser devolvida para ajuste durante o atendimento do Suprimentos, antes da aprovação.');
+    }
+    const reason = dto.reason.trim();
+    if (reason.length < 5) throw new BadRequestException('Informe o motivo da devolução (mínimo de 5 caracteres).');
+
+    return this.prisma.$transaction(async (tx) => {
+      const approvals = await tx.requestApproval.findMany({ where: { requestId: id }, select: { approvalSource: true, status: true } });
+      if (approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'aprovado')) {
+        throw new BadRequestException('A compra já foi aprovada e não pode mais ser devolvida para ajuste.');
+      }
+      const now = new Date();
+      await tx.requestApproval.updateMany({ where: { requestId: id, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
+      const updated = await tx.request.update({ where: { id }, data: { status: 'devolvida_ajuste' } });
+      await tx.requestComment.create({ data: { requestId: id, authorId: actorId, visibility: 'publico', body: `${RETURN_FOR_ADJUSTMENT_PREFIX}${reason}` } });
+      await this.audit(tx, { aggregateId: id, event: 'request.returned_for_adjustment', actorId, before: { status: request.status }, after: { status: 'devolvida_ajuste', reason } });
+      await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      return updated;
+    });
+  }
+
+  async requestInformation(id: string, actorId: string, dto: RequestInformationDto, actorRoles: string[] = []) {
+    const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
+    await this.assertPurchaseOperator(request, actorRoles);
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível pedir informação durante o atendimento');
 
     return this.prisma.$transaction(async (tx) => {
@@ -529,7 +605,7 @@ export class RequestsService {
   /** Quem pode retomar: quem gerencia o fluxo (`request:update`) em qualquer pausa, ou o
    * solicitante/beneficiário quando a pausa é uma pergunta para ele (`aguardando_solicitante`) —
    * nesse caso a resposta é obrigatória e vira comentário público. */
-  async resume(id: string, actorId: string, canManage: boolean, dto: ResumeRequestDto) {
+  async resume(id: string, actorId: string, canManage: boolean, dto: ResumeRequestDto, actorRoles: string[] = []) {
     const request = await this.getOrThrow(id);
     if (!['aguardando_solicitante', 'aguardando_terceiro'].includes(request.status)) throw new BadRequestException('Requisição não está pausada');
     const isRequester = actorId === request.requesterId || actorId === request.beneficiaryId;
@@ -538,6 +614,8 @@ export class RequestsService {
       if (!dto.answer?.trim()) throw new BadRequestException('Escreva a resposta à pergunta do atendente.');
     } else if (!canManage) {
       throw new ForbiddenException('Você não pode retomar esta requisição.');
+    } else {
+      await this.assertPurchaseOperator(request, actorRoles);
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -556,9 +634,10 @@ export class RequestsService {
   /** §11.4: uma requisição com subtarefas em aberto não pode ser concluída — barreira de
    * conclusão. Lê `request_relations` (relation_type = subtarefa_de, target = esta requisição).
    */
-  async complete(id: string, actorId: string, dto: CompleteRequestDto) {
+  async complete(id: string, actorId: string, dto: CompleteRequestDto, actorRoles: string[] = []) {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
+    await this.assertPurchaseOperator(request, actorRoles);
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível concluir durante o atendimento');
 
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
@@ -605,10 +684,13 @@ export class RequestsService {
     });
   }
 
-  async close(id: string, actorId: string | null) {
+  async close(id: string, actorId: string | null, actorRoles: string[] = []) {
     const request = await this.getOrThrow(id);
     // actorId é null quando runAutoClose() (cron) fecha sozinho — não há solicitante a excluir aí.
-    if (actorId) this.assertNotRequester(request, actorId);
+    if (actorId) {
+      this.assertNotRequester(request, actorId);
+      await this.assertPurchaseOperator(request, actorRoles);
+    }
     if (request.status !== 'concluida') throw new BadRequestException('Só é possível encerrar uma requisição concluída');
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
     if (categoryVersion.category.requiresAcceptance && !request.requesterAcceptedAt) {
@@ -680,7 +762,7 @@ export class RequestsService {
   // (request:update) cancela em qualquer etapa aberta; o solicitante só enquanto a requisição
   // ainda é dele de fato (rascunho/devolvida para ajuste) — depois de enviada, só quem está com
   // a responsabilidade atual decide.
-  async cancel(id: string, actorId: string, canManage: boolean, dto: CancelRequestDto) {
+  async cancel(id: string, actorId: string, canManage: boolean, dto: CancelRequestDto, actorRoles: string[] = []) {
     const request = await this.getOrThrow(id);
     if (['concluida', 'encerrada', 'cancelada'].includes(request.status)) throw new BadRequestException('Esta requisição não pode mais ser cancelada');
     const isRequester = actorId === request.requesterId || actorId === request.beneficiaryId;
@@ -688,6 +770,8 @@ export class RequestsService {
     if (!canManage && !(isRequester && requesterOwnsThisStage)) {
       throw new ForbiddenException('Você não pode cancelar esta requisição nesta etapa.');
     }
+    // Cancelamento como staff (fora do rascunho/devolvida do próprio solicitante) em compra é do Suprimentos.
+    if (!(isRequester && requesterOwnsThisStage)) await this.assertPurchaseOperator(request, actorRoles);
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.request.update({ where: { id }, data: { status: 'cancelada' } });
       await this.audit(tx, { aggregateId: id, event: 'request.cancelled', actorId, after: { reason: dto.reason } });
@@ -1149,6 +1233,17 @@ export class RequestsService {
   private assertNotRequester(request: { requesterId: string; beneficiaryId: string }, actorId: string) {
     if (actorId === request.requesterId || actorId === request.beneficiaryId) {
       throw new ForbiddenException('Você é o solicitante desta requisição — aguarde o próximo responsável.');
+    }
+  }
+
+  /** Em compra de material, depois da triagem só o Suprimentos (`analista_suprimentos`/`admin`)
+   * age como staff: o aprovador do centro de custo, mesmo com `request:update`, não inicia,
+   * pergunta, conclui, encerra, retoma nem cancela. Categorias que não são compra não mudam. */
+  private async assertPurchaseOperator(request: { categoryVersionId: string }, actorRoles: string[]) {
+    const version = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    if (!version.category || !isPurchase(version.category)) return;
+    if (!actorRoles.includes('analista_suprimentos') && !actorRoles.includes('admin')) {
+      throw new ForbiddenException('Somente o Suprimentos pode executar esta ação na compra.');
     }
   }
 

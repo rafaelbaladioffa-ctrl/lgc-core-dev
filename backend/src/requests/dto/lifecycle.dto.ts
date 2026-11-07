@@ -1,4 +1,11 @@
-import { IsOptional, IsString, MinLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+
+export class ReturnForAdjustmentDto {
+  @IsString()
+  @MinLength(5)
+  @MaxLength(1000)
+  reason!: string;
+}
 
 export class RequestInformationDto {
   @IsString()

@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { StatusBadge } from '../components/DataTable';
 import { Button } from '../components/Button';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { useAuth } from '../context/AuthContext';
 import { requestsApi, type PurchaseAnalysisItem, type RequestAttachmentMeta, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
@@ -12,6 +13,9 @@ import { translateApiError } from '../utils/apiError';
 // Fases em que a bola ainda está genuinamente com o solicitante — nas demais, a tela dele fica
 // travada (só informação) assim que ela sai das mãos dele, mesmo que o papel dele também carregue
 // uma permissão operacional (admin, gestor etc. testando a própria requisição).
+// Prefixo do comentário público gravado pelo servidor ao devolver a compra (RETURN_FOR_ADJUSTMENT_PREFIX).
+const RETURN_REASON_PREFIX = 'Devolvida para ajuste: ';
+
 const REQUESTER_TURN_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante'];
 
 function formatFileSize(bytes: number): string {
@@ -87,6 +91,10 @@ export function RequestDetailPage() {
   const [quoteFiles, setQuoteFiles] = useState<File[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [returnBusy, setReturnBusy] = useState(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
 
   const refresh = async () => {
     if (!id) return;
@@ -144,6 +152,8 @@ export function RequestDetailPage() {
   const costCenterApproved = request.approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'aprovado')
     && !request.approvals.some((a) => a.status === 'pendente');
   const canComplete = !isPurchaseRequest || costCenterApproved;
+  // Em compra, depois da triagem só o Suprimentos age como staff (o aprovador do CC não vê ação nenhuma).
+  const staffActionsAllowed = canUpdate && !requesterLocked && (!isPurchaseRequest || Boolean(canProcure));
   const canTriage = canUpdate && !isRequesterOrBeneficiary && (!purchaseItems.length || canProcure);
   const hasAnalysis = Boolean(request.formData && typeof request.formData === 'object' && (request.formData as { procurementAnalysis?: unknown }).procurementAnalysis);
   const quotationData = request.formData && typeof request.formData === 'object' ? request.formData as { procurementQuotation?: Record<string, unknown>; procurementQuotations?: Array<Record<string, unknown>>; selectedQuotationId?: string } : {};
@@ -211,6 +221,35 @@ export function RequestDetailPage() {
   };
 
   const isRequester = user?.collaboratorId === request.requesterId;
+  // Devolução ao solicitante: só o Suprimentos, em compra já aceita e ainda sem aprovação do CC.
+  const canReturnPurchase = isPurchaseRequest && Boolean(canProcure) && canUpdate && !isRequesterOrBeneficiary
+    && ['em_atendimento', 'aguardando_aprovacao'].includes(request.status)
+    && !request.approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'aprovado');
+  // Motivo mais recente gravado pelo servidor na devolução; ausente na devolução feita pela triagem.
+  const returnComment = [...request.comments]
+    .filter((c) => c.visibility === 'publico' && c.body.startsWith(RETURN_REASON_PREFIX))
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .pop();
+  const returnReasonText = returnComment ? returnComment.body.slice(RETURN_REASON_PREFIX.length) : null;
+
+  const openReturnDialog = () => {
+    setReturnReason('');
+    setReturnError(null);
+    setReturnOpen(true);
+  };
+  const confirmReturn = async () => {
+    setReturnBusy(true);
+    setReturnError(null);
+    try {
+      await requestsApi.returnForAdjustment(request.id, returnReason.trim());
+      setReturnOpen(false);
+      await refresh();
+    } catch (err) {
+      setReturnError(translateApiError(err, 'Não foi possível devolver a compra ao solicitante. Atualize a página e tente novamente.'));
+    } finally {
+      setReturnBusy(false);
+    }
+  };
 
   const answerQuestion = () => {
     const answer = window.prompt('Sua resposta ao atendente:');
@@ -478,6 +517,13 @@ export function RequestDetailPage() {
           </div>
         )}
 
+        {isRequester && request.status === 'devolvida_ajuste' && (
+          <div className="return-reason-banner" role="status">
+            <strong>Esta requisição foi devolvida para ajuste</strong>
+            {returnReasonText ? <p>{returnReasonText}</p> : <p>Veja os comentários para o motivo da devolução.</p>}
+          </div>
+        )}
+
         {actionError && (
           <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>
             {actionError}
@@ -486,9 +532,14 @@ export function RequestDetailPage() {
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {isRequester && ['rascunho', 'devolvida_ajuste'].includes(request.status) && (
-            <Button variant="positive" onClick={() => void run(() => requestsApi.submit(request.id))}>
-              {request.status === 'devolvida_ajuste' ? 'Reenviar para triagem' : 'Enviar requisição'}
-            </Button>
+            <>
+              <Button variant="positive" onClick={() => navigate(`/requests/${request.id}/edit`)}>
+                {request.status === 'devolvida_ajuste' ? 'Editar e reenviar' : 'Editar e enviar'}
+              </Button>
+              <Button variant={request.status === 'devolvida_ajuste' ? 'secondary' : 'positive'} onClick={() => void run(() => requestsApi.submit(request.id))}>
+                {request.status === 'devolvida_ajuste' ? 'Reenviar sem alterar' : 'Enviar requisição'}
+              </Button>
+            </>
           )}
           {isRequesterOrBeneficiary && request.status === 'aguardando_solicitante' && (
             <Button variant="positive" onClick={answerQuestion}>
@@ -505,6 +556,11 @@ export function RequestDetailPage() {
               </Button>
             </>
           )}
+          {canReturnPurchase && (
+            <Button variant="secondary" onClick={openReturnDialog}>
+              Devolver ao solicitante para ajuste
+            </Button>
+          )}
           {canApprove && !requesterLocked && request.status === 'aguardando_aprovacao' && (
             <>
               <Button variant="positive" onClick={() => decide('approve')}>
@@ -515,12 +571,12 @@ export function RequestDetailPage() {
               </Button>
             </>
           )}
-          {canUpdate && !requesterLocked && ['aprovada', 'planejada'].includes(request.status) && (
+          {staffActionsAllowed && ['aprovada', 'planejada'].includes(request.status) && (
             <Button variant="positive" onClick={() => void run(() => requestsApi.start(request.id))}>
               Iniciar atendimento
             </Button>
           )}
-          {canUpdate && !requesterLocked && request.status === 'em_atendimento' && (
+          {staffActionsAllowed && request.status === 'em_atendimento' && (
             <>
               <Button variant="secondary" onClick={requestInfo}>
                 Pedir informação ao solicitante
@@ -532,12 +588,12 @@ export function RequestDetailPage() {
               )}
             </>
           )}
-          {canUpdate && !requesterLocked && ['aguardando_solicitante', 'aguardando_terceiro'].includes(request.status) && (
+          {staffActionsAllowed && ['aguardando_solicitante', 'aguardando_terceiro'].includes(request.status) && (
             <Button variant="secondary" onClick={() => void run(() => requestsApi.resume(request.id))}>
               Retomar atendimento
             </Button>
           )}
-          {canUpdate && !requesterLocked && request.status === 'concluida' && (
+          {staffActionsAllowed && request.status === 'concluida' && (
             <Button variant="positive" onClick={() => void run(() => requestsApi.close(request.id))}>
               Encerrar
             </Button>
@@ -553,7 +609,7 @@ export function RequestDetailPage() {
               (rascunho/devolvida para ajuste); dali em diante, só quem gerencia o fluxo
               (request:update) — mesmo critério aplicado em RequestsService.cancel. */}
           {!['concluida', 'encerrada', 'cancelada'].includes(request.status) &&
-            ((isRequesterOrBeneficiary && ['rascunho', 'devolvida_ajuste'].includes(request.status)) || (!isRequesterOrBeneficiary && canUpdate)) && (
+            ((isRequesterOrBeneficiary && ['rascunho', 'devolvida_ajuste'].includes(request.status)) || (!isRequesterOrBeneficiary && canUpdate && (!isPurchaseRequest || Boolean(canProcure)))) && (
               <Button variant="danger" onClick={cancel}>
                 Cancelar
               </Button>
@@ -584,6 +640,17 @@ export function RequestDetailPage() {
           </form>
         </div>
       </div>
+      <ConfirmDialog
+        open={returnOpen}
+        title="Devolver ao solicitante para ajuste"
+        message="O solicitante poderá editar itens, quantidades e demais dados e reenviar. A análise de estoque e as cotações atuais serão descartadas no reenvio."
+        confirmLabel="Devolver compra"
+        busy={returnBusy}
+        error={returnError}
+        reasonField={{ label: 'Motivo da devolução *', value: returnReason, onChange: setReturnReason, minLength: 5, maxLength: 1000 }}
+        onConfirm={() => void confirmReturn()}
+        onCancel={() => setReturnOpen(false)}
+      />
     </AppLayout>
   );
 }

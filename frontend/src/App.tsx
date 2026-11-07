@@ -319,6 +319,14 @@ function AppRoutes() {
       />
 
       <Route
+        path="/requests/:id/edit"
+        element={
+          <PrivateRoute permission="request:create">
+            <NewRequestPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
         path="/requests/:id"
         element={
           <PrivateRoute permission="request:read">

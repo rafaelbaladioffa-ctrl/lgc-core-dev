@@ -136,6 +136,9 @@ export interface CreateRequestInput {
   formData?: Record<string, unknown>;
 }
 
+/** `PUT /requests/:id` — só rascunho/devolvida para ajuste; categoria e beneficiário não mudam. */
+export type UpdateRequestInput = Partial<Omit<CreateRequestInput, 'categoryId' | 'beneficiaryId' | 'parentRequestId'>>;
+
 export interface MyApproval {
   approvalId: string;
   requestId: string;
@@ -187,9 +190,11 @@ export const requestsApi = {
   myApprovals: () => api.get<MyApproval[]>('/requests/my-approvals').then((r) => r.data),
   myActivities: () => api.get<MyActivity[]>('/requests/my-activities').then((r) => r.data),
   get: (id: string) => api.get<RequestDetail>(`/requests/${id}`).then((r) => r.data),
+  update: (id: string, input: UpdateRequestInput) => api.put<AxisRequest>(`/requests/${id}`, input).then((r) => r.data),
   submit: (id: string) => api.post<AxisRequest>(`/requests/${id}/submit`).then((r) => r.data),
   triage: (id: string, action: 'aceitar' | 'devolver' | 'recategorizar', reason?: string, newCategoryId?: string) =>
     api.post<AxisRequest>(`/requests/${id}/triage`, { action, reason, newCategoryId }).then((r) => r.data),
+  returnForAdjustment: (id: string, reason: string) => api.post<AxisRequest>(`/requests/${id}/return-for-adjustment`, { reason }).then((r) => r.data),
   assign: (id: string, assigneeId: string) => api.post<AxisRequest>(`/requests/${id}/assign`, { assigneeId }).then((r) => r.data),
   approve: (id: string, comment?: string) => api.post<AxisRequest>(`/requests/${id}/approve`, { comment }).then((r) => r.data),
   reject: (id: string, comment: string) => api.post<AxisRequest>(`/requests/${id}/reject`, { comment }).then((r) => r.data),
