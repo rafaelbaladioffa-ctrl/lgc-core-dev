@@ -1,6 +1,6 @@
 # Documentação do Axis
 
-Índice da documentação do Core e do satélite Logística. Reorganizada em 2026-11-07: cada
+Índice da documentação do Core e dos satélites Logística e Financeiro. Reorganizada em 2026-11-07: cada
 documento abaixo foi conferido contra o código da branch `rafaelbaladioffa-ctrl/minhas-atividades`.
 O que descreve código removido ou entregas passadas está em [arquivo/](arquivo/README.md).
 
@@ -33,6 +33,12 @@ O que descreve código removido ou entregas passadas está em [arquivo/](arquivo
 - [../lgc-dev-logistica/README.md](../lgc-dev-logistica/README.md) — como rodar e o que foi entregue.
 - [../lgc-dev-logistica/docs/especificacao.md](../lgc-dev-logistica/docs/especificacao.md) — especificação do satélite.
 - [../lgc-dev-logistica/DEPLOY.md](../lgc-dev-logistica/DEPLOY.md) — implantação.
+
+## Financeiro
+
+- [../lgc-dev-financeiro/README.md](../lgc-dev-financeiro/README.md) — como rodar e o que foi entregue (F0, esqueleto).
+- [../lgc-dev-financeiro/docs/especificacao.md](../lgc-dev-financeiro/docs/especificacao.md) — especificação de contas a pagar, decisões pendentes F-01–F-07 e entregas F0–F6.
+- [integracao-core-financeiro.md](integracao-core-financeiro.md) — contratos entre Core e Financeiro e o que falta no Core.
 
 ## Convenções desta pasta
 

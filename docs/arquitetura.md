@@ -8,8 +8,8 @@ Visão técnica do Core e da relação com os satélites. Atualizado em 2026-11-
 ## 1. Visão
 
 O Axis é o **ponto único de verdade** da LGC para usuários, colaboradores, estrutura organizacional,
-clientes, projetos e requisições internas. Satélites especializados (Logística hoje; Projetos/Field,
-Finanças e Pessoas planejados) **nunca acessam o banco do Core**: integram por API REST versionada
+clientes, projetos e requisições internas. Satélites especializados (Logística em operação; Financeiro
+em construção, só o esqueleto F0; Projetos/Field e Pessoas planejados) **nunca acessam o banco do Core**: integram por API REST versionada
 (`/api/v1`) e por eventos (outbox + webhook). Cada satélite tem seu próprio banco.
 
 | Premissa | Decisão |
@@ -39,6 +39,9 @@ Finanças e Pessoas planejados) **nunca acessam o banco do Core**: integram por 
   disponibilidade), via proxy nginx `/logistica-api/` → `logistica-backend:3100/api/v1/`. O backend
   do Core **não** chama a Logística.
 - Detalhes e lacunas dos contratos: [integracao-core-logistica.md](integracao-core-logistica.md).
+- **Financeiro** (`lgc-dev-financeiro/`, API `:3200`, Postgres `axis_financeiro`, web `:5175`): o
+  navegador faz login no Core e usa o access token do Core na API do Financeiro, que recebe o webhook
+  do Core como a Logística. Contratos: [integracao-core-financeiro.md](integracao-core-financeiro.md).
 
 ## 3. Backend do Core
 
@@ -139,5 +142,6 @@ seed a cada partida. Procedimentos: [operacao.md](operacao.md).
 | A6 | Anexos em BYTEA no Postgres, sem antimalware (provisório) | Especificação de Requisições §27.1 |
 | A7 | Motor BPM removido em 02/11/2026 para reescrita organizada (checkpoint `629044d`) | Commit `98dfce5` |
 | A8 | Logística mantida como subpasta deste repositório (monorepo informal) | Estado atual; ver [avaliacao §5](avaliacao-2026-11-07.md#5-estrutura-do-repositório) |
+| A9 | Financeiro como subpasta `lgc-dev-financeiro/`, banco próprio, primeira frente contas a pagar; aceita só o access token do Core (sem sessão própria) | Dono do produto, 2026-11-07; [especificação](../lgc-dev-financeiro/docs/especificacao.md) |
 
 Decisões de negócio: [dominio/decisoes-negocio.md](dominio/decisoes-negocio.md).

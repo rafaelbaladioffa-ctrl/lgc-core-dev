@@ -5,7 +5,7 @@ Leia antes de alterar este repositório. Vale para Claude, Codex e qualquer outr
 ## Contexto
 
 - Axis = ERP interno da LGC Instalações e Projetos. Usuários finais falam português; **toda UI, mensagem de erro e documentação em pt-BR**.
-- Este repo tem o Core (`backend/`, `frontend/`) e o satélite Logística (`lgc-dev-logistica/`). Eles têm `package.json` e bancos separados.
+- Este repo tem o Core (`backend/`, `frontend/`) e os satélites Logística (`lgc-dev-logistica/`) e Financeiro (`lgc-dev-financeiro/`). Cada um tem `package.json` e banco separados.
 - Visão e estado atual: [docs/README.md](docs/README.md). Diagnóstico e riscos: [docs/avaliacao-2026-11-07.md](docs/avaliacao-2026-11-07.md).
 - Padrões obrigatórios e Definition of Done: [docs/diretrizes-desenvolvimento.md](docs/diretrizes-desenvolvimento.md).
 
@@ -48,6 +48,14 @@ cd frontend && npx tsc -p tsconfig.app.json --noEmit && npx oxlint src
 
 ```bash
 cd lgc-dev-logistica/backend && npx tsc --noEmit -p tsconfig.build.json && npm test
+```
+
+```bash
+cd lgc-dev-financeiro/backend && npx tsc -p tsconfig.build.json --noEmit && npm run lint && npm test
+```
+
+```bash
+cd lgc-dev-financeiro/frontend && npx tsc -p tsconfig.json --noEmit && npx oxlint src && npm test
 ```
 
 Rode também `cd backend && npm test` e `cd frontend && npm test`. A cobertura do Core ainda é pequena: escreva testes para o que mudar (exemplo de serviço com Prisma simulado: `backend/src/requests/requests-fluxo.spec.ts`).

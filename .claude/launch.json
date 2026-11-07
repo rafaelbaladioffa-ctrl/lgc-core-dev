@@ -24,6 +24,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "C:\\Users\\servidor\\Documents\\orca-dev\\lgc-dev-logistica\\backend", "run", "start:dev"],
       "port": 3100
+    },
+    {
+      "name": "financeiro-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "lgc-dev-financeiro/frontend", "run", "dev", "--", "--port", "5175"],
+      "port": 5175
     }
   ]
 }
