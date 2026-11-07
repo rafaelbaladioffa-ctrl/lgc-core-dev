@@ -24,6 +24,7 @@
 | PL-05 | Volume esperado 50–300 usuários/colaboradores; VPS 4 vCPU / 8 GB RAM / 80 GB SSD. | decidida | idem PL-01 | [planning-v0.2 §8 #5](../arquivo/planning-v0.2.md) |
 | PL-06 | Retenção de dados sensíveis pós-desligamento: indefinida — sem expurgo automático, apenas soft-offboarding. | decidida (provisória; ver P26-06) | idem PL-01 | [planning-v0.2 §8 #6](../arquivo/planning-v0.2.md) |
 | D-01 | Remover o módulo BPM P01–P04 do código para reescrita organizada; o estado anterior fica preservado no checkpoint `629044d`. | decidida | 2026-11-02 | commits `629044d` e `98dfce5` |
+| D-02 | Apagar do banco as tabelas, triggers, colunas e permissões do BPM, descartando os dados do piloto P01; categorias do piloto ficam inativas e requisições existentes são mantidas. | decidida | 2026-11-07 | dono do produto, em conversa; migração `20261121000000_remove_bpm` |
 
 ## 2. Pendentes
 

@@ -76,15 +76,28 @@ Seeds auxiliares (`backend/package.json`): `seed:org`, `seed:org-cc-restructure`
 
 ## 4. Migrações — cuidados obrigatórios
 
-1. **Não rode `npx prisma migrate dev` em banco com dados.** As tabelas do BPM removido continuam no
-   banco sem model no schema; o Prisma vai propor uma migração que as apaga.
-2. **Banco novo não sobe hoje:** as migrações `20261101000000_request_bpm_p01`,
-   `20261103000001_request_approval_source` e `20261103000002_request_bpm_p02` alteram tabelas
-   criadas depois, em `20261110000000_rebuild_requisicoes` e `20261111000000_requisicoes_fase1`.
-   O banco atual só funciona porque essas migrações foram aplicadas em outra ordem. A correção está
-   na lista de pré-requisitos de [dominio/requisicoes-roadmap.md](dominio/requisicoes-roadmap.md).
-3. Nunca edite uma migração já aplicada; crie outra.
-4. Antes de aplicar migração em produção: backup, ensaio numa cópia (`*_test`) e, só depois, deploy.
+1. **Aplique migrações com `npm run db:migrate`** (é o que o container faz). Ele roda antes
+   `prisma/fix-migration-history.sql`, ajuste único e idempotente: em 2026-11-07 quatro migrações
+   que tinham data anterior às tabelas que alteram foram renomeadas para logo depois de
+   `20261111000000_requisicoes_fase1` (`request_bpm_p01`, `bpm_p04_materials`,
+   `request_approval_source`, `request_bpm_p02`, agora `20261111000001`–`…004`). O script renomeia
+   as linhas correspondentes em `_prisma_migrations` de bancos antigos; o conteúdo e o checksum não
+   mudaram. Rodar só `prisma migrate deploy` num banco antigo, sem o ajuste, faria o Prisma tentar
+   reaplicá-las.
+2. **`20261121000000_remove_bpm`** apaga do banco o motor BPM removido do código (tabelas `bpm_*`,
+   `request_queue_members`, `process_config_grants`, triggers e funções `bpm_*`, colunas BPM de
+   `request_categories`/`category_versions`, tipos `Bpm*` e permissões `request_process:*` /
+   `request_queue:manage`) e **desativa** as categorias do piloto. Requisições existentes, inclusive as
+   do piloto (`execution_mode = 'bpm_v1'`), são mantidas. **Faça backup antes do primeiro deploy
+   com esta migração** — os dados do piloto nas tabelas `bpm_*` não voltam.
+3. Depois dessas duas correções o histórico aplica do zero num banco vazio e não há drift entre
+   banco e `schema.prisma` (verificado com `prisma migrate diff`). Ainda assim, nunca rode
+   `prisma migrate dev`, `migrate reset` ou `db push` contra banco com dados.
+   A migração seguinte, `20261121000001_requisicoes_destravar_em_triagem`, devolve à fila de triagem
+   (`enviada`) as requisições reabertas que tinham ficado presas em `em_triagem`, registrando cada uma
+   em `audit_events`.
+4. Nunca edite uma migração já aplicada; crie outra.
+5. Antes de aplicar migração em produção: backup, ensaio numa cópia (`*_test`) e, só depois, deploy.
    O seed roda a cada partida do container e precisa continuar idempotente.
 
 ## 5. Backup e restauração
@@ -119,7 +132,6 @@ Não há endpoint de health no Core. Para checar a API: `POST /api/v1/auth/login
 | Sintoma | Causa | Ação |
 |---|---|---|
 | `network lgc-dev-logistica_default … not found` | Rede externa da Logística não existe | Suba a Logística antes (seção 1) |
-| `migrate deploy` falha em banco vazio | Ordem das migrações BPM | Ver seção 4 |
 | Catálogo de compra vazio em `npm run dev` | Sem proxy `/logistica-api` no Vite | Definir `VITE_LOGISTICA_API_BASE_URL` |
 | 403 no catálogo para `analista_suprimentos` ou `compliance` | Papel sem mapeamento na Logística | `PUT /rbac/axis-role-mapping/:axisRole` na Logística |
 | Usuário com papel removido ainda acessa | Permissões vêm do JWT (até 15 min) e desativar não revoga refresh | Aguardar expiração; ver avaliação |

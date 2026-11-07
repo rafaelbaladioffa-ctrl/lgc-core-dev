@@ -13,8 +13,8 @@ especializados. Este repositório contém o Core e o satélite **Logística** (a
 
 > **Estado em 2026-11-07:** o motor BPM (P01–P04) foi removido em 02/11 para reescrita; o módulo
 > Requisições segue no fluxo "legado" em evolução. Antes de qualquer deploy novo, leia
-> [docs/avaliacao-2026-11-07.md](docs/avaliacao-2026-11-07.md) — há bloqueios conhecidos
-> (migrações que não rodam em banco vazio, testes quebrados, vazamento de dados na fila de requisições).
+> [docs/avaliacao-2026-11-07.md](docs/avaliacao-2026-11-07.md) — há riscos conhecidos
+> (segurança do SSO com a Logística, concorrência nas aprovações, contratos de eventos).
 
 ## O que o Core faz hoje
 

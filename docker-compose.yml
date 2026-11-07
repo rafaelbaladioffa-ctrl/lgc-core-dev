@@ -30,7 +30,7 @@ services:
         condition: service_healthy
     ports:
       - "3000:3000"
-    command: sh -c "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/main.js"
+    command: sh -c "npm run -s db:migrate && npx tsx prisma/seed.ts && node dist/main.js"
     networks:
       - default
       - logistica

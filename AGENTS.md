@@ -13,7 +13,7 @@ Leia antes de alterar este repositório. Vale para Claude, Codex e qualquer outr
 
 1. **Banco de dados**
    - Nunca rode `prisma migrate dev`, `migrate reset`, seeds ou testes e2e contra o banco de desenvolvimento ou de produção. Testes usam um banco separado com sufixo `_test`.
-   - O banco tem tabelas do BPM removido sem model no schema, e `migrate dev` vai propor um DROP delas.
+   - Migrações são aplicadas com `npm run db:migrate` (ajuste de histórico + `migrate deploy`), nunca só com `migrate deploy` num banco antigo.
 2. **Migrações:** nunca edite uma migração já aplicada; crie uma nova. Mudanças destrutivas exigem backup e ensaio numa cópia.
 3. **Segredos:** não versione `.env`, chaves ou senhas. O repositório no GitHub é público.
 4. **Escopo:** um commit e um PR por escopo. Não misture mudanças do Core e da Logística no mesmo commit, salvo quando for mudança de contrato entre os dois, e diga isso na mensagem.

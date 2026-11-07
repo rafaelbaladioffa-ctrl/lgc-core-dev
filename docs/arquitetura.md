@@ -68,14 +68,11 @@ Domínio em detalhe: [dominio/cadastros.md](dominio/cadastros.md) e
 
 ### Modelo de dados
 
-31 models e 21 enums em `backend/prisma/schema.prisma`; 28 migrações. Pontos de atenção (detalhe em
-[avaliacao-2026-11-07.md](avaliacao-2026-11-07.md)):
+31 models e 21 enums em `backend/prisma/schema.prisma`; 29 migrações, aplicadas com
+`npm run db:migrate` ([operacao.md §4](operacao.md#4-migrações--cuidados-obrigatórios)). Desde
+2026-11-07 o histórico aplica do zero e o banco não tem objetos do BPM (`20261121000000_remove_bpm`).
 
-- As migrações do BPM removido continuam no histórico e criaram tabelas `bpm_*`,
-  `request_queue_members` e `process_config_grants` que **não existem no schema** (drift).
-- A ordem por nome de pasta faz `20261101000000_request_bpm_p01` alterar `request_categories` antes
-  de `20261111000000_requisicoes_fase1` criá-la: **`migrate deploy` falha em banco vazio.**
-- Resquícios no schema: `RequestExecutionMode.bpm_v1`, `RequestStatus.aguardando_correcao` e
+- Resquícios ainda no schema (saem junto com o código que os usa): `RequestExecutionMode.bpm_v1`, `RequestStatus.aguardando_correcao` e
   `aguardando_informacao`, `Queue.revision`, `Request.currentCycle`.
 
 ## 4. Frontend do Core

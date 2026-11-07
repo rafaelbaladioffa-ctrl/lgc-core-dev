@@ -192,6 +192,7 @@ model CostCenter {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@index([parentCostCenterId])
+  @@index([responsibleCollaboratorId])
   @@map("cost_centers")
 }
 

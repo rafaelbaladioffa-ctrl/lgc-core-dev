@@ -1,6 +1,6 @@
 # Avaliação do código — 2026-11-07
 
-> **Atualização de 2026-11-07 (tarde):** corrigidos na branch `rafaelbaladioffa-ctrl/correcoes-bloqueantes` o vazamento da fila, os três defeitos de fluxo (devolução, reabertura, resposta do solicitante), o tratamento de erro da tela de detalhe e da fila, os testes BPM quebrados (B4) e o tsbuildinfo/cache versionados (B3). Itens corrigidos estão marcados com ✅. B1/B2 (migrações) aguardam decisão.
+> **Atualização de 2026-11-07 (tarde):** corrigidos na branch `rafaelbaladioffa-ctrl/correcoes-bloqueantes` o vazamento da fila, os três defeitos de fluxo (devolução, reabertura, resposta do solicitante), o tratamento de erro da tela de detalhe e da fila, os testes BPM quebrados (B4) e o tsbuildinfo/cache versionados (B3). Itens corrigidos estão marcados com ✅. B1/B2 (migrações) corrigidos em seguida, com autorização para apagar os dados do piloto BPM.
 
 Diagnóstico do Axis Core (`backend/`, `frontend/`) e do satélite Logística (`lgc-dev-logistica/`)
 na branch `rafaelbaladioffa-ctrl/minhas-atividades` (HEAD `115d5b9`). Foi feito por leitura do
@@ -14,7 +14,7 @@ os itens que dependem do estado do banco foram inferidos das migrações.
 | Logística | Código sólido e consistente: transações, DTOs validados, ledger imutável. 417 testes unitários no backend e 98 no frontend passando. | Boa |
 | Core — cadastros e acesso | Funcional, com criptografia LGPD e outbox bem desenhados. Faltam rate limit no login, auditoria completa e filtro global de erros. | Razoável |
 | Core — Requisições | Rico em funcionalidade, mas com vazamento de dados na fila, transições sem controle de concorrência e telas sem tratamento de erro. | Atenção |
-| Banco e migrações | Ordem das migrações quebrada (banco vazio não sobe) e drift das tabelas BPM. | **Bloqueante** |
+| Banco e migrações | Ordem e drift corrigidos em 2026-11-07 (migrações renomeadas + `remove_bpm`), testados em Postgres de teste. | Corrigido |
 | Testes do Core | Praticamente inexistentes; os que existem quebraram com a remoção do BPM. | **Bloqueante** |
 | Integração Core ↔ Logística | O SSO e o catálogo funcionam. Os eventos não fecham, e o SSO tem falha de segurança. | Atenção |
 | Documentação | Estava desatualizada. Foi reorganizada nesta data (ver §7). | Corrigida |
@@ -26,8 +26,8 @@ segredos versionados, mas o código revela o desenho de segurança. Avalie torn�
 
 | # | Problema | Evidência | Correção |
 |---|---|---|---|
-| B1 | `prisma migrate deploy` falha em banco vazio. Três migrações BPM alteram tabelas criadas depois na ordem alfabética. | `backend/prisma/migrations/20261101000000_request_bpm_p01/migration.sql:22-40` × `20261111000000_requisicoes_fase1` | Gerar um baseline (`migrate diff` do schema atual) para ambientes novos e marcar como aplicado no banco existente, ou renomear com cuidado as pastas e o `_prisma_migrations`. |
-| B2 | Drift: 15 tabelas `bpm_*`/`request_queue_members`/`process_config_grants`, colunas BPM em `request_categories`/`category_versions` e permissões `request_process:*` existem no banco sem model. | Commit `98dfce5` sem migração de DROP | Migração explícita de limpeza, depois de backup, e remoção dos resquícios no schema (`bpm_v1`, estados não usados). |
+| B1 ✅ | `prisma migrate deploy` falha em banco vazio. Três migrações BPM alteram tabelas criadas depois na ordem alfabética. | `backend/prisma/migrations/20261101000000_request_bpm_p01/migration.sql:22-40` × `20261111000000_requisicoes_fase1` | Gerar um baseline (`migrate diff` do schema atual) para ambientes novos e marcar como aplicado no banco existente, ou renomear com cuidado as pastas e o `_prisma_migrations`. |
+| B2 ✅ | Drift: 15 tabelas `bpm_*`/`request_queue_members`/`process_config_grants`, colunas BPM em `request_categories`/`category_versions` e permissões `request_process:*` existem no banco sem model. | Commit `98dfce5` sem migração de DROP | Migração explícita de limpeza, depois de backup, e remoção dos resquícios no schema (`bpm_v1`, estados não usados). |
 | B3 ✅ | `dist/` pode sair sem `main.js`: `tsconfig.build.tsbuildinfo` versionado e fora de `outDir`, com `incremental` + `deleteOutDir`. | `backend/tsconfig.build.tsbuildinfo` (aparece modificado no git status), `nest-cli.json` | Remover do git, adicionar ao `.gitignore` e ao `.dockerignore`, ou apontar `tsBuildInfoFile` para dentro de `dist`. |
 | B4 ✅ | Testes quebrados. Backend: 6 de 9 e2e importam módulos removidos, e `tsc -p tsconfig.json` dá 169 erros. Frontend: 3 de 4 arquivos do Vitest falham, e o Playwright mira `/requests/bpm`. | `backend/test/bpm-*`, `frontend/tests/*`, `frontend/e2e/a23-mobile.spec.ts` | Apagar os testes BPM (o código está no checkpoint `629044d`). Recriar uma base mínima: auth, RBAC, requisições. |
 

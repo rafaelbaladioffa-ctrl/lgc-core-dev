@@ -58,7 +58,7 @@ Identificador único + código amigável, setor/unidade responsável, solicitant
 ### 6.1 Prisma e migrações
 
 - Mudança de modelo = nova migration em `backend/prisma/migrations/`. **Nunca editar uma migration já aplicada** em qualquer ambiente.
-- **Nunca rodar `prisma migrate dev` contra banco com dados** enquanto houver drift das tabelas `bpm_*` (criadas por migrations do BPM removido e ausentes do schema): o comando propõe reset e apaga dados. Detalhes em [arquitetura.md](arquitetura.md) e [operacao.md](operacao.md). Gerar SQL com `prisma migrate diff` e aplicar com `migrate deploy`.
+- **Nunca rodar `prisma migrate dev` contra banco com dados** (o drift das tabelas `bpm_*` foi eliminado em 2026-11-07, mas `migrate dev` continua sendo ferramenta só de banco descartável) (criadas por migrations do BPM removido e ausentes do schema): o comando propõe reset e apaga dados. Detalhes em [arquitetura.md](arquitetura.md) e [operacao.md](operacao.md). Gerar SQL com `prisma migrate diff` e aplicar com `migrate deploy`.
 - Sequences e travas (`FOR UPDATE`) são criadas por SQL na migration; documente-as no comentário do serviço que as usa.
 
 ## 7. Convenções do frontend

@@ -84,7 +84,7 @@ Legenda de quem pode: **Sol.** = solicitante; **Benef.** = beneficiário; "não-
 | qualquer | atribuir (`POST /:id/assign`) | `request:assign` | sem checagem de estado nem de conflito ([:330-335](../../backend/src/requests/requests.service.ts#L330-L335)) | mesmo status |
 
 Estados sem saída ou sem entrada:
-- `em_triagem`: só existe dentro da transação do aceite da triagem (gravado e sobrescrito em seguida); nenhum comando parte dele. Registros antigos reabertos antes de 2026-11-07 podem ter ficado nesse status e precisam ser movidos para `enviada` manualmente.
+- `em_triagem`: só existe dentro da transação do aceite da triagem (gravado e sobrescrito em seguida); nenhum comando parte dele. Registros reabertos antes de 2026-11-07 que ficaram presos nele são movidos para `enviada` pela migração `20261121000001_requisicoes_destravar_em_triagem`, com um `audit_event` `request.unstuck_from_triage` para cada um.
 - `planejada`, `aguardando_terceiro`: aceitos como origem, nunca atribuídos.
 - `suspensa`, `reaberta`, `expirada`, `aguardando_correcao`, `aguardando_informacao`: não referenciados em `backend/src`.
 
