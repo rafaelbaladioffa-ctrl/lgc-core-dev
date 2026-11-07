@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// F0 — infraestrutura: RBAC local, auditoria, integração com o Core.
+// O domínio de contas a pagar (F1–F3) entra em migrações próprias.
+// ---------------------------------------------------------------------------
+
+model FinancePermission {
+  id          String @id @default(uuid())
+  code        String @unique // "recurso:acao", ex.: payable:approve
+  description String
+
+  roles RolePermission[]
+
+  @@map("finance_permissions")
+}
+
+model FinanceRole {
+  id          String   @id @default(uuid())
+  code        String   @unique // ex.: TESOURARIA
+  name        String
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  permissions  RolePermission[]
+  axisMappings AxisRoleToFinanceRole[]
+  userGrants   UserFinanceRole[]
+
+  @@map("finance_roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       FinanceRole       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission FinancePermission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+/// Papel vindo no JWT do Core → perfis do Financeiro; editável sem redeploy do Core.
+model AxisRoleToFinanceRole {
+  axisRole      String @map("axis_role")
+  financeRoleId String @map("finance_role_id")
+
+  financeRole FinanceRole @relation(fields: [financeRoleId], references: [id], onDelete: Cascade)
+
+  @@id([axisRole, financeRoleId])
+  @@map("axis_role_to_finance_role")
+}
+
+/// Perfil concedido a um usuário específico do Core, somado ao que vem do mapeamento por papel.
+model UserFinanceRole {
+  axisUserId    String   @map("axis_user_id")
+  financeRoleId String   @map("finance_role_id")
+  grantedBy     String?  @map("granted_by")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  financeRole FinanceRole @relation(fields: [financeRoleId], references: [id], onDelete: Cascade)
+
+  @@id([axisUserId, financeRoleId])
+  @@map("user_finance_roles")
+}
+
+/// Trilha append-only: o código só insere (sem rota de alteração ou remoção).
+model AuditEvent {
+  id            String   @id @default(uuid())
+  actorAxisId   String   @map("actor_axis_id")
+  action        String
+  aggregateType String   @map("aggregate_type")
+  aggregateId   String   @map("aggregate_id")
+  diff          Json?
+  origin        String?
+  correlationId String?  @map("correlation_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([aggregateType, aggregateId])
+  @@index([actorAxisId, createdAt])
+  @@map("audit_events")
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  RECEIVED
+  PROCESSED
+  IGNORED
+  FAILED
+  PENDING
+  DELIVERED
+}
+
+/// Inbox (idempotência por event_id) e outbox transacional (Financeiro → Core).
+model IntegrationMessage {
+  id            String           @id @default(uuid())
+  direction     MessageDirection
+  eventId       String           @map("event_id")
+  eventType     String           @map("event_type")
+  occurredAt    DateTime         @map("occurred_at")
+  payload       Json
+  status        MessageStatus
+  attempts      Int              @default(0)
+  lastError     String?          @map("last_error")
+  correlationId String?          @map("correlation_id")
+  nextAttemptAt DateTime?        @map("next_attempt_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  processedAt   DateTime?        @map("processed_at")
+
+  @@unique([direction, eventId])
+  @@index([direction, status, nextAttemptAt])
+  @@map("integration_messages")
+}
+
+/// Cache dos mestres do Core (usuário, colaborador, cliente, projeto, centro de custo). Nunca editável aqui.
+model AxisMasterCache {
+  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER
+  axisId           String   @map("axis_id")
+  code             String?
+  name             String?
+  active           Boolean  @default(true)
+  data             Json     @default("{}")
+  sourceOccurredAt DateTime @map("source_occurred_at") // ordem dos eventos: o mais novo vence
+  syncedAt         DateTime @default(now()) @map("synced_at")
+
+  @@id([kind, axisId])
+  @@index([kind, active])
+  @@map("axis_master_cache")
+}

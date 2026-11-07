@@ -1,0 +1,22 @@
+FROM node:20-alpine AS build
+WORKDIR /app
+RUN apk add --no-cache openssl
+COPY package*.json ./
+COPY prisma ./prisma
+RUN npm ci
+COPY . .
+RUN npx prisma generate
+RUN npm run build
+
+FROM node:20-alpine AS runtime
+WORKDIR /app
+RUN apk add --no-cache openssl
+COPY package*.json ./
+COPY prisma ./prisma
+RUN npm ci
+RUN npx prisma generate
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/src ./src
+ENV NODE_ENV=production
+EXPOSE 3200
+CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx prisma/seed.ts && node dist/main.js"]

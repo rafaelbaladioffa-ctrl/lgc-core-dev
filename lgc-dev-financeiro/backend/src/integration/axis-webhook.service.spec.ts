@@ -1,0 +1,117 @@
+import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
+import { createHmac } from 'crypto';
+import { AxisWebhookService, toMasterRecord, type Envelope } from './axis-webhook.service.js';
+import type { PrismaService } from '../prisma/prisma.service.js';
+
+const SECRET = 'segredo-webhook-de-teste';
+const EVENT_ID = '7f3c2a10-1b2c-4d5e-8f90-0123456789ab';
+const NOW = Date.parse('2026-11-07T12:00:00Z');
+
+const config = (values: Record<string, unknown>) => ({ get: (k: string) => values[k] }) as unknown as ConfigService;
+const sign = (body: Buffer) => `sha256=${createHmac('sha256', SECRET).update(body).digest('hex')}`;
+const envelope = (over: Partial<Envelope> = {}): Envelope => ({ event_id: EVENT_ID, event_type: 'project.created', occurred_at: '2026-11-07T11:59:00Z', payload: { project_id: 'p1', code: 'PROP-1', status: 'aprovado' }, ...over });
+const raw = (e: unknown) => Buffer.from(JSON.stringify(e));
+
+function prismaMock() {
+  const tx = { axisMasterCache: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) } };
+  const prisma = {
+    integrationMessage: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'm1' }), update: vi.fn().mockResolvedValue({}) },
+    $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
+  };
+  return { prisma, tx };
+}
+
+describe('AxisWebhookService — assinatura e envelope', () => {
+  const service = new AxisWebhookService({} as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+
+  it('aceita a assinatura HMAC correta do corpo bruto', () => {
+    const body = raw(envelope());
+    expect(() => service.verifySignature(body, sign(body))).not.toThrow();
+  });
+
+  it('recusa assinatura ausente, malformada ou de outro corpo', () => {
+    const body = raw(envelope());
+    expect(() => service.verifySignature(body, undefined)).toThrow(UnauthorizedException);
+    expect(() => service.verifySignature(body, 'abc')).toThrow(UnauthorizedException);
+    expect(() => service.verifySignature(body, sign(raw({ outro: true })))).toThrow(UnauthorizedException);
+  });
+
+  it('sem segredo configurado responde 503', () => {
+    const semSegredo = new AxisWebhookService({} as PrismaService, config({}));
+    expect(() => semSegredo.verifySignature(Buffer.from('{}'), 'sha256=00')).toThrow(ServiceUnavailableException);
+  });
+
+  it('recusa envelope inválido, evento velho (replay) e evento no futuro', () => {
+    expect(() => service.parse(Buffer.from('não é json'), NOW)).toThrow('Corpo do evento não é um JSON válido.');
+    expect(() => service.parse(raw(envelope({ event_id: '123' })), NOW)).toThrow('event_id ausente ou inválido.');
+    expect(() => service.parse(raw(envelope({ payload: [] as never })), NOW)).toThrow('payload ausente ou inválido.');
+    expect(() => service.parse(raw(envelope({ occurred_at: '2026-11-01T00:00:00Z' })), NOW)).toThrow(BadRequestException);
+    expect(() => service.parse(raw(envelope({ occurred_at: '2026-11-07T13:00:00Z' })), NOW)).toThrow('occurred_at no futuro.');
+  });
+
+  it('janela configurada inválida volta ao padrão de 72 h', () => {
+    const s = new AxisWebhookService({} as PrismaService, config({ WEBHOOK_MAX_AGE_HOURS: 'abc' }));
+    expect(s.parse(raw(envelope({ occurred_at: '2026-11-05T12:00:00Z' })), NOW).event_id).toBe(EVENT_ID);
+    expect(() => s.parse(raw(envelope({ occurred_at: '2026-11-03T12:00:00Z' })), NOW)).toThrow(BadRequestException);
+  });
+});
+
+describe('toMasterRecord', () => {
+  it('mapeia os mestres emitidos pelo Core', () => {
+    expect(toMasterRecord(envelope())).toMatchObject({ kind: 'PROJECT', axisId: 'p1', code: 'PROP-1', active: true });
+    expect(toMasterRecord(envelope({ event_type: 'project.status_changed', payload: { project_id: 'p1', status: 'encerrado' } }))).toMatchObject({ active: false });
+    expect(toMasterRecord(envelope({ event_type: 'collaborator.offboarded', payload: { collaborator_id: 'c1' } }))).toMatchObject({ kind: 'COLLABORATOR', active: false });
+    expect(toMasterRecord(envelope({ event_type: 'collaborator.updated', payload: { collaborator_id: 'c1', name: 'Ana' } }))?.active).toBeUndefined();
+    expect(toMasterRecord(envelope({ event_type: 'user.disabled', payload: { user_id: 'u1' } }))).toMatchObject({ kind: 'USER', active: false });
+    expect(toMasterRecord(envelope({ event_type: 'client.created', payload: { client_id: 'k1', code: 12 } }))).toMatchObject({ kind: 'CLIENT', code: '12' });
+  });
+
+  it('ignora eventos que não são mestres', () => {
+    expect(toMasterRecord(envelope({ event_type: 'request.completed', payload: { request_id: 'r1' } }))).toBeNull();
+  });
+
+  it('exige o identificador do mestre', () => {
+    expect(() => toMasterRecord(envelope({ payload: { code: 'x' } }))).toThrow('project_id ausente.');
+  });
+});
+
+describe('AxisWebhookService.receive', () => {
+  const fresh = () => envelope({ occurred_at: new Date(Date.now() - 60_000).toISOString() });
+
+  it('processa o evento e grava o cache', async () => {
+    const { prisma, tx } = prismaMock();
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(fresh());
+    await expect(service.receive(body, sign(body))).resolves.toEqual({ status: 'processed', event_id: EVENT_ID });
+    expect(tx.axisMasterCache.upsert).toHaveBeenCalledOnce();
+    expect(prisma.integrationMessage.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'PROCESSED' }) }));
+  });
+
+  it('evento repetido não é reprocessado', async () => {
+    const { prisma, tx } = prismaMock();
+    prisma.integrationMessage.findUnique.mockResolvedValue({ id: 'm1', status: 'PROCESSED' });
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(fresh());
+    await expect(service.receive(body, sign(body))).resolves.toEqual({ status: 'duplicate', event_id: EVENT_ID });
+    expect(tx.axisMasterCache.upsert).not.toHaveBeenCalled();
+  });
+
+  it('evento fora de ordem não sobrescreve versão mais nova', async () => {
+    const { prisma, tx } = prismaMock();
+    tx.axisMasterCache.findUnique.mockResolvedValue({ sourceOccurredAt: new Date(Date.now() + 1000), data: {} });
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(fresh());
+    await service.receive(body, sign(body));
+    expect(tx.axisMasterCache.upsert).not.toHaveBeenCalled();
+    expect(prisma.integrationMessage.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ lastError: 'out_of_order' }) }));
+  });
+
+  it('falha de processamento marca FAILED e devolve erro para o Core reentregar', async () => {
+    const { prisma } = prismaMock();
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(envelope({ occurred_at: new Date().toISOString(), payload: { code: 'sem id' } }));
+    await expect(service.receive(body, sign(body))).rejects.toThrow('project_id ausente.');
+    expect(prisma.integrationMessage.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'FAILED' }) }));
+  });
+});
