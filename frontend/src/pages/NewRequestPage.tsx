@@ -231,30 +231,40 @@ export function NewRequestPage() {
 
       {categoryId && (
         <FormSection title="Dados da requisição">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {isPurchaseRequest ? <input value={purchaseTitle} readOnly aria-label="Título da requisição" /> : <input placeholder="Título (10-120 caracteres)" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={10} maxLength={120} />}
-            <div style={fieldStyle}>
-              <label style={labelStyle}>Solicitante</label>
-              <input value={requester?.fullName ?? ''} readOnly aria-label="Solicitante" />
+          <div className="request-form">
+            {isPurchaseRequest ? <input value={purchaseTitle} readOnly aria-label="Título da requisição" /> : <input placeholder="Título (10-120 caracteres)" aria-label="Título da requisição" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required minLength={10} maxLength={120} />}
+            <div className="request-form-grid">
+              <div className="request-form-field">
+                <label htmlFor="request-requester">Solicitante</label>
+                <input id="request-requester" value={requester?.fullName ?? ''} readOnly />
+              </div>
+              <div className="request-form-field">
+                <label htmlFor="request-priority">Prioridade</label>
+                <select id="request-priority" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as CreateRequestInput['priority'] })}>
+                  <option value="baixa">Baixa</option>
+                  <option value="normal">Normal</option>
+                  <option value="alta">Alta</option>
+                  <option value="critica">Crítica</option>
+                </select>
+              </div>
+              <div className="request-form-field">
+                <label htmlFor="request-needed-by">Data necessária</label>
+                <input id="request-needed-by" type="date" value={form.neededBy ?? ''} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} />
+              </div>
+              <div className="request-form-field">
+                <label htmlFor="request-cost-center">Centro de custo *</label>
+                {/* Toda requisição exige centro de custo, não só compras — RequestsService.create valida de novo no servidor. */}
+                <select id="request-cost-center" value={form.costCenterId ?? ''} onChange={(e) => setForm({ ...form, costCenterId: e.target.value || undefined })} required>
+                  <option value="">Selecione o centro de custo</option>
+                  {optionData.cost_centers.map((cc) => (
+                    <option key={cc.id} value={cc.id}>
+                      {cc.code} — {cc.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <textarea placeholder="Descrição/justificativa" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} required />
-            <select value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value as CreateRequestInput['priority'] })}>
-              <option value="baixa">Prioridade: Baixa</option>
-              <option value="normal">Prioridade: Normal</option>
-              <option value="alta">Prioridade: Alta</option>
-              <option value="critica">Prioridade: Crítica</option>
-            </select>
-            <label style={{ fontSize: 11, color: 'var(--text-muted)' }}>Data necessária</label>
-            <input type="date" value={form.neededBy ?? ''} onChange={(e) => setForm({ ...form, neededBy: e.target.value })} />
-            {/* Toda requisição exige centro de custo, não só compras — RequestsService.create valida de novo no servidor. */}
-            <select value={form.costCenterId ?? ''} onChange={(e) => setForm({ ...form, costCenterId: e.target.value || undefined })} required>
-              <option value="">Selecione o centro de custo *</option>
-              {optionData.cost_centers.map((cc) => (
-                <option key={cc.id} value={cc.id}>
-                  {cc.code} — {cc.name}
-                </option>
-              ))}
-            </select>
+            <textarea placeholder="Descrição/justificativa" aria-label="Descrição/justificativa" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} required />
           </div>
         </FormSection>
       )}
