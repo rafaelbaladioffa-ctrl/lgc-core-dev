@@ -561,6 +561,16 @@ export class RequestsService {
     this.assertNotRequester(request, actorId);
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível concluir durante o atendimento');
 
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    if (isPurchase(categoryVersion.category)) {
+      const approvals = await this.prisma.requestApproval.findMany({ where: { requestId: id }, select: { approvalSource: true, status: true } });
+      const costCenterApproved = approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'aprovado');
+      const hasPending = approvals.some((a) => a.status === 'pendente');
+      if (!costCenterApproved || hasPending) {
+        throw new BadRequestException('A compra só pode ser concluída depois da aprovação do responsável do centro de custo.');
+      }
+    }
+
     const subtaskLinks = await this.prisma.requestRelation.findMany({
       where: { targetId: id, relationType: 'subtarefa_de' },
       include: { source: { select: { code: true, status: true } } },

@@ -142,6 +142,46 @@ describe('reopen — volta para a fila de triagem', () => {
   });
 });
 
+describe('complete — compra exige aprovação do centro de custo', () => {
+  function completeFixture(kind: 'padrao' | 'compra_material', approvals: Array<{ approvalSource: string; status: string }>) {
+    const f = fixture(baseRequest({ status: 'em_atendimento', assigneeId: STAFF }));
+    f.prisma.categoryVersion.findUniqueOrThrow.mockResolvedValue({ id: 'cv-1', formSchema: [], category: { kind } });
+    f.prisma.requestApproval = { findMany: vi.fn().mockResolvedValue(approvals) };
+    f.prisma.requestRelation = { findMany: vi.fn().mockResolvedValue([]) };
+    return f;
+  }
+
+  it('compra em atendimento sem aprovação não conclui e não grava nada', async () => {
+    const { prisma, outbox, service } = completeFixture('compra_material', []);
+    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any)).rejects.toThrow(
+      'A compra só pode ser concluída depois da aprovação do responsável do centro de custo.',
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.request.update).not.toHaveBeenCalled();
+    expect(prisma.requestComment.create).not.toHaveBeenCalled();
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
+
+  it('compra com aprovação do centro de custo pendente não conclui', async () => {
+    const { prisma, service } = completeFixture('compra_material', [{ approvalSource: 'centro_custo', status: 'pendente' }]);
+    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.request.update).not.toHaveBeenCalled();
+  });
+
+  it('compra com aprovação do centro de custo aprovada conclui', async () => {
+    const { prisma, service } = completeFixture('compra_material', [{ approvalSource: 'centro_custo', status: 'aprovado' }]);
+    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any);
+    expect(updated.status).toBe('concluida');
+    expect(prisma.request.update).toHaveBeenCalled();
+  });
+
+  it('categoria padrão em atendimento sem aprovações conclui (regressão)', async () => {
+    const { service } = completeFixture('padrao', []);
+    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any);
+    expect(updated.status).toBe('concluida');
+  });
+});
+
 describe('resume — resposta do solicitante', () => {
   it('solicitante responde à pergunta e a requisição volta ao atendimento', async () => {
     const { prisma, service } = fixture(baseRequest({ status: 'aguardando_solicitante' }));
