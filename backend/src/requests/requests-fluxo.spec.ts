@@ -142,19 +142,19 @@ describe('reopen — volta para a fila de triagem', () => {
   });
 });
 
-describe('complete — compra exige aprovação do centro de custo', () => {
-  function completeFixture(kind: 'padrao' | 'compra_material', approvals: Array<{ approvalSource: string; status: string }>) {
+describe('complete — não se aplica à compra', () => {
+  function completeFixture(kind: 'padrao' | 'compra_material') {
     const f = fixture(baseRequest({ status: 'em_atendimento', assigneeId: STAFF }));
     f.prisma.categoryVersion.findUniqueOrThrow.mockResolvedValue({ id: 'cv-1', formSchema: [], category: { kind } });
-    f.prisma.requestApproval = { findMany: vi.fn().mockResolvedValue(approvals) };
+    f.prisma.requestApproval = { findMany: vi.fn().mockResolvedValue([]) };
     f.prisma.requestRelation = { findMany: vi.fn().mockResolvedValue([]) };
     return f;
   }
 
-  it('compra em atendimento sem aprovação não conclui e não grava nada', async () => {
-    const { prisma, outbox, service } = completeFixture('compra_material', []);
+  it('compra: complete responde 400 e não grava nada', async () => {
+    const { prisma, outbox, service } = completeFixture('compra_material');
     await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos'])).rejects.toThrow(
-      'A compra só pode ser concluída depois da aprovação do responsável do centro de custo.',
+      'Na compra, a conclusão é a confirmação de recebimento pelo solicitante.',
     );
     expect(prisma.$transaction).not.toHaveBeenCalled();
     expect(prisma.request.update).not.toHaveBeenCalled();
@@ -162,21 +162,8 @@ describe('complete — compra exige aprovação do centro de custo', () => {
     expect(outbox.record).not.toHaveBeenCalled();
   });
 
-  it('compra com aprovação do centro de custo pendente não conclui', async () => {
-    const { prisma, service } = completeFixture('compra_material', [{ approvalSource: 'centro_custo', status: 'pendente' }]);
-    await expect(service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos'])).rejects.toBeInstanceOf(BadRequestException);
-    expect(prisma.request.update).not.toHaveBeenCalled();
-  });
-
-  it('compra com aprovação do centro de custo aprovada conclui', async () => {
-    const { prisma, service } = completeFixture('compra_material', [{ approvalSource: 'centro_custo', status: 'aprovado' }]);
-    const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos']);
-    expect(updated.status).toBe('concluida');
-    expect(prisma.request.update).toHaveBeenCalled();
-  });
-
-  it('categoria padrão em atendimento sem aprovações conclui (regressão)', async () => {
-    const { service } = completeFixture('padrao', []);
+  it('categoria padrão em atendimento conclui (regressão)', async () => {
+    const { service } = completeFixture('padrao');
     const updated = await service.complete('req-1', STAFF, { resolution: 'Feito' } as any, ['analista_suprimentos']);
     expect(updated.status).toBe('concluida');
   });
@@ -379,11 +366,14 @@ describe('compra — só o Suprimentos age depois da triagem', () => {
     expect(prisma.request.update).not.toHaveBeenCalled();
   });
 
-  it('analista de suprimentos inicia e cancela a compra', async () => {
+  it('analista de suprimentos não inicia a compra (400) mas cancela, inclusive aguardando entrega', async () => {
     const a = opsFixture('compra_material');
-    expect((await a.service.start('req-1', STAFF, ANALYST_ROLES)).status).toBe('em_atendimento');
+    await expect(a.service.start('req-1', STAFF, ANALYST_ROLES)).rejects.toThrow('Na compra, registre o pedido ao fornecedor.');
+    expect(a.prisma.request.update).not.toHaveBeenCalled();
     const b = opsFixture('compra_material');
     expect((await b.service.cancel('req-1', STAFF, true, { reason: 'x' } as any, ANALYST_ROLES)).status).toBe('cancelada');
+    const c = opsFixture('compra_material', 'aguardando_entrega');
+    expect((await c.service.cancel('req-1', STAFF, true, { reason: 'x' } as any, ANALYST_ROLES)).status).toBe('cancelada');
   });
 
   it('solicitante ainda cancela a própria compra devolvida para ajuste', async () => {

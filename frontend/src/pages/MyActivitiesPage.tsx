@@ -17,6 +17,7 @@ const STATUS_LABEL: Record<RequestStatus, string> = {
   em_atendimento: 'Em atendimento',
   aguardando_solicitante: 'Aguardando solicitante',
   aguardando_terceiro: 'Aguardando terceiro',
+  aguardando_entrega: 'Aguardando entrega',
   concluida: 'Concluída',
   encerrada: 'Encerrada',
   devolvida_ajuste: 'Devolvida para ajuste',

@@ -11,6 +11,7 @@ export type RequestStatus =
   | 'em_atendimento'
   | 'aguardando_solicitante'
   | 'aguardando_terceiro'
+  | 'aguardando_entrega'
   | 'concluida'
   | 'encerrada'
   | 'devolvida_ajuste'
@@ -165,6 +166,31 @@ export interface PurchaseDecisionInput {
   reason?: string;
 }
 
+/** Entrega gravada em formData.procurementDeliveries (um grupo por fornecedor, mais "Estoque"). */
+export interface PurchaseDelivery {
+  groupId: string;
+  supplier: string;
+  items: Array<{ materialId: string; item: string; quantity: number }>;
+  orderNumber: string;
+  /** aaaa-mm-dd */
+  orderDate: string;
+  /** aaaa-mm-dd */
+  expectedDeliveryDate: string;
+  notes: string;
+  receivedAt: string | null;
+  receivedBy: string | null;
+  receivedByName?: string | null;
+  history: Array<{ expectedDeliveryDate: string; changedAt: string; changedBy: string; changedByName?: string | null }>;
+}
+
+export interface PurchaseOrderDeliveryInput {
+  groupId: string;
+  orderNumber?: string;
+  orderDate: string;
+  expectedDeliveryDate: string;
+  notes?: string;
+}
+
 export interface CreateRequestInput {
   categoryId: string;
   beneficiaryId?: string;
@@ -259,6 +285,8 @@ export const requestsApi = {
   purchaseQuotation: (id: string, input: PurchaseQuotationInput) => api.post(`/requests/${id}/purchase-quotation`, input).then((r) => r.data),
   deletePurchaseQuotation: (id: string, quotationId: string) => api.delete(`/requests/${id}/purchase-quotation/${quotationId}`).then((r) => r.data),
   submitPurchaseForApproval: (id: string) => api.post(`/requests/${id}/purchase-quotation/submit`).then((r) => r.data),
+  purchaseOrder: (id: string, deliveries: PurchaseOrderDeliveryInput[]) => api.post<AxisRequest>(`/requests/${id}/purchase-order`, { deliveries }).then((r) => r.data),
+  confirmReceipt: (id: string, groupIds: string[], notes?: string) => api.post<AxisRequest>(`/requests/${id}/confirm-receipt`, { groupIds, notes }).then((r) => r.data),
   decidePurchase: (id: string, input: PurchaseDecisionInput) => api.post<AxisRequest>(`/requests/${id}/purchase-decision`, input).then((r) => r.data),
   downloadAttachment: (id: string, attachmentId: string) => api.get<Blob>(`/requests/${id}/attachments/${attachmentId}`, { responseType: 'blob' }).then((r) => r.data),
   attachment: (id: string, input: { filename: string; contentBase64: string }) => api.post<{ id: string }>(`/requests/${id}/attachments`, input).then((r) => r.data),

@@ -20,6 +20,7 @@ const REQUEST_OPEN_STATUSES: RequestStatus[] = [
   'em_atendimento',
   'aguardando_solicitante',
   'aguardando_terceiro',
+  'aguardando_entrega',
 ];
 
 const REQUEST_STATUS_LABELS: Partial<Record<RequestStatus, string>> = {

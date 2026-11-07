@@ -12,6 +12,7 @@ import { CreateRequestAttachmentDto } from './dto/create-attachment.dto.js';
 import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
 import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
 import { PurchaseDecisionDto } from './dto/purchase-decision.dto.js';
+import { ConfirmReceiptDto, PurchaseOrderDto } from './dto/purchase-delivery.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
@@ -170,6 +171,21 @@ export class RequestsController {
   @AuditAction({ action: 'reject_request', resourceType: 'request', resourceIdParam: 'id' })
   reject(@Param('id') id: string, @Body() dto: RejectRequestDto, @CurrentUser() user: AuthenticatedUser) {
     return this.requestsService.reject(id, requireCollaboratorId(user), dto);
+  }
+
+  @Post(':id/purchase-order')
+  @RequirePermissions('request:update')
+  @AuditAction({ action: 'register_purchase_order', resourceType: 'request', resourceIdParam: 'id' })
+  purchaseOrder(@Param('id') id: string, @Body() dto: PurchaseOrderDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.registerPurchaseOrder(id, requireCollaboratorId(user), dto, user.roles);
+  }
+
+  // request:create (não update): só o solicitante/beneficiário confirma (RequestsService.confirmReceipt checa).
+  @Post(':id/confirm-receipt')
+  @RequirePermissions('request:create')
+  @AuditAction({ action: 'confirm_receipt', resourceType: 'request', resourceIdParam: 'id' })
+  confirmReceipt(@Param('id') id: string, @Body() dto: ConfirmReceiptDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.requestsService.confirmReceipt(id, requireCollaboratorId(user), dto);
   }
 
   @Post(':id/start')

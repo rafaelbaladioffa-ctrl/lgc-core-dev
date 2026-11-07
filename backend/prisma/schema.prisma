@@ -385,6 +385,7 @@ enum RequestStatus {
   aguardando_terceiro
   aguardando_correcao
   aguardando_informacao
+  aguardando_entrega
   concluida
   encerrada
   devolvida_ajuste

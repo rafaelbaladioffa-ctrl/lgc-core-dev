@@ -15,6 +15,7 @@ import { AssignRequestDto } from './dto/assign-request.dto.js';
 import { PurchaseAnalysisDto } from './dto/purchase-analysis.dto.js';
 import { PurchaseQuotationDto } from './dto/purchase-quotation.dto.js';
 import { PurchaseDecisionDto } from './dto/purchase-decision.dto.js';
+import { ConfirmReceiptDto, PurchaseOrderDto } from './dto/purchase-delivery.dto.js';
 import { ApproveRequestDto, RejectRequestDto } from './dto/decision.dto.js';
 import { RequestInformationDto, ReturnForAdjustmentDto, ResumeRequestDto, CompleteRequestDto, CancelRequestDto, ReopenRequestDto } from './dto/lifecycle.dto.js';
 import { ManagementLevel, Prisma, RequestApprovalCompletionRule, RequestStatus } from '@prisma/client';
@@ -65,7 +66,7 @@ const TERMINAL_STATUSES: RequestStatus[] = ['concluida', 'encerrada', 'cancelada
 const REQUESTER_EDITABLE_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste'];
 /** Chaves de `formData` gravadas só pelo servidor (análise de estoque e cotações do Suprimentos).
  * O cliente nunca as envia (L02) e o reenvio de uma compra devolvida as descarta (ciclo novo). */
-const PROCUREMENT_SERVER_KEYS: readonly string[] = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId', 'procurementSelection'];
+const PROCUREMENT_SERVER_KEYS: readonly string[] = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId', 'procurementSelection', 'procurementDeliveries'];
 /** Prefixo do comentário público gravado na devolução para ajuste; a tela do solicitante o usa. */
 export const RETURN_FOR_ADJUSTMENT_PREFIX = 'Devolvida para ajuste: ';
 
@@ -651,6 +652,199 @@ export class RequestsService {
     });
   }
 
+  /** Grupos de entrega de uma compra aprovada: um por fornecedor distinto escolhido em
+   * `procurementSelection` (o `groupId` é o `quotationId` da primeira cotação escolhida daquele
+   * fornecedor) e, se houver itens atendidos pelo estoque, o grupo "Estoque" (`groupId` `estoque`).
+   * A tela repete esta mesma regra para montar o formulário do pedido. */
+  private deliveryGroupsOf(formData: Record<string, unknown>): Array<{ groupId: string; supplier: string; items: Array<{ materialId: string; item: string; quantity: number }> }> {
+    const selection = Array.isArray(formData.procurementSelection) ? (formData.procurementSelection as Array<Record<string, unknown>>) : [];
+    const purchaseItems = this.purchaseItemsOf(formData);
+    const nameOf = (materialId: string) => String((purchaseItems.find((item) => item.materialId === materialId)?.item as string | undefined) ?? materialId);
+    const groups = new Map<string, { groupId: string; supplier: string; items: Array<{ materialId: string; item: string; quantity: number }> }>();
+    const bySupplier = new Map<string, string>();
+    for (const row of selection) {
+      const supplierKey = String(row.supplier).trim().toLowerCase();
+      let groupId = bySupplier.get(supplierKey);
+      if (!groupId) {
+        groupId = String(row.quotationId);
+        bySupplier.set(supplierKey, groupId);
+        groups.set(groupId, { groupId, supplier: String(row.supplier).trim(), items: [] });
+      }
+      groups.get(groupId)!.items.push({ materialId: String(row.materialId), item: nameOf(String(row.materialId)), quantity: Number(row.quantity) });
+    }
+    const selected = new Set(selection.map((row) => String(row.materialId)));
+    const fromStock = purchaseItems.filter((item) => !selected.has(String(item.materialId)));
+    if (fromStock.length > 0) {
+      groups.set('estoque', { groupId: 'estoque', supplier: 'Estoque', items: fromStock.map((item) => ({ materialId: String(item.materialId), item: String(item.item ?? item.materialId), quantity: Number(item.quantity) })) });
+    }
+    return [...groups.values()];
+  }
+
+  private deliveriesOf(formData: Record<string, unknown>): Array<Record<string, any>> {
+    return Array.isArray(formData.procurementDeliveries) ? (formData.procurementDeliveries as Array<Record<string, any>>) : [];
+  }
+
+  /** `aaaa-mm-dd` para `dd/mm/aaaa` (sem passar por Date, para não deslocar o dia por fuso). */
+  private formatIsoDate(value: string): string {
+    const [year, month, day] = value.slice(0, 10).split('-');
+    return `${day}/${month}/${year}`;
+  }
+
+  private parseIsoDate(value: string, label: string): number {
+    const time = /^\d{4}-\d{2}-\d{2}$/.test(value) ? Date.parse(`${value}T00:00:00Z`) : NaN;
+    if (!Number.isFinite(time) || new Date(time).toISOString().slice(0, 10) !== value) throw new BadRequestException(`${label} inválida.`);
+    return time;
+  }
+
+  /** Pedido ao fornecedor (Suprimentos): depois da aprovação do centro de custo, registra um pedido
+   * por grupo de entrega com a previsão e passa a compra para o solicitante (`aguardando_entrega`).
+   * Em `aguardando_entrega` serve para atualizar a previsão (e demais dados) dos grupos ainda não recebidos. */
+  async registerPurchaseOrder(id: string, actorId: string, dto: PurchaseOrderDto, actorRoles: string[] = []) {
+    const request = await this.getOrThrow(id);
+    this.assertNotRequester(request, actorId);
+    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    if (!categoryVersion.category || !isPurchase(categoryVersion.category)) throw new BadRequestException('Esta requisição não é de compras.');
+    await this.assertPurchaseOperator(request, actorRoles);
+    const formData = (request.formData as Record<string, unknown> | null) ?? {};
+    // `em_atendimento` com `procurementSelection` é compra já aprovada que alguém levou ao atendimento
+    // (legado de quando havia "Iniciar atendimento"): o pedido pós-aprovação também é aceito aí.
+    const approvedInProgress = request.status === 'em_atendimento' && Array.isArray(formData.procurementSelection);
+    if (!['aprovada', 'aguardando_entrega'].includes(request.status) && !approvedInProgress) {
+      throw new BadRequestException('O pedido ao fornecedor só pode ser registrado depois da aprovação da compra e antes da entrega.');
+    }
+    const first = request.status !== 'aguardando_entrega';
+    const groups = this.deliveryGroupsOf(formData);
+    if (groups.length === 0) throw new BadRequestException('A compra não possui itens para entrega.');
+    const existing = this.deliveriesOf(formData);
+
+    const ids = dto.deliveries.map((row) => row.groupId);
+    if (new Set(ids).size !== ids.length) throw new BadRequestException('O mesmo grupo de entrega foi informado mais de uma vez.');
+    if (ids.some((groupId) => !groups.some((group) => group.groupId === groupId))) throw new BadRequestException('Algum grupo de entrega informado não pertence a esta compra.');
+    if (first && groups.some((group) => !ids.includes(group.groupId))) throw new BadRequestException('Informe o pedido e a previsão de entrega de todos os fornecedores (e do estoque, se houver).');
+    if (!first && existing.some((delivery) => ids.includes(delivery.groupId) && delivery.receivedAt)) throw new BadRequestException('Um dos grupos informados já foi recebido e não pode mais ser alterado.');
+
+    for (const row of dto.deliveries) {
+      const orderTime = this.parseIsoDate(row.orderDate, 'Data do pedido');
+      const expectedTime = this.parseIsoDate(row.expectedDeliveryDate, 'Previsão de entrega');
+      if (expectedTime < orderTime) throw new BadRequestException('A previsão de entrega não pode ser anterior à data do pedido.');
+    }
+
+    const actor = await this.prisma.collaborator.findUnique({ where: { id: actorId }, select: { fullName: true } });
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+    const change = (expectedDeliveryDate: string) => ({ expectedDeliveryDate, changedAt: now, changedBy: actorId, changedByName: actor?.fullName ?? null });
+    const changedForecast: Array<{ supplier: string; expectedDeliveryDate: string }> = [];
+    const deliveries = first
+      ? groups.map((group) => {
+          const row = dto.deliveries.find((r) => r.groupId === group.groupId)!;
+          changedForecast.push({ supplier: group.supplier, expectedDeliveryDate: row.expectedDeliveryDate });
+          return {
+            groupId: group.groupId,
+            supplier: group.supplier,
+            items: group.items,
+            orderNumber: row.orderNumber?.trim() ?? '',
+            orderDate: row.orderDate,
+            expectedDeliveryDate: row.expectedDeliveryDate,
+            notes: row.notes?.trim() ?? '',
+            receivedAt: null,
+            receivedBy: null,
+            history: [change(row.expectedDeliveryDate)],
+          };
+        })
+      : existing.map((delivery) => {
+          const row = dto.deliveries.find((r) => r.groupId === delivery.groupId);
+          if (!row) return delivery;
+          const forecastChanged = row.expectedDeliveryDate !== delivery.expectedDeliveryDate;
+          if (forecastChanged) changedForecast.push({ supplier: delivery.supplier, expectedDeliveryDate: row.expectedDeliveryDate });
+          return {
+            ...delivery,
+            orderNumber: row.orderNumber?.trim() ?? '',
+            orderDate: row.orderDate,
+            expectedDeliveryDate: row.expectedDeliveryDate,
+            notes: row.notes?.trim() ?? '',
+            history: forecastChanged ? [...(Array.isArray(delivery.history) ? delivery.history : []), change(row.expectedDeliveryDate)] : delivery.history,
+          };
+        });
+    const updatedFormData = { ...formData, procurementDeliveries: deliveries };
+
+    return this.prisma.$transaction(async (tx) => {
+      if (first) {
+        // O trabalho do Suprimentos terminou: para os relógios abertos (registra estouro, como `complete`).
+        const clocks = await tx.slaClock.findMany({ where: { requestId: id, metric: { in: ['solucao', 'primeira_resposta'] }, stoppedAt: null } });
+        for (const clock of clocks) await tx.slaClock.update({ where: { id: clock.id }, data: { stoppedAt: nowDate, breached: nowDate > clock.targetAt } });
+      }
+      const updated = await tx.request.update({
+        where: { id },
+        data: { formData: updatedFormData as unknown as Prisma.InputJsonValue, ...(first ? { status: 'aguardando_entrega' as RequestStatus, assigneeId: request.assigneeId ?? actorId } : {}) },
+      });
+      for (const item of changedForecast) {
+        const date = this.formatIsoDate(item.expectedDeliveryDate);
+        const body = first ? `Pedido registrado: ${item.supplier} — previsão de entrega ${date}` : `Nova previsão de entrega: ${item.supplier} — ${date}`;
+        await tx.requestComment.create({ data: { requestId: id, authorId: actorId, visibility: 'publico', body } });
+      }
+      await this.audit(tx, {
+        aggregateId: id,
+        event: first ? 'request.purchase_order_registered' : 'request.delivery_forecast_updated',
+        actorId,
+        before: { status: request.status },
+        after: { status: 'aguardando_entrega', deliveries: dto.deliveries.map((row) => ({ groupId: row.groupId, orderNumber: row.orderNumber, orderDate: row.orderDate, expectedDeliveryDate: row.expectedDeliveryDate })) },
+      });
+      if (first) await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      return updated;
+    });
+  }
+
+  /** Confirmação de recebimento (solicitante/beneficiário): marca os grupos recebidos; quando o
+   * último chega, a compra é encerrada — é a conclusão e o aceite do solicitante num só passo. */
+  async confirmReceipt(id: string, actorId: string, dto: ConfirmReceiptDto) {
+    const request = await this.getOrThrow(id);
+    if (actorId !== request.requesterId && actorId !== request.beneficiaryId) {
+      throw new ForbiddenException('Somente o solicitante pode confirmar o recebimento.');
+    }
+    if (request.status !== 'aguardando_entrega') throw new BadRequestException('O recebimento só pode ser confirmado enquanto a compra aguarda a entrega.');
+    const formData = (request.formData as Record<string, unknown> | null) ?? {};
+    const deliveries = this.deliveriesOf(formData);
+    if (deliveries.length === 0) throw new BadRequestException('Esta compra não tem pedido registrado.');
+    const groupIds = [...new Set(dto.groupIds)];
+    for (const groupId of groupIds) {
+      const delivery = deliveries.find((row) => row.groupId === groupId);
+      if (!delivery) throw new BadRequestException('Algum grupo informado não pertence a esta compra.');
+      if (delivery.receivedAt) throw new BadRequestException(`A entrega de ${delivery.supplier} já foi confirmada.`);
+    }
+    const actor = await this.prisma.collaborator.findUnique({ where: { id: actorId }, select: { fullName: true } });
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+    const updatedDeliveries = deliveries.map((delivery) =>
+      groupIds.includes(delivery.groupId) ? { ...delivery, receivedAt: now, receivedBy: actorId, receivedByName: actor?.fullName ?? null } : delivery,
+    );
+    const allReceived = updatedDeliveries.every((delivery) => !!delivery.receivedAt);
+    const notes = dto.notes?.trim();
+    const suppliers = deliveries.filter((delivery) => groupIds.includes(delivery.groupId)).map((delivery) => delivery.supplier);
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.request.update({
+        where: { id },
+        data: {
+          formData: { ...formData, procurementDeliveries: updatedDeliveries } as unknown as Prisma.InputJsonValue,
+          ...(allReceived ? { status: 'encerrada' as RequestStatus, closedAt: nowDate, completedAt: nowDate, requesterAcceptedAt: nowDate } : {}),
+        },
+      });
+      if (notes) await tx.requestComment.create({ data: { requestId: id, authorId: actorId, visibility: 'publico', body: `Recebimento confirmado (${suppliers.join(', ')}): ${notes}` } });
+      await this.audit(tx, {
+        aggregateId: id,
+        event: allReceived ? 'request.received' : 'request.partial_receipt_confirmed',
+        actorId,
+        before: { status: request.status },
+        after: { status: updated.status, groupIds, suppliers },
+      });
+      if (allReceived) {
+        await this.outbox.record(tx, 'request.completed', { request_id: id, code: updated.code });
+        await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      }
+      return updated;
+    });
+  }
+
   /** §9.1: a etapa ativa pode ter vários aprovadores em paralelo no mesmo stepOrder — `approve`
    * só avança pro próximo stepOrder (ou finaliza) quando a `completionRule` do nó for satisfeita
    * (todos aprovados / qualquer um / N de M); até lá, fica aguardando os demais do mesmo nó. */
@@ -724,6 +918,7 @@ export class RequestsService {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
     await this.assertPurchaseOperator(request, actorRoles);
+    await this.assertNotPurchaseStage(request.categoryVersionId, 'Na compra, registre o pedido ao fornecedor.');
     if (!['aprovada', 'planejada'].includes(request.status)) throw new BadRequestException('A requisição precisa estar aprovada para iniciar o atendimento');
     return this.prisma.$transaction(async (tx) => {
       const now = new Date();
@@ -814,17 +1009,8 @@ export class RequestsService {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
     await this.assertPurchaseOperator(request, actorRoles);
+    await this.assertNotPurchaseStage(request.categoryVersionId, 'Na compra, a conclusão é a confirmação de recebimento pelo solicitante.');
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível concluir durante o atendimento');
-
-    const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
-    if (isPurchase(categoryVersion.category)) {
-      const approvals = await this.prisma.requestApproval.findMany({ where: { requestId: id }, select: { approvalSource: true, status: true } });
-      const costCenterApproved = approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'aprovado');
-      const hasPending = approvals.some((a) => a.status === 'pendente');
-      if (!costCenterApproved || hasPending) {
-        throw new BadRequestException('A compra só pode ser concluída depois da aprovação do responsável do centro de custo.');
-      }
-    }
 
     const subtaskLinks = await this.prisma.requestRelation.findMany({
       where: { targetId: id, relationType: 'subtarefa_de' },
@@ -1263,7 +1449,7 @@ export class RequestsService {
       this.prisma.request.findMany({
         where: {
           executionMode: 'legacy',
-          status: { in: ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante'] },
+          status: { in: ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante', 'aguardando_entrega'] },
           OR: [{ requesterId: user.collaboratorId }, { beneficiaryId: user.collaboratorId }],
         },
         include,
@@ -1439,6 +1625,13 @@ export class RequestsService {
     if (!actorRoles.includes('analista_suprimentos') && !actorRoles.includes('admin')) {
       throw new ForbiddenException('Somente o Suprimentos pode executar esta ação na compra.');
     }
+  }
+
+  /** Na compra, `start`/`complete` não existem: depois da aprovação o fluxo é pedido ao fornecedor e
+   * confirmação de recebimento. */
+  private async assertNotPurchaseStage(categoryVersionId: string, message: string) {
+    const version = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: categoryVersionId }, include: { category: true } });
+    if (version.category && isPurchase(version.category)) throw new BadRequestException(message);
   }
 
   /** Compra se decide por `decidePurchase` (escolha do vencedor por item); as rotas genéricas não servem. */

@@ -5,6 +5,7 @@ import { StatusBadge } from '../components/DataTable';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PurchaseQuotations } from '../components/PurchaseQuotations';
+import { PurchaseDeliveries } from '../components/PurchaseDeliveries';
 import { useAuth } from '../context/AuthContext';
 import { requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
@@ -17,9 +18,10 @@ import { translateApiError } from '../utils/apiError';
 // Prefixo do comentário público gravado pelo servidor ao devolver a compra (RETURN_FOR_ADJUSTMENT_PREFIX).
 const RETURN_REASON_PREFIX = 'Devolvida para ajuste: ';
 
-const REQUESTER_TURN_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante'];
+// `aguardando_entrega`: a compra já foi pedida e o solicitante confirma o recebimento (única ação dele ali).
+const REQUESTER_TURN_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste', 'aguardando_solicitante', 'aguardando_entrega'];
 
-function nextResponsibleLabel(status: RequestStatus, approvals: RequestDetail['approvals']): string {
+function nextResponsibleLabel(status: RequestStatus, approvals: RequestDetail['approvals'], isPurchase = false): string {
   if (status === 'aguardando_aprovacao') {
     const pending = approvals.filter((a) => a.status === 'pendente');
     if (pending.length) {
@@ -36,7 +38,9 @@ function nextResponsibleLabel(status: RequestStatus, approvals: RequestDetail['a
       return 'em triagem';
     case 'aprovada':
     case 'planejada':
-      return 'aprovada, aguardando início do atendimento';
+      return isPurchase ? 'aprovada, aguardando o pedido ao fornecedor' : 'aprovada, aguardando início do atendimento';
+    case 'aguardando_entrega':
+      return 'aguardando a entrega do pedido';
     case 'em_atendimento':
       return 'em atendimento';
     case 'aguardando_terceiro':
@@ -58,6 +62,7 @@ const STATUS_LABEL: Record<RequestStatus, string> = {
   em_atendimento: 'Em atendimento',
   aguardando_solicitante: 'Aguardando solicitante',
   aguardando_terceiro: 'Aguardando terceiro',
+  aguardando_entrega: 'Aguardando entrega',
   concluida: 'Concluída',
   encerrada: 'Encerrada',
   devolvida_ajuste: 'Devolvida para ajuste',
@@ -129,16 +134,17 @@ export function RequestDetailPage() {
   // (Encerrar etc.) continuam travados normalmente nesse status.
   const awaitingRequesterAcceptance = request.categoryVersion.category.requiresAcceptance && request.status === 'concluida' && !request.requesterAcceptedAt;
   const showLockedBanner = requesterLocked && !awaitingRequesterAcceptance;
-  // Compra só conclui depois da aprovação do responsável do centro de custo (e sem aprovação pendente).
+  // Compra não tem "Iniciar atendimento"/"Concluir"/"Encerrar": depois da aprovação o Suprimentos
+  // registra o pedido e o solicitante confirma o recebimento, que encerra a requisição.
   const isPurchaseRequest = request.categoryVersion.category.kind === 'compra_material';
-  const costCenterApproved = request.approvals.some((a) => a.approvalSource === 'centro_custo' && a.status === 'aprovado')
-    && !request.approvals.some((a) => a.status === 'pendente');
-  const canComplete = !isPurchaseRequest || costCenterApproved;
   // Em compra, depois da triagem só o Suprimentos age como staff (o aprovador do CC não vê ação nenhuma).
   const staffActionsAllowed = canUpdate && !requesterLocked && (!isPurchaseRequest || Boolean(canProcure));
   const canTriage = canUpdate && !isRequesterOrBeneficiary && (!purchaseItems.length || canProcure);
   const hasAnalysis = Boolean(request.formData && typeof request.formData === 'object' && (request.formData as { procurementAnalysis?: unknown }).procurementAnalysis);
-  const canProcureQuotation = Boolean(canProcure) && !requesterLocked && request.status === 'em_atendimento';
+  // `procurementSelection` só existe depois da aprovação do centro de custo: dali em diante as
+  // cotações ficam só leitura (nem a devolução ao Suprimentos a deixa gravada).
+  const hasSelection = Boolean(request.formData && typeof request.formData === 'object' && Array.isArray((request.formData as { procurementSelection?: unknown }).procurementSelection));
+  const canProcureQuotation = Boolean(canProcure) && !requesterLocked && request.status === 'em_atendimento' && !hasSelection;
   // Quem decide (titular ou delegado ativo) vem calculado do servidor em `viewer`; na compra o
   // servidor já restringe à linha `centro_custo`.
   const canDecideApproval = Boolean(request.viewer?.canDecideApproval) && canApprove && !requesterLocked && request.status === 'aguardando_aprovacao';
@@ -319,7 +325,7 @@ export function RequestDetailPage() {
           </div>
         )}
 
-        {purchaseItems.length > 0 && canUpdate && canProcure && !requesterLocked && (
+        {purchaseItems.length > 0 && canUpdate && canProcure && !requesterLocked && !hasSelection && (
           <div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Análise de Suprimentos — estoque e cotação</div>
             <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -333,6 +339,17 @@ export function RequestDetailPage() {
 
         {purchaseItems.length > 0 && hasAnalysis && (canProcureQuotation || hasQuotations) && (
           <PurchaseQuotations key={request.id} request={request} purchaseItems={purchaseItems} canQuote={canProcureQuotation} canDecide={canDecidePurchase} onChanged={refresh} />
+        )}
+
+        {isPurchaseRequest && purchaseItems.length > 0 && hasSelection && (
+          <PurchaseDeliveries
+            key={`${request.id}-${request.status}`}
+            request={request}
+            purchaseItems={purchaseItems}
+            canOrder={Boolean(canProcure) && canUpdate && !isRequesterOrBeneficiary}
+            canConfirm={isRequesterOrBeneficiary}
+            onChanged={refresh}
+          />
         )}
 
         <div>
@@ -383,7 +400,7 @@ export function RequestDetailPage() {
 
         {showLockedBanner && (
           <div style={{ background: 'var(--accent-soft)', border: '1px solid var(--accent)', borderRadius: 8, padding: 12, fontSize: 13 }}>
-            Esta requisição está {nextResponsibleLabel(request.status, request.approvals)} — a partir de agora, só o próximo responsável pode agir sobre ela. Você pode acompanhar o andamento aqui e comentar, mas não alterar nada.
+            Esta requisição está {nextResponsibleLabel(request.status, request.approvals, isPurchaseRequest)} — a partir de agora, só o próximo responsável pode agir sobre ela. Você pode acompanhar o andamento aqui e comentar, mas não alterar nada.
           </div>
         )}
 
@@ -444,17 +461,19 @@ export function RequestDetailPage() {
               </Button>
             </>
           )}
-          {staffActionsAllowed && ['aprovada', 'planejada'].includes(request.status) && (
+          {staffActionsAllowed && !isPurchaseRequest && ['aprovada', 'planejada'].includes(request.status) && (
             <Button variant="positive" onClick={() => void run(() => requestsApi.start(request.id))}>
               Iniciar atendimento
             </Button>
           )}
           {staffActionsAllowed && request.status === 'em_atendimento' && (
             <>
-              <Button variant="secondary" onClick={requestInfo}>
-                Pedir informação ao solicitante
-              </Button>
-              {canComplete && (
+              {!(isPurchaseRequest && hasSelection) && (
+                <Button variant="secondary" onClick={requestInfo}>
+                  Pedir informação ao solicitante
+                </Button>
+              )}
+              {!isPurchaseRequest && (
                 <Button variant="positive" onClick={complete}>
                   Concluir
                 </Button>
@@ -466,7 +485,7 @@ export function RequestDetailPage() {
               Retomar atendimento
             </Button>
           )}
-          {staffActionsAllowed && request.status === 'concluida' && (
+          {staffActionsAllowed && !isPurchaseRequest && request.status === 'concluida' && (
             <Button variant="positive" onClick={() => void run(() => requestsApi.close(request.id))}>
               Encerrar
             </Button>
