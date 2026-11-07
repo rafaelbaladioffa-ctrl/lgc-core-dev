@@ -7,6 +7,7 @@ import { useAuth } from '../context/AuthContext';
 import { requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
 import { formatBRL } from '../utils/format';
+import { translateApiError } from '../utils/apiError';
 
 // Fases em que a bola ainda está genuinamente com o solicitante — nas demais, a tela dele fica
 // travada (só informação) assim que ela sai das mãos dele, mesmo que o papel dele também carregue
@@ -78,10 +79,17 @@ export function RequestDetailPage() {
   const [quoteError, setQuoteError] = useState<string | null>(null);
   const [quoteId, setQuoteId] = useState('');
   const [quoteFiles, setQuoteFiles] = useState<File[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const refresh = async () => {
     if (!id) return;
-    setRequest(await requestsApi.get(id));
+    try {
+      setRequest(await requestsApi.get(id));
+      setLoadError(null);
+    } catch (err) {
+      setLoadError(translateApiError(err, 'Não foi possível carregar esta requisição.'));
+    }
   };
 
   useEffect(() => {
@@ -104,7 +112,13 @@ export function RequestDetailPage() {
     setQuoteNotes(quotation?.notes ?? '');
   }, [request?.id]);
 
-  if (!request) return <AppLayout breadcrumb={['Axis', 'Requisições', 'Detalhe']}><p>Carregando...</p></AppLayout>;
+  if (!request) {
+    return (
+      <AppLayout breadcrumb={['Axis', 'Requisições', 'Detalhe']}>
+        {loadError ? <p role="alert" style={{ color: 'var(--danger)' }}>{loadError}</p> : <p>Carregando...</p>}
+      </AppLayout>
+    );
+  }
 
   const canUpdate = hasPermission('request:update');
   const canApprove = hasPermission('request:approve');
@@ -129,9 +143,24 @@ export function RequestDetailPage() {
   const saveQuotation = async () => { setQuoteError(null); try { const currentId = quoteId || `cotacao-${Date.now()}`; const uploaded = await Promise.all(quoteFiles.map(async (file) => { const contentBase64 = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result).split(',')[1] ?? ''); reader.onerror = reject; reader.readAsDataURL(file); }); return requestsApi.attachment(request.id, { filename: file.name, contentBase64 }); })); await requestsApi.purchaseQuotation(request.id, { quotationId: currentId, supplier, quoteNumber, totalValue: quoteTotal, notes: quoteNotes, attachmentIds: uploaded.map((item) => item.id) }); setQuoteFiles([]); await refresh(); } catch { setQuoteError('Não foi possível registrar a cotação. Verifique os dados e os anexos.'); } };
   const selectQuotation = async (quotationId: string) => { setQuoteError(null); try { await requestsApi.selectPurchaseQuotation(request.id, quotationId); await refresh(); } catch { setQuoteError('Não foi possível selecionar esta cotação.'); } };
 
+  // Toda ação do fluxo passa por aqui: erro do servidor (validação, permissão, status que mudou
+  // enquanto a tela estava aberta) aparece ao lado dos botões em vez de sumir em silêncio.
   const run = async (action: () => Promise<unknown>) => {
-    await action();
+    setActionError(null);
+    try {
+      await action();
+    } catch (err) {
+      setActionError(translateApiError(err, 'Não foi possível concluir a ação. Atualize a página e tente novamente.'));
+    }
     await refresh();
+  };
+
+  const isRequester = user?.collaboratorId === request.requesterId;
+
+  const answerQuestion = () => {
+    const answer = window.prompt('Sua resposta ao atendente:');
+    if (!answer?.trim()) return;
+    void run(() => requestsApi.resume(request.id, answer));
   };
 
   const triage = (type: 'aceitar' | 'devolver') => {
@@ -181,8 +210,13 @@ export function RequestDetailPage() {
   const addComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!commentBody.trim()) return;
-    await requestsApi.comment(request.id, commentBody);
-    setCommentBody('');
+    setActionError(null);
+    try {
+      await requestsApi.comment(request.id, commentBody);
+      setCommentBody('');
+    } catch (err) {
+      setActionError(translateApiError(err, 'Não foi possível enviar o comentário.'));
+    }
     await refresh();
   };
 
@@ -325,7 +359,23 @@ export function RequestDetailPage() {
           </div>
         )}
 
+        {actionError && (
+          <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>
+            {actionError}
+          </p>
+        )}
+
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {isRequester && ['rascunho', 'devolvida_ajuste'].includes(request.status) && (
+            <Button variant="positive" onClick={() => void run(() => requestsApi.submit(request.id))}>
+              {request.status === 'devolvida_ajuste' ? 'Reenviar para triagem' : 'Enviar requisição'}
+            </Button>
+          )}
+          {isRequesterOrBeneficiary && request.status === 'aguardando_solicitante' && (
+            <Button variant="positive" onClick={answerQuestion}>
+              Responder ao atendente
+            </Button>
+          )}
           {canTriage && request.status === 'enviada' && (
             <>
               <Button variant="positive" onClick={() => triage('aceitar')}>

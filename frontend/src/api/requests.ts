@@ -47,6 +47,13 @@ export interface AxisRequest {
   createdAt: string;
 }
 
+/** Linha da fila (`GET /requests/queue`): só cabeçalho, sem descrição/formulário, e com a
+ * identidade mascarada (`null`) quando a requisição é anônima e o leitor não pode vê-la. */
+export type QueueRequest = Pick<
+  AxisRequest,
+  'id' | 'code' | 'title' | 'sectorId' | 'queueId' | 'categoryVersionId' | 'assigneeId' | 'priority' | 'confidentiality' | 'anonymous' | 'status' | 'slaDueResolutionAt' | 'createdAt'
+> & { requesterId: string | null; beneficiaryId: string | null; requesterDisplay: string | null };
+
 export interface RequestApproval {
   id: string;
   stepOrder: number;
@@ -166,7 +173,7 @@ export interface MyActivity {
 export const requestsApi = {
   create: (input: CreateRequestInput) => api.post<AxisRequest>('/requests', input).then((r) => r.data),
   mine: () => api.get<AxisRequest[]>('/requests/mine').then((r) => r.data),
-  queue: (params?: { sectorId?: string; status?: RequestStatus }) => api.get<AxisRequest[]>('/requests/queue', { params }).then((r) => r.data),
+  queue: (params?: { sectorId?: string; status?: RequestStatus }) => api.get<QueueRequest[]>('/requests/queue', { params }).then((r) => r.data),
   dashboard: () => api.get<RequestsDashboard>('/requests/dashboard').then((r) => r.data),
   myApprovals: () => api.get<MyApproval[]>('/requests/my-approvals').then((r) => r.data),
   myActivities: () => api.get<MyActivity[]>('/requests/my-activities').then((r) => r.data),

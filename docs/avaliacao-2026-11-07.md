@@ -1,5 +1,7 @@
 # Avaliação do código — 2026-11-07
 
+> **Atualização de 2026-11-07 (tarde):** corrigidos na branch `rafaelbaladioffa-ctrl/correcoes-bloqueantes` o vazamento da fila, os três defeitos de fluxo (devolução, reabertura, resposta do solicitante), o tratamento de erro da tela de detalhe e da fila, os testes BPM quebrados (B4) e o tsbuildinfo/cache versionados (B3). Itens corrigidos estão marcados com ✅. B1/B2 (migrações) aguardam decisão.
+
 Diagnóstico do Axis Core (`backend/`, `frontend/`) e do satélite Logística (`lgc-dev-logistica/`)
 na branch `rafaelbaladioffa-ctrl/minhas-atividades` (HEAD `115d5b9`). Foi feito por leitura do
 código e pela execução de typecheck, lint e testes unitários. Não foi usado banco de dados, então
@@ -26,16 +28,16 @@ segredos versionados, mas o código revela o desenho de segurança. Avalie torn�
 |---|---|---|---|
 | B1 | `prisma migrate deploy` falha em banco vazio. Três migrações BPM alteram tabelas criadas depois na ordem alfabética. | `backend/prisma/migrations/20261101000000_request_bpm_p01/migration.sql:22-40` × `20261111000000_requisicoes_fase1` | Gerar um baseline (`migrate diff` do schema atual) para ambientes novos e marcar como aplicado no banco existente, ou renomear com cuidado as pastas e o `_prisma_migrations`. |
 | B2 | Drift: 15 tabelas `bpm_*`/`request_queue_members`/`process_config_grants`, colunas BPM em `request_categories`/`category_versions` e permissões `request_process:*` existem no banco sem model. | Commit `98dfce5` sem migração de DROP | Migração explícita de limpeza, depois de backup, e remoção dos resquícios no schema (`bpm_v1`, estados não usados). |
-| B3 | `dist/` pode sair sem `main.js`: `tsconfig.build.tsbuildinfo` versionado e fora de `outDir`, com `incremental` + `deleteOutDir`. | `backend/tsconfig.build.tsbuildinfo` (aparece modificado no git status), `nest-cli.json` | Remover do git, adicionar ao `.gitignore` e ao `.dockerignore`, ou apontar `tsBuildInfoFile` para dentro de `dist`. |
-| B4 | Testes quebrados. Backend: 6 de 9 e2e importam módulos removidos, e `tsc -p tsconfig.json` dá 169 erros. Frontend: 3 de 4 arquivos do Vitest falham, e o Playwright mira `/requests/bpm`. | `backend/test/bpm-*`, `frontend/tests/*`, `frontend/e2e/a23-mobile.spec.ts` | Apagar os testes BPM (o código está no checkpoint `629044d`). Recriar uma base mínima: auth, RBAC, requisições. |
+| B3 ✅ | `dist/` pode sair sem `main.js`: `tsconfig.build.tsbuildinfo` versionado e fora de `outDir`, com `incremental` + `deleteOutDir`. | `backend/tsconfig.build.tsbuildinfo` (aparece modificado no git status), `nest-cli.json` | Remover do git, adicionar ao `.gitignore` e ao `.dockerignore`, ou apontar `tsBuildInfoFile` para dentro de `dist`. |
+| B4 ✅ | Testes quebrados. Backend: 6 de 9 e2e importam módulos removidos, e `tsc -p tsconfig.json` dá 169 erros. Frontend: 3 de 4 arquivos do Vitest falham, e o Playwright mira `/requests/bpm`. | `backend/test/bpm-*`, `frontend/tests/*`, `frontend/e2e/a23-mobile.spec.ts` | Apagar os testes BPM (o código está no checkpoint `629044d`). Recriar uma base mínima: auth, RBAC, requisições. |
 
 ### Defeitos funcionais em Requisições
 
 | Sev. | Problema | Evidência |
 |---|---|---|
-| Alta | Requisição **devolvida para ajuste** fica sem saída: `update` e `submit` só aceitam `rascunho`, então o solicitante só consegue cancelar. | `backend/src/requests/requests.service.ts:186, 208` × `:245` |
-| Alta | Requisição **reaberta** vai para `em_triagem`, mas a triagem exige o status `enviada`. Nenhum comando parte de `em_triagem`, então a requisição fica parada. | `requests.service.ts:623` × `:231` |
-| Média | Solicitante com papel `colaborador` não consegue responder um pedido de informação: `resume` exige `request:update`. | `backend/src/requests/requests.controller.ts:160` |
+| Alta ✅ | Requisição **devolvida para ajuste** fica sem saída: `update` e `submit` só aceitam `rascunho`, então o solicitante só consegue cancelar. | `backend/src/requests/requests.service.ts:186, 208` × `:245` |
+| Alta ✅ | Requisição **reaberta** vai para `em_triagem`, mas a triagem exige o status `enviada`. Nenhum comando parte de `em_triagem`, então a requisição fica parada. | `requests.service.ts:623` × `:231` |
+| Média ✅ | Solicitante com papel `colaborador` não conseguia responder um pedido de informação: `resume` exige `request:update`. | `backend/src/requests/requests.controller.ts:160` |
 | Média | O próprio solicitante escolhe a confidencialidade (`dto.confidentiality ?? category.confidentiality`), podendo rebaixar uma categoria `restrita`. | `requests.service.ts:144` |
 | Média | O SLA só começa depois da aprovação, não no envio. Compras ficam sem relógio até o responsável do centro de custo aprovar. | `finalizeApproval` em `requests.service.ts` |
 | Média | As faixas de alçada usam intervalo fechado `[min, max]`, e o seed deixa um buraco entre 1.000,00 e 1.000,01: um valor nesse buraco aprova sozinho. | `seed-approval-authority-matrix.ts`; regra normativa RM-APR em [dominio/requisicoes-regras-motor.md](dominio/requisicoes-regras-motor.md) |
@@ -46,7 +48,7 @@ A lista completa (L01–L23) está em [dominio/requisicoes-estado-atual.md](domi
 
 | Sev. | Problema | Evidência |
 |---|---|---|
-| Alta | `GET /requests/queue` devolve requisições sem filtro de confidencialidade e sem mascarar o solicitante anônimo. Qualquer usuário com `request:read` vê denúncias e requisições restritas. | `backend/src/requests/requests.service.ts:760-772` |
+| Alta ✅ | `GET /requests/queue` devolvia requisições sem filtro de confidencialidade e sem mascarar o solicitante anônimo. Qualquer usuário com `request:read` vê denúncias e requisições restritas. | `backend/src/requests/requests.service.ts:760-772` |
 | Alta | O SSO da Logística troca **qualquer** access token do Core por uma sessão de 8 h. O Core aceita esse token de volta (não verifica `iss` nem fixa o algoritmo). | `lgc-dev-logistica/backend/src/auth/auth.controller.ts:30-50`, `backend/src/auth/strategies/jwt.strategy.ts` |
 | Alta | Desativar um usuário no Core não chega à Logística (`user.disabled` não é emitido) e não revoga os refresh tokens no próprio Core. | `backend/src/users/users.service.ts:274-278` |
 | Média | Quem tem `user:update` pode criar um papel com qualquer permissão e atribuí-lo a si mesmo. As rotas de papéis não são auditadas. | `backend/src/users/roles.controller.ts:29-38` |

@@ -285,7 +285,7 @@ async function main() {
   });
 
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@axis.local';
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? randomBytes(12).toString('base64url');
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD || randomBytes(12).toString('base64url');
   const passwordHash = await bcrypt.hash(adminPassword, 12);
 
   const adminUser = await prisma.user.upsert({

@@ -50,4 +50,4 @@ cd frontend && npx tsc -p tsconfig.app.json --noEmit && npx oxlint src
 cd lgc-dev-logistica/backend && npx tsc --noEmit -p tsconfig.build.json && npm test
 ```
 
-Os testes BPM antigos do Core estão quebrados (ver avaliação, item B4). Não os use como critério; escreva testes novos para o que mudar.
+Rode também `cd backend && npm test` e `cd frontend && npm test`. A cobertura do Core ainda é pequena: escreva testes para o que mudar (exemplo de serviço com Prisma simulado: `backend/src/requests/requests-fluxo.spec.ts`).

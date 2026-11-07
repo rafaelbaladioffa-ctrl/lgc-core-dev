@@ -29,9 +29,9 @@ npx prisma migrate deploy && npm run prisma:seed && npm run start:dev
 | `build` / `start:prod` | Compila para `dist/` e roda `node dist/main` |
 | `lint` | oxlint com regras type-aware |
 | `test` | Vitest unitário (`src/**/*.spec.ts`) |
-| `test:e2e` | Vitest e2e (`test/`). **Quebrado hoje:** os testes importam o BPM removido e exigem `BPM_TEST_DATABASE_URL` |
+| `test:e2e` | Vitest de integração (`test/`). Só roda com `TEST_DATABASE_URL` apontando para um Postgres local `*_test`; sem ela, os testes são pulados |
 | `prisma:seed` | Papéis, permissões, admin e dados base (idempotente; roda a cada partida do container) |
-| `seed:*` | Seeds auxiliares de organização e requisições. `seed:requests-suprimentos` não compila |
+| `seed:*` | Seeds auxiliares de organização e requisições |
 
 ## Estrutura
 
@@ -48,10 +48,11 @@ prisma/
   schema.prisma, migrations/, seed*.ts
 scripts/
   backup-postgres.sh, restore-postgres.sh (usados pelo serviço de backup do compose)
-test/                         e2e (hoje só BPM, obsoletos)
+test/                         integração com banco real (a24: login/refresh/troca de senha)
 ```
 
 ## Typecheck
 
 Use `npx tsc -p tsconfig.build.json --noEmit`, que cobre `src/`. O `tsconfig.json` completo inclui
-testes e seeds com erros conhecidos do BPM removido.
+testes e seeds; restam 3 erros de tipo conhecidos em `seed-requests-fase1.ts` e `seed-requests-fase2-sectors.ts`
+(os seeds rodam normalmente com `tsx`).

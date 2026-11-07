@@ -61,6 +61,8 @@ interface ResolvedApproval {
 const AUTO_CLOSE_AFTER_DAYS = 3;
 
 const TERMINAL_STATUSES: RequestStatus[] = ['concluida', 'encerrada', 'cancelada', 'reprovada'];
+/** Status em que a requisição está nas mãos do solicitante: pode editar e (re)enviar. */
+const REQUESTER_EDITABLE_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_ajuste'];
 
 /** Horário comercial único e global (§10.2) — Axis não modela empresa/unidade/turno como
  * entidades separadas ainda, então "por empresa/unidade"/plantões do documento não se aplicam
@@ -183,8 +185,10 @@ export class RequestsService {
 
   async update(id: string, actorId: string, dto: UpdateRequestDto) {
     const request = await this.getOrThrow(id);
-    if (request.status !== 'rascunho') throw new BadRequestException('Só é possível editar uma requisição em rascunho');
-    if (request.requesterId !== actorId) throw new ForbiddenException('Somente o solicitante pode editar o rascunho');
+    if (!REQUESTER_EDITABLE_STATUSES.includes(request.status)) {
+      throw new BadRequestException('Só é possível editar uma requisição em rascunho ou devolvida para ajuste');
+    }
+    if (request.requesterId !== actorId) throw new ForbiddenException('Somente o solicitante pode editar esta requisição');
 
     return this.prisma.request.update({
       where: { id },
@@ -203,10 +207,16 @@ export class RequestsService {
     });
   }
 
+  /** Envia o rascunho ou **reenvia** uma requisição devolvida para ajuste (triagem `devolver` ou
+   * `recategorizar`). O reenvio volta para `enviada` — a mesma fila de triagem do setor — e
+   * revalida o formulário da versão atual da categoria, que pode ter mudado na recategorização. */
   async submit(id: string, actorId: string) {
     const request = await this.getOrThrow(id);
-    if (request.status !== 'rascunho') throw new BadRequestException('Só é possível enviar uma requisição em rascunho');
+    if (!REQUESTER_EDITABLE_STATUSES.includes(request.status)) {
+      throw new BadRequestException('Só é possível enviar uma requisição em rascunho ou devolvida para ajuste');
+    }
     if (request.requesterId !== actorId) throw new ForbiddenException('Somente o solicitante pode enviar esta requisição');
+    const isResubmission = request.status === 'devolvida_ajuste';
 
     const categoryVersion = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
     const requestData = (request.formData as Record<string, unknown> | null) ?? undefined;
@@ -217,9 +227,23 @@ export class RequestsService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.request.update({ where: { id }, data: { status: 'enviada', submittedAt: new Date() } });
-      await this.audit(tx, { aggregateId: id, event: 'request.submitted', actorId, before: { status: 'rascunho' }, after: { status: 'enviada' } });
-      await this.outbox.record(tx, 'request.submitted', { request_id: id, code: updated.code });
+      const updated = await tx.request.update({
+        where: { id },
+        // submittedAt marca o primeiro envio; o reenvio fica registrado na auditoria.
+        data: { status: 'enviada', submittedAt: isResubmission ? undefined : new Date() },
+      });
+      await this.audit(tx, {
+        aggregateId: id,
+        event: isResubmission ? 'request.resubmitted' : 'request.submitted',
+        actorId,
+        before: { status: request.status },
+        after: { status: 'enviada' },
+      });
+      if (isResubmission) {
+        await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      } else {
+        await this.outbox.record(tx, 'request.submitted', { request_id: id, code: updated.code });
+      }
       return updated;
     });
   }
@@ -501,9 +525,19 @@ export class RequestsService {
 
   /** Resuming extends the solution clock's target by exactly how long it was paused, so the
    * pause never counts against SLA (§5.2: pendência pausa somente o SLA de solução). */
-  async resume(id: string, actorId: string, dto: ResumeRequestDto) {
+  /** Quem pode retomar: quem gerencia o fluxo (`request:update`) em qualquer pausa, ou o
+   * solicitante/beneficiário quando a pausa é uma pergunta para ele (`aguardando_solicitante`) —
+   * nesse caso a resposta é obrigatória e vira comentário público. */
+  async resume(id: string, actorId: string, canManage: boolean, dto: ResumeRequestDto) {
     const request = await this.getOrThrow(id);
     if (!['aguardando_solicitante', 'aguardando_terceiro'].includes(request.status)) throw new BadRequestException('Requisição não está pausada');
+    const isRequester = actorId === request.requesterId || actorId === request.beneficiaryId;
+    if (isRequester) {
+      if (request.status !== 'aguardando_solicitante') throw new ForbiddenException('Esta pendência não é sua — aguarde o responsável.');
+      if (!dto.answer?.trim()) throw new BadRequestException('Escreva a resposta à pergunta do atendente.');
+    } else if (!canManage) {
+      throw new ForbiddenException('Você não pode retomar esta requisição.');
+    }
 
     return this.prisma.$transaction(async (tx) => {
       const clock = await tx.slaClock.findFirst({ where: { requestId: id, metric: 'solucao', stoppedAt: null } });
@@ -620,8 +654,12 @@ export class RequestsService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.request.update({ where: { id }, data: { status: 'em_triagem', closedAt: null } });
-      await this.audit(tx, { aggregateId: id, event: 'request.reopened', actorId, after: { reason: dto.reason } });
+      // Reaberta volta para a fila de triagem do setor (`enviada`) — a triagem só parte de
+      // `enviada`; antes ia para `em_triagem`, de onde nenhum comando sai. As aprovações do ciclo
+      // anterior ficam como histórico: só linhas `pendente` contam para a etapa ativa.
+      const updated = await tx.request.update({ where: { id }, data: { status: 'enviada', closedAt: null } });
+      await this.audit(tx, { aggregateId: id, event: 'request.reopened', actorId, before: { status: request.status }, after: { status: 'enviada', reason: dto.reason } });
+      await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
       return updated;
     });
   }
@@ -757,17 +795,62 @@ export class RequestsService {
     });
   }
 
-  async findQueue(filters: { sectorId?: string; queueId?: string; status?: RequestStatus }, user?: { roles: string[]; collaboratorId: string | null }) {
+  /** Fila por setor. É uma listagem ampla (qualquer `request:read`), então aplica no servidor,
+   * antes de devolver, as mesmas regras de visibilidade do detalhe (`findOne`):
+   * - `restrita` só aparece para participante (solicitante, beneficiário, responsável) ou aprovador;
+   * - solicitante anônimo é mascarado para quem não é ele nem tem `request:view_whistleblower_identity`;
+   * - nunca devolve `formData`/`description` (podem identificar envolvidos numa denúncia) — a
+   *   lista só precisa dos campos de cabeçalho; o conteúdo completo passa pelo `findOne`. */
+  async findQueue(
+    filters: { sectorId?: string; queueId?: string; status?: RequestStatus },
+    viewer: { roles: string[]; collaboratorId: string | null; canViewWhistleblowerIdentity: boolean },
+  ) {
     let sectorId = filters.sectorId;
-    if (user?.roles.includes('analista_suprimentos')) {
-      const collaborator = user.collaboratorId
-        ? await this.prisma.collaborator.findUnique({ where: { id: user.collaboratorId }, select: { sectorId: true } })
+    if (viewer.roles.includes('analista_suprimentos')) {
+      const collaborator = viewer.collaboratorId
+        ? await this.prisma.collaborator.findUnique({ where: { id: viewer.collaboratorId }, select: { sectorId: true } })
         : null;
       sectorId = collaborator?.sectorId;
     }
-    return this.prisma.request.findMany({
-      where: { executionMode: 'legacy', sectorId, queueId: filters.queueId, status: filters.status },
+    const me = viewer.collaboratorId;
+    const visibility: Prisma.RequestWhereInput = me
+      ? {
+          OR: [
+            { confidentiality: { not: 'restrita' } },
+            { requesterId: me },
+            { beneficiaryId: me },
+            { assigneeId: me },
+            { approvals: { some: { approverId: me } } },
+          ],
+        }
+      : { confidentiality: { not: 'restrita' } };
+    const rows = await this.prisma.request.findMany({
+      where: { AND: [{ executionMode: 'legacy', sectorId, queueId: filters.queueId, status: filters.status }, visibility] },
+      select: {
+        id: true,
+        code: true,
+        title: true,
+        sectorId: true,
+        queueId: true,
+        categoryVersionId: true,
+        requesterId: true,
+        beneficiaryId: true,
+        assigneeId: true,
+        priority: true,
+        confidentiality: true,
+        anonymous: true,
+        status: true,
+        slaDueResolutionAt: true,
+        createdAt: true,
+        updatedAt: true,
+      },
       orderBy: { createdAt: 'desc' },
+    });
+    return rows.map((row) => {
+      const masked = this.maskIdentityIfAnonymous(row, me, viewer.canViewWhistleblowerIdentity);
+      // Em denúncia o beneficiário costuma ser o próprio solicitante — mascarar só requesterId
+      // deixaria a identidade exposta pelo beneficiaryId.
+      return masked.requesterDisplay ? { ...masked, beneficiaryId: null } : masked;
     });
   }
 

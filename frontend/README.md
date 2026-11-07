@@ -30,9 +30,8 @@ Em Docker, o `nginx.conf` serve a SPA e faz proxy de `/logistica-api/` para `log
 | Script | O que faz |
 |---|---|
 | `dev` / `build` / `preview` | Vite (o `build` roda `tsc -b` antes) |
-| `lint` | oxlint. Hoje falha porque também analisa `.vite-codex-cache/`; use `npx oxlint src` |
-| `test:journey` | Vitest. 3 de 4 arquivos quebrados (importam o BPM removido) |
-| `test:a23` | Playwright. Obsoleto (mira `/requests/bpm`) |
+| `lint` | oxlint |
+| `test` | Vitest (`tests/*.test.tsx`, jsdom) |
 
 ## Estrutura
 

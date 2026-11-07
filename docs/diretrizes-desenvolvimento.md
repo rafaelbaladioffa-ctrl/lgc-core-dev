@@ -85,7 +85,7 @@ Uma entrega só está pronta quando:
    - backend: `cd backend && npx tsc -p tsconfig.build.json --noEmit`
    - frontend: `cd frontend && npx tsc -p tsconfig.app.json --noEmit`
 2. **Lint** sem erros novos: `npm run lint` no backend (`oxlint --type-aware src/ test/`) e no frontend (`oxlint`).
-3. **Testes do que mudou** escritos ou atualizados e passando (backend: `npm test` / `npm run test:e2e`; frontend: `npm run test:journey`). Observação: parte dos testes de frontend em `frontend/tests/` importa módulos do BPM removido (`src/features/requisicoes-bpm/...`) e não roda como está — não verificado se o restante passa.
+3. **Testes do que mudou** escritos ou atualizados e passando (backend: `npm test`, e `npm run test:e2e` com `TEST_DATABASE_URL` local; frontend: `npm test`).
 4. **Erro de API tratado na tela**: carregamento e ações mostram mensagem em pt-BR; nada falha em silêncio.
 5. **Permissão na rota**: backend com `@RequirePermissions`; frontend com `PrivateRoute permission` e item de menu filtrado pela mesma permissão; permissão nova no seed.
 6. **Auditoria**: ação sensível com `@AuditAction`; mudança relevante para satélites com evento no outbox na mesma transação.

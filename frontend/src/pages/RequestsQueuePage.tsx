@@ -2,17 +2,19 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { DataTable, StatusBadge, type ColumnDef } from '../components/DataTable';
-import { requestsApi, type AxisRequest } from '../api/requests';
+import { requestsApi, type QueueRequest } from '../api/requests';
 import { sectorsApi, type Sector } from '../api/sectors';
 import { formatDate } from '../utils/formatDate';
 import { useAuth } from '../context/AuthContext';
+import { translateApiError } from '../utils/apiError';
 
 /** Fila do setor (§15.1.5) — visão tabela das requisições por setor; distribuição/kanban
  * avançado fica para a Fase 2. */
 export function RequestsQueuePage() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [requests, setRequests] = useState<AxisRequest[]>([]);
+  const [requests, setRequests] = useState<QueueRequest[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [sectors, setSectors] = useState<Sector[]>([]);
   const [sectorId, setSectorId] = useState('');
   const isSupplyAnalyst = user?.roles.includes('analista_suprimentos') ?? false;
@@ -22,12 +24,21 @@ export function RequestsQueuePage() {
   }, []);
 
   useEffect(() => {
-    void requestsApi.queue({ sectorId: sectorId || undefined }).then(setRequests);
+    requestsApi
+      .queue({ sectorId: sectorId || undefined })
+      .then((rows) => {
+        setRequests(rows);
+        setError(null);
+      })
+      .catch((err: unknown) => {
+        setRequests([]);
+        setError(translateApiError(err, 'Não foi possível carregar a fila.'));
+      });
   }, [sectorId]);
 
   const sectorName = (id: string) => sectors.find((s) => s.id === id)?.name ?? '—';
 
-  const columns: ColumnDef<AxisRequest>[] = [
+  const columns: ColumnDef<QueueRequest>[] = [
     {
       key: 'code',
       header: 'Código',
@@ -62,6 +73,7 @@ export function RequestsQueuePage() {
         </select>
         )}
       </div>
+      {error && <p role="alert" style={{ color: 'var(--danger)', fontSize: 13, margin: '0 0 12px' }}>{error}</p>}
       <DataTable columns={columns} rows={requests} rowKey={(r) => r.id} />
     </AppLayout>
   );

@@ -52,8 +52,16 @@ export class RequestsController {
 
   @Get('queue')
   @RequirePermissions('request:read')
-  findQueue(@Query('sectorId') sectorId?: string, @Query('queueId') queueId?: string, @Query('status') status?: RequestStatus, @CurrentUser() user?: AuthenticatedUser) {
-    return this.requestsService.findQueue({ sectorId, queueId, status }, user);
+  findQueue(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query('sectorId') sectorId?: string,
+    @Query('queueId') queueId?: string,
+    @Query('status') status?: RequestStatus,
+  ) {
+    return this.requestsService.findQueue(
+      { sectorId, queueId, status },
+      { roles: user.roles, collaboratorId: user.collaboratorId, canViewWhistleblowerIdentity: user.permissions.includes('request:view_whistleblower_identity') },
+    );
   }
 
   @Get('dashboard')
@@ -157,11 +165,13 @@ export class RequestsController {
     return this.requestsService.requestInformation(id, requireCollaboratorId(user), dto);
   }
 
+  // request:create na rota (todo papel solicitante tem): o solicitante responde à pergunta do
+  // atendente por aqui; o serviço exige request:update para qualquer outra retomada.
   @Post(':id/resume')
-  @RequirePermissions('request:update')
+  @RequirePermissions('request:create')
   @AuditAction({ action: 'resume_request', resourceType: 'request', resourceIdParam: 'id' })
   resume(@Param('id') id: string, @Body() dto: ResumeRequestDto, @CurrentUser() user: AuthenticatedUser) {
-    return this.requestsService.resume(id, requireCollaboratorId(user), dto);
+    return this.requestsService.resume(id, requireCollaboratorId(user), user.permissions.includes('request:update'), dto);
   }
 
   @Post(':id/complete')

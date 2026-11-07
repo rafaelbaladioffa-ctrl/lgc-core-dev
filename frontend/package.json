@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test:journey": "vitest run --config vitest.config.ts",
-    "test:a23": "playwright test e2e/a23-mobile.spec.ts",
+    "test": "vitest run --config vitest.config.ts",
     "lint": "oxlint",
     "preview": "vite preview"
   },

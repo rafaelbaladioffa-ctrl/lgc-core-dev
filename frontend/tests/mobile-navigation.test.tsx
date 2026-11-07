@@ -13,9 +13,6 @@ vi.mock("../src/context/AuthContext", () => ({
 vi.mock("../src/context/ThemeContext", () => ({
   useTheme: () => ({ theme: "light", toggleTheme: vi.fn() }),
 }));
-vi.mock("../src/features/requisicoes-bpm/api", () => ({
-  bpmApi: { capabilities: vi.fn().mockResolvedValue({ enabled: true }) },
-}));
 vi.mock("../src/components/layout/NotificationsDropdown", () => ({
   NotificationsDropdown: () => <span aria-hidden="true" />,
 }));

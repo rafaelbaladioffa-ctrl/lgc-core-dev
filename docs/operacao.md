@@ -43,8 +43,7 @@ docker compose up --build
 | `CORS_ALLOWED_ORIGINS` | sim em produção | Lista separada por vírgula. Sem ela, só `localhost:5173` e `localhost:5174`. Precisa incluir o domínio do PWA da Logística. |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | recomendado | Admin criado pelo seed. Sem senha, o seed gera uma aleatória e **imprime no log**. |
 | `SEED_ADMIN_CPF` | não | CPF do colaborador vinculado ao admin. |
-| `REQUEST_BPM_ENABLED` | — | **Obsoleta** (BPM removido); não é lida pelo código. |
-| `BPM_TEST_DATABASE_URL` | só testes e2e | Banco `*_bpm_test` usado pelos testes e2e antigos. |
+| `TEST_DATABASE_URL` | só testes e2e | PostgreSQL **local** dedicado com nome terminado em `_test` (a guarda em `backend/test/support/test-database.ts` recusa outros). |
 
 `AXIS_LOGISTICA_URL`, definida no `docker-compose.yml`, não é lida pelo backend.
 
@@ -73,7 +72,7 @@ cd frontend && npm install && npm run dev
 
 Seeds auxiliares (`backend/package.json`): `seed:org`, `seed:org-cc-restructure`,
 `seed:requests-fase1`, `seed:requests-fase2-sectors`, `seed:requests-parallel-demo`,
-`seed:approval-authority-matrix`. **`seed:requests-suprimentos` não compila** (usa models do BPM removido).
+`seed:approval-authority-matrix`.
 
 ## 4. Migrações — cuidados obrigatórios
 
@@ -121,7 +120,6 @@ Não há endpoint de health no Core. Para checar a API: `POST /api/v1/auth/login
 |---|---|---|
 | `network lgc-dev-logistica_default … not found` | Rede externa da Logística não existe | Suba a Logística antes (seção 1) |
 | `migrate deploy` falha em banco vazio | Ordem das migrações BPM | Ver seção 4 |
-| Container do backend sobe sem `dist/main.js` | `tsconfig.build.tsbuildinfo` versionado fora de `outDir` + `incremental` + `deleteOutDir` (o tsc acha que está tudo compilado) | Apagar o `.tsbuildinfo` antes do build; correção definitiva na avaliação |
 | Catálogo de compra vazio em `npm run dev` | Sem proxy `/logistica-api` no Vite | Definir `VITE_LOGISTICA_API_BASE_URL` |
 | 403 no catálogo para `analista_suprimentos` ou `compliance` | Papel sem mapeamento na Logística | `PUT /rbac/axis-role-mapping/:axisRole` na Logística |
 | Usuário com papel removido ainda acessa | Permissões vêm do JWT (até 15 min) e desativar não revoga refresh | Aguardar expiração; ver avaliação |
