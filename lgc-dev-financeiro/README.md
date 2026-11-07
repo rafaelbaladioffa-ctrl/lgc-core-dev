@@ -27,8 +27,9 @@ npm install
 npm run dev                          # http://localhost:5175 (proxy /api → :3200)
 ```
 
-No Core, inclua `http://localhost:5175` em `CORS_ALLOWED_ORIGINS`; o login e o refresh são feitos
-no Core pelo navegador.
+Em desenvolvimento o login e o refresh vão ao Core pelo proxy `/core-api` do Vite (Core em
+`localhost:3000`), sem precisar liberar a 5175 no CORS do Core. Em produção, defina `VITE_AXIS_URL`
+no build e inclua o domínio do Financeiro em `CORS_ALLOWED_ORIGINS` do Core.
 
 ## Acesso
 

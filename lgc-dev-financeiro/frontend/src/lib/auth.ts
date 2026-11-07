@@ -11,8 +11,8 @@ export interface Session {
 
 const SESSION_KEY = 'financeiro.session';
 
-/** URL da API do Core. Em produção vem de VITE_AXIS_URL no build; em dev, o Core local. */
-export const axisUrl = () => (import.meta.env?.VITE_AXIS_URL || 'http://localhost:3000/api/v1').replace(/\/$/, '');
+/** URL da API do Core. Em produção vem de VITE_AXIS_URL no build; em dev, o proxy /core-api do Vite para o Core local. */
+export const axisUrl = () => (import.meta.env?.VITE_AXIS_URL || (import.meta.env?.DEV ? '/core-api/api/v1' : 'http://localhost:3000/api/v1')).replace(/\/$/, '');
 
 export function decodeJwt(token: string): { exp?: number; email?: string; sub?: string; mustChangePassword?: boolean } | null {
   try {
