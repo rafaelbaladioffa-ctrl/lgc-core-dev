@@ -1,11 +1,22 @@
 # Axis Logística (satélite de Almoxarifado/WMS)
 
-Especificação: `../lgc-dev-core/PLANNING_LOGISTICA.md`. Stack: NestJS + Prisma + PostgreSQL 16 (banco **próprio**, nunca o do Axis).
+Satélite do Axis Core, mantido como subpasta deste repositório. Esta subpasta é a versão oficial; o repositório
+irmão `orca-dev/lgc-dev-logistica` está desatualizado (parado em 01/11/2026).
+
+- **Stack:** NestJS 12 + Prisma 5 + PostgreSQL 16 com banco **próprio** (nunca o do Axis). O frontend é React 19 + Vite 8 (PWA).
+- **Especificação:** [docs/especificacao.md](docs/especificacao.md). **Implantação:** [DEPLOY.md](DEPLOY.md).
+- **Integração com o Core** (o que funciona e o que não fecha): [../docs/integracao-core-logistica.md](../docs/integracao-core-logistica.md).
+
+> **Estado em 2026-11-07:**
+> - Testes: 417 unitários do backend e 98 do frontend passando; os e2e exigem Postgres e não foram executados nesta avaliação.
+> - Typecheck: o `tsc -p tsconfig.json` aponta 4 erros em mocks de teste.
+> - Integração com o Core: o fluxo requisição do Core → ordem de atendimento ainda não funciona, porque os tipos de evento divergem.
+> - Pendências do MVP: estão em [../docs/arquivo/logistica-status-final-2026-11-01.md](../docs/arquivo/logistica-status-final-2026-11-01.md) §3–4.
 
 ## Rodando
 
 ```bash
-docker compose up -d postgres        # Postgres em localhost:5433 (usuário/banco: logistica/axis_logistica)
+docker compose up -d logistica-postgres   # Postgres em localhost:5433 (usuário/banco: logistica/axis_logistica)
 cd backend
 cp .env.example .env                 # JWT_SECRET deve ser igual ao JWT_ACCESS_SECRET do Axis
 npm install
@@ -71,9 +82,38 @@ npm run test:e2e:setup && npm run test:e2e   # testes em banco SEPARADO (.env.te
 - **Agendador** (`SCHEDULER_ENABLED=true`, uma instância): outbox 30 s, alertas e reservas 5 min, reconciliação 1 h.
 - **Reconciliação (12.4):** `POST /reconciliation/run`, `GET /reconciliation/issues`, `POST /reconciliation/issues/:id/resolve` — detecta e abre item; nunca corrige em silêncio.
 - **Auditoria:** toda mutação, leitura sensível e negação de acesso; `GET /audit/events`; `X-Correlation-Id` em todas as respostas.
-- **Deploy e status:** `DEPLOY.md` (compose com Postgres próprio, backend, frontend/nginx e backup) e `STATUS_FINAL.md` (o que ficou fora do MVP, contratos a confirmar e decisões da seção 28).
+- **Deploy e status:** [DEPLOY.md](DEPLOY.md) (compose com Postgres próprio, backend, frontend/nginx e backup). O antigo `STATUS_FINAL.md` (o que ficou fora do MVP, contratos a confirmar e decisões da seção 28) foi para [../docs/arquivo/](../docs/arquivo/logistica-status-final-2026-11-01.md).
+
+## Sprints 11–14 — telas web de gestão
+O frontend ganhou, além do PWA operacional, telas de gestão, cada uma liberada por permissão (`NAV_ITEMS` em `frontend/src/App.tsx`). A navegação é feita por abas, sem router:
+
+| Tela | Arquivo | Permissão |
+|---|---|---|
+| Painel | `Dashboard.tsx` | `dashboard:read` |
+| Catálogo e cadastro de material | `Catalog.tsx`, `MaterialForm.tsx` | `material:read` |
+| Estoque e ajustes | `Stock.tsx`, `StockAdjust.tsx` | `stock:read` |
+| Recebimento | `Receiving.tsx` | `receipt:execute` |
+| Transferências | `Transfers.tsx`, `TransferReceive.tsx` | `transfer:request` |
+| Devoluções e custódia | `Returns.tsx` | `return:execute` |
+| Atendimento | `Fulfillment.tsx` | `fulfillment:read` |
+| Reposição e alertas | `Replenishment.tsx` | `alert:read` |
+| Administração (endereços, parâmetros, integração) | `Admin.tsx`, `AdminForms.tsx` | `warehouse:read` |
+
+O Core consome `GET /materials/purchase-catalog` e `POST /materials/availability:batch` na tela "Nova requisição".
+
+## Pontos de atenção conhecidos
+- **Catálogo revisado:** `SEED_REVISED_CATALOG=true` (definido no `docker-compose.yml`) faz duas coisas:
+  - o seed sobrescreve custo e status dos itens `REV-` a cada partida, sem versão nem auditoria;
+  - a listagem do catálogo esconde todo material cujo código não começa com `REV-`.
+- **Custo exposto:** `GET /materials/purchase-catalog` devolve custo a quem tem só `material:read`.
+- **SSO e permissões:**
+  - `POST /auth/exchange` aceita qualquer access token do Core, não só o do launcher;
+  - o CORS do backend não tem allow-list;
+  - o mapeamento de papéis precisa de revisão.
+  
+  Detalhes em [../docs/integracao-core-logistica.md §1](../docs/integracao-core-logistica.md#1-identidade-e-sessão).
 
 ## Desenvolvimento e testes
 - **Banco de testes separado:** copie `backend/.env.test.example` para `.env.test` (outro banco, `axis_logistica_test`); `npm run test:e2e:setup` migra e `npm run test:e2e` roda. O banco de desenvolvimento não acumula lixo de teste.
-- **Catálogo inicial:** `prisma/catalog-data.ts` é gerado por `python scripts/generate-catalog.py <PLANNING_LOGISTICA.md>` (101 SKUs das tabelas 8.1–8.8; 8.9 químicos não é carregado — exige validação técnica e de HSE). O seed só cria o que ainda não existe e `SEED_CATALOG=false` desliga.
+- **Catálogo inicial:** `prisma/catalog-data.ts` é gerado por `python scripts/generate-catalog.py <PLANNING_LOGISTICA.md>` (101 SKUs das tabelas 8.1–8.8; 8.9 químicos não é carregado — exige validação técnica e de HSE). O seed só cria o que ainda não existe e `SEED_CATALOG=false` desliga. A exceção é `SEED_REVISED_CATALOG=true`, que sobrescreve os itens `REV-` (ver "Pontos de atenção").
 - **Perfil por usuário:** além do mapeamento por role do Axis, `PUT /rbac/users/:axisUserId/roles` concede perfis de Logística a um usuário específico (ex.: um colaborador que atua como almoxarife); o acesso a almoxarifados continua em `PUT /rbac/users/:axisUserId/warehouses`.

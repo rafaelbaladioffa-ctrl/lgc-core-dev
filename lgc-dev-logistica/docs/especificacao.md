@@ -1,5 +1,14 @@
 # LGC — Sistema Satélite de Almoxarifado e Logística
 
+> **Nota de 2026-11-07:** este documento era o `PLANNING_LOGISTICA.md` da raiz do Core. Ele continua sendo a
+> especificação funcional do satélite, mas a seção 0 tem afirmações superadas:
+> - **§0.1 (repositório):** a Logística vive como subpasta do repositório do Core, não em repositório próprio.
+> - **§0.2 (branding):** os tokens visuais foram copiados para `frontend/src/styles.css`.
+> - **§0.3 (tokens):** o PWA faz refresh, e o token do launcher é trocado por uma sessão de 8 h.
+> - **§0.4 (eventos):** os eventos que o Core realmente emite são outros.
+>
+> O estado verificado está em [../../docs/integracao-core-logistica.md](../../docs/integracao-core-logistica.md).
+
 **Integração principal:** Axis ERP | SGI
 **Documento:** Especificação funcional e técnica pronta para vibe coding
 **Versão:** 1.1 (v1.0 do usuário + seção 0 de amarração com o Axis)

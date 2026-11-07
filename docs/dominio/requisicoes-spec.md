@@ -1,5 +1,18 @@
 # AXIS ERP | SGI — Módulo de Requisições Intersetoriais
 
+> **Nota de 2026-11-07:** esta é a especificação **alvo** (ex-`REQUISICOES_SPEC.md`), não a descrição do
+> código. Várias partes ainda não existem:
+> - **§6 e §14 (empresa e unidade):** `company_id` e `unit_id` não existem no schema.
+> - **§14 (API):**
+>   - não existem catálogo, publicação de versão, `/approvals/inbox`, timeline, worklogs, relações nem upload em duas etapas;
+>   - as decisões usam `/requests/:id/approve|reject`;
+>   - a edição usa `PUT`.
+> - **§13.1 (entidades):** `request_field_values`, `request_participants`, workflow instances/steps, `sla_pauses`, `worklogs` e `notifications` não existem.
+> - **§9.2 (matriz):** a matriz do seed é por nível hierárquico, não por papel.
+> - **§15.1 (telas):** a tela "Minhas atividades" não está descrita.
+>
+> O comportamento real está em [requisicoes-estado-atual.md](requisicoes-estado-atual.md); o caminho até o alvo, em [requisicoes-roadmap.md](requisicoes-roadmap.md).
+
 **Empresa:** LGC
 **Documento:** Especificação funcional e técnica pronta para vibe coding
 **Versão:** 1.0
