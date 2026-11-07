@@ -1,6 +1,7 @@
 @import "./styles/axis-tokens.css";
 @import "./styles/request-catalog.css";
 @import "./styles/request-form.css";
+@import "./styles/request-quotations.css";
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100svh; margin: 0; }

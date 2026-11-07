@@ -1,0 +1,25 @@
+/* Detalhe da requisição: cotações de fornecedores (lista legível + formulário de registro). */
+.quotations { display: flex; flex-direction: column; gap: var(--space-3); background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-3); }
+.quotation-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.quotation-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); font-size: var(--text-sm); }
+.quotation-card--selected { border: 2px solid var(--success); background: color-mix(in srgb, var(--success) 8%, var(--surface)); }
+.quotation-card__head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.quotation-card__title { font-weight: 600; flex: 1; min-width: 160px; }
+.quotation-badge { padding: 2px 10px; color: var(--success); background: var(--surface); border: 1px solid var(--success); border-radius: 999px; font-size: var(--text-xs); font-weight: 600; }
+.quotation-card__grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2) var(--space-3); margin: 0; }
+.quotation-card__grid dt { color: var(--foreground-muted); font-size: var(--text-xs); }
+.quotation-card__grid dd { margin: 0; overflow-wrap: anywhere; }
+.quotation-card__full { grid-column: 1 / -1; }
+.quotation-card__notes { white-space: pre-wrap; }
+.quotation-attachments { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.quotation-attachment { padding: 4px 10px; color: var(--primary); background: var(--surface-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--text-xs); }
+.quotation-attachment:hover { border-color: var(--primary); }
+.quotation-card__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.quotation-form { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.quotation-form h4 { margin: 0; }
+.quotation-form__grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+.quotation-form__full { grid-column: 1 / -1; }
+.quotation-error { margin: 0; color: var(--danger); font-size: var(--text-xs); }
+@media (max-width: 768px) {
+  .quotation-card__grid, .quotation-form__grid { grid-template-columns: 1fr; }
+}

@@ -1,5 +1,5 @@
 import { api } from './client';
-import type { RequestConfidentiality } from './requestCategories';
+import type { RequestCategoryKind, RequestConfidentiality } from './requestCategories';
 
 export type RequestStatus =
   | 'rascunho'
@@ -81,7 +81,7 @@ export interface RequestSubtaskLink {
 export interface RequestDetail extends AxisRequest {
   comments: RequestComment[];
   approvals: RequestApproval[];
-  categoryVersion: { category: { id: string; name: string; code: string; requiresAcceptance: boolean } };
+  categoryVersion: { category: { id: string; name: string; code: string; requiresAcceptance: boolean; kind: RequestCategoryKind } };
   relationsAsTarget: RequestSubtaskLink[];
   requesterAcceptedAt: string | null;
   // Null unless a denúncia (§7.3) is marked anônima; "Anônimo" when the viewer lacks
@@ -91,6 +91,15 @@ export interface RequestDetail extends AxisRequest {
   requester?: { id: string; fullName: string };
   formData?: { purchaseItems?: PurchaseRequestItem[] } | Record<string, unknown> | null;
   costCenter?: { id: string; code: string; name: string; responsibleCollaborator?: { id: string; fullName: string } | null } | null;
+  attachments?: RequestAttachmentMeta[];
+}
+
+export interface RequestAttachmentMeta {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
 }
 
 export interface PurchaseRequestItem {
@@ -196,5 +205,6 @@ export const requestsApi = {
   purchaseAnalysis: (id: string, items: PurchaseAnalysisItem[], notes?: string) => api.post(`/requests/${id}/purchase-analysis`, { items, notes }).then((r) => r.data),
   purchaseQuotation: (id: string, input: { quotationId?: string; supplier: string; quoteNumber?: string; totalValue: string; notes?: string; selected?: boolean; attachmentIds?: string[] }) => api.post(`/requests/${id}/purchase-quotation`, input).then((r) => r.data),
   selectPurchaseQuotation: (id: string, quotationId: string) => api.post(`/requests/${id}/purchase-quotation-selection`, { quotationId }).then((r) => r.data),
+  downloadAttachment: (id: string, attachmentId: string) => api.get<Blob>(`/requests/${id}/attachments/${attachmentId}`, { responseType: 'blob' }).then((r) => r.data),
   attachment: (id: string, input: { filename: string; contentBase64: string }) => api.post<{ id: string }>(`/requests/${id}/attachments`, input).then((r) => r.data),
 };
