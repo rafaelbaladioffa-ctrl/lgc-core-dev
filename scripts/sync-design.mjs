@@ -17,7 +17,8 @@ const esperados = [];
 for (const sat of satelites) {
   const base = join(raiz, sat);
   for (const arq of estilos) {
-    const texto = readFileSync(join(origem, 'src/styles', arq), 'utf8');
+    // Normaliza para LF: com core.autocrlf o Git pode reescrever as cópias com CRLF no Windows.
+    const texto = readFileSync(join(origem, 'src/styles', arq), 'utf8').replaceAll('\r\n', '\n');
     const cabecalho = `/* GERADO por scripts/sync-design.mjs a partir de frontend/src/styles/${arq} — não edite aqui. */\n`;
     esperados.push({ destino: join(base, 'src/styles', arq), conteudo: Buffer.from(cabecalho + texto, 'utf8') });
   }
@@ -35,7 +36,8 @@ for (const sat of satelites) {
 const rel = (p) => p.slice(raiz.length + 1).replaceAll(String.fromCharCode(92), '/');
 const divergentes = [];
 for (const { destino, conteudo } of esperados) {
-  const atual = existsSync(destino) ? readFileSync(destino) : null;
+  const lido = existsSync(destino) ? readFileSync(destino) : null;
+  const atual = lido && destino.endsWith('.css') ? Buffer.from(lido.toString('utf8').replaceAll('\r\n', '\n'), 'utf8') : lido;
   if (atual && atual.equals(conteudo)) continue;
   divergentes.push(`${atual ? 'divergente' : 'ausente'}: ${rel(destino)}`);
   if (!checar) {
