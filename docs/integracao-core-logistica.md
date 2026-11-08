@@ -73,8 +73,9 @@ e idempotência por `event_id`.
 |---|---|---|
 | `collaborator.created/updated/offboarded` | sim | sim |
 | `client.created/updated` | sim | sim |
-| `project.created/updated/status_changed/deleted` | sim (estado completo; ver [cadastros.md §10](dominio/cadastros.md#10-projetos)) | sim (qualquer `project.*` atualiza o cache; `deleted` chega com `status: encerrado`) |
+| `project.created/updated/status_changed/deleted` | sim (estado completo; ver [cadastros.md §10](dominio/cadastros.md#10-projetos)) | sim (qualquer `project.*` atualiza o cache; `deleted` chega com `status: encerrado`; desde 2026-11-08 o payload traz `site_id`, `site_code` e `site_name`, que o cache da Logística ainda não guarda) |
 | `cost_center.created/updated` | sim | **não (ignora)** |
+| `site.created/updated` (site do cliente, com endereço e coordenadas; ver [cadastros.md §9.1](dominio/cadastros.md#91-sites)) | sim (desde 2026-11-08) | **não assina ainda**; é o endereço de entrega que a ordem de envio para obra vai usar (PT-04 do plano "projeto aprovado → obra") |
 | `project.document_added` (SOW) | sim | não assina; o evento só vai para quem assinar |
 | `project.quote_requested` (cotação pelo Financeiro) | sim | não assina; o evento só vai para quem assinar |
 | `user.*` (inclui `user.disabled`) | **não** | sim |

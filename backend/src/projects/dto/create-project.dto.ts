@@ -20,6 +20,11 @@ export class CreateProjectDto {
   @IsUUID()
   responsibleCollaboratorId!: string;
 
+  /** Site do cliente onde a obra acontece. Opcional por enquanto; obrigatório só para aprovar o projeto. */
+  @IsOptional()
+  @IsUUID()
+  siteId?: string | null;
+
   /** Data no formato AAAA-MM-DD. */
   @IsOptional()
   @IsISO8601({ strict: true }, { message: 'Início previsto inválido.' })

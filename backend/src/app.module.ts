@@ -14,6 +14,7 @@ import { CollaboratorsModule } from './collaborators/collaborators.module.js';
 import { CertificationsModule } from './certifications/certifications.module.js';
 import { ClientsModule } from './clients/clients.module.js';
 import { ProjectsModule } from './projects/projects.module.js';
+import { SitesModule } from './sites/sites.module.js';
 import { RequestCategoriesModule } from './request-categories/request-categories.module.js';
 import { RequestsModule } from './requests/requests.module.js';
 import { DelegationsModule } from './delegations/delegations.module.js';
@@ -38,6 +39,7 @@ import { AuditLogInterceptor } from './audit/audit-log.interceptor.js';
     CertificationsModule,
     ClientsModule,
     ProjectsModule,
+    SitesModule,
     RequestCategoriesModule,
     RequestsModule,
     DelegationsModule,

@@ -20,6 +20,11 @@ export class UpdateProjectDto {
   @IsUUID()
   responsibleCollaboratorId?: string;
 
+  /** Site do mesmo cliente do projeto; `null` desvincula. */
+  @IsOptional()
+  @IsUUID()
+  siteId?: string | null;
+
   /** AAAA-MM-DD; `null` apaga a data. */
   @IsOptional()
   @IsISO8601({ strict: true }, { message: 'Início previsto inválido.' })

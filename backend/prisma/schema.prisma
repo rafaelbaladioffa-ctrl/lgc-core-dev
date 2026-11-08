@@ -381,6 +381,7 @@ model Client {
   projects  Project[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
+  sites     Site[]
 
   @@map("clients")
 }
@@ -404,12 +405,44 @@ model Project {
   documents                 ProjectDocument[]
   quoteRequests             ProjectQuoteRequest[]
   quotes                    ProjectQuote[]
+  /// Local da obra (PA-05). Nulo até o PT-06 exigi-lo para aprovar o projeto; sempre do mesmo cliente.
+  siteId                    String?  @map("site_id")
+  site                      Site?    @relation(fields: [siteId], references: [id])
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
   @@index([clientId])
   @@index([costCenterId])
+  @@index([siteId])
   @@map("projects")
+}
+
+/// Site (local de obra ou de entrega) de um cliente, ex.: `GRU53`. Cadastro do Core usado por
+/// Logística (endereço de entrega), Financeiro e Field. Sem exclusão: sai de uso inativando.
+model Site {
+  id                String   @id @default(uuid())
+  clientId          String   @map("client_id")
+  client            Client   @relation(fields: [clientId], references: [id])
+  /// Código do site informado por quem cadastra (ex.: GRU53), único dentro do cliente.
+  code              String
+  name              String
+  cep               String?
+  addressStreet     String?  @map("address_street")
+  addressNumber     String?  @map("address_number")
+  addressComplement String?  @map("address_complement")
+  addressDistrict   String?  @map("address_district")
+  addressCity       String?  @map("address_city")
+  addressState      String?  @map("address_state")
+  latitude          Float?
+  longitude         Float?
+  active            Boolean  @default(true)
+  projects          Project[]
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@unique([clientId, code])
+  @@index([clientId])
+  @@map("sites")
 }
 
 enum ProjectDocumentKind {
