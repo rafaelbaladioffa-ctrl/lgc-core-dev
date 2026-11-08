@@ -24,6 +24,7 @@ Decisões do dono do produto em 2026-11-08:
 | Webhook de dados mestres (`collaborator.*`, `client.*`, `project.*`, `cost_center.*`, `site.*`) | Core → Field | **Feito** (F2, §3). `project.*` só guarda cache e vínculo; não cria obra |
 | Carga inicial e casamento dos cadastros já existentes no Field | Core → Field | **Feito** (F3, `manage.py axis_sync`, §3) |
 | Projeto ganho no Core vira obra no Field | Core → Field | **A decidir** (F4, §4) |
+| Horas reais por técnico, projeto e dia (mão de obra realizada) | Field → Financeiro | **Feito** (PT-10, §5.1): `GET /api/integration/labor-hours`, puxado pelo Financeiro |
 | Avanço, HH e status da obra | Field → Core | **A fazer**; depende do receptor `POST /integration/inbound` no Core, que ainda não existe (F5) |
 
 ## 1. Sobreposição de cadastros
@@ -132,7 +133,7 @@ mais novo que a consulta prevalece sobre ela.
 ### Variáveis (`lgc-dev-field/.env.example`)
 
 `AXIS_WEBHOOK_SECRET`, `AXIS_WEBHOOK_MAX_AGE_HOURS`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`,
-`AXIS_API_TIMEOUT`. No Core, o satélite precisa assinar os eventos da tabela acima e apontar o webhook para
+`AXIS_API_TIMEOUT`, `FIELD_INTEGRATION_API_KEY` (chave que o Financeiro envia em `X-Api-Key`, §5.1). No Core, o satélite precisa assinar os eventos da tabela acima e apontar o webhook para
 `<url do Field>/api/v1/webhooks/axis`; depois, o botão **Integrações → Reenviar cadastros** reenvia
 colaboradores e centros de custo (clientes e sites entram pelo `axis_sync`).
 
@@ -151,6 +152,31 @@ O Core não tem receptor de eventos de satélite (mesmo bloqueio da Logística e
 existir, candidatos: `field.project.progress` (% de avanço, HH real × orçado) e
 `field.project.completed`. O Financeiro (módulo Projetos, resultado por projeto) é o principal
 interessado no HH real.
+
+### 5.1 Horas reais para o Financeiro (PT-10)
+
+Não passa pelo Core: o Financeiro consulta o Field direto (mesmo padrão do consumo da Logística).
+
+`GET /api/integration/labor-hours?from=AAAA-MM-DD&to=AAAA-MM-DD` com o cabeçalho `X-Api-Key`
+(`FIELD_INTEGRATION_API_KEY`; sem a variável a rota responde `503`, chave errada `401`, período inválido ou
+acima de 62 dias `400`). Resposta: lista de
+`{ axis_project_id, axis_collaborator_id, date, hours, adjusted }`.
+
+- **Fonte:** a mesma do HH do projeto (regra 1): o `actual_hours` de cada despacho (`ProjectTaskAssignment`),
+  que já desconta as pausas. Tarefa com apontamento completo mas sem horas por técnico (dado histórico)
+  segue o mesmo fallback do `real_man_hours`: cada técnico vinculado recebe as horas de relógio da tarefa.
+- **Dia:** São Paulo. Despacho que atravessa a meia-noite reparte as horas pelos dias na proporção do tempo
+  de execução de cada um, com arredondamento a 2 casas que preserva o total do despacho.
+- **Fora:** tarefa sem técnico vinculado (regra 8), horas da planilha do supervisor (`ProjectHourEntry`,
+  regra 9) e despacho ainda aberto (sem término).
+- **`adjusted`:** `true` quando algum despacho do dia (técnico × projeto) teve ajuste de timeline.
+- **`hours`:** string decimal com 2 casas; uma linha por (projeto, técnico, dia).
+- **Vínculo:** só entram projetos com `axis_project_id` e colaboradores com `axis_collaborator_id`. O que
+  ficou de fora por falta de vínculo é somado por motivo (`projeto_sem_vinculo`, `colaborador_sem_vinculo`)
+  no log do Field (`WARNING`) e no cabeçalho de resposta `X-Unlinked-Hours`, não na lista.
+
+Contrato e tratamento no Financeiro: [integracao-centros-de-custo.md](integracao-centros-de-custo.md).
+Sem migração nova.
 
 ## 6. Migração da produção
 

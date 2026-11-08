@@ -299,3 +299,6 @@ AXIS_WEBHOOK_MAX_AGE_HOURS = int(os.getenv("AXIS_WEBHOOK_MAX_AGE_HOURS") or 72)
 AXIS_API_URL = os.getenv("AXIS_API_URL", "").rstrip("/")
 AXIS_API_KEY = os.getenv("AXIS_API_KEY", "")
 AXIS_API_TIMEOUT = int(os.getenv("AXIS_API_TIMEOUT") or 15)
+# API de horas reais para o Financeiro (`GET /api/integration/labor-hours`, PT-10): o Financeiro envia esta
+# chave em `X-Api-Key`. Vazia = a rota responde 503. Nunca versionar o valor.
+FIELD_INTEGRATION_API_KEY = os.getenv("FIELD_INTEGRATION_API_KEY", "")
