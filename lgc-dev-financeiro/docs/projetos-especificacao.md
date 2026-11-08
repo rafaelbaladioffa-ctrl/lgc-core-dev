@@ -479,6 +479,13 @@ Disponível quando o orçamento tem revisão `ganha`. Linha de base = essa revis
   categorias do CC: mão de obra = `folha`; material = `material` + `compras`; deslocamento e estadia = `frota` +
   `servicos` + `despesas_campo`; outros = `outros`. Resultado direto = receita − custos diretos (impostos e
   indiretos não são lançados no CC).
+- **Mão de obra realizada (PT-10, PA-14).** O grupo "Mão de obra" do realizado passa a ter valor: as horas reais
+  do Field por técnico, projeto e dia × o **custo hora médio da função** do colaborador (nunca o salário
+  individual) viram, todo dia, um custo `realizado`/`folha` no CC do projeto com o projeto, em par com um crédito
+  "mão de obra transferida" no CC de origem do técnico. O resultado do projeto lê só o custo (o crédito não leva
+  o projeto). Colaborador sem função mapeada não lança e fica como pendência na Controladoria. Detalhes e
+  contrato: [centros de custo §2.2](centros-de-custo-especificacao.md#22-mão-de-obra-realizada-por-projeto-horas-do-field-pt-10-pa-14) e
+  [integração §7](../../docs/integracao-centros-de-custo.md#7-field--financeiro-horas-reais-por-técnico-e-projeto).
 - **Ainda fora (PJ5 original):** apontamento digitado (técnicos, dias, carros) e "fechar/reabrir realizado" ficam
   para depois; o realizado do projeto é o que o CC já tem. Com o contas a pagar (PJ6), o título pago passa a
   entrar no mesmo livro.
@@ -669,7 +676,7 @@ de custo; outros modelos de cliente além do AWS.
 | PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
 | PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | **feito** (2026-11-08): ver nota abaixo |
 | PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | **feito** (2026-11-08), em duas partes: ver notas abaixo. O perfil de cliente com o mapeamento tipo de cabo/função → linha do Bid Template fica para a PJ7, onde é usado |
-| PJ5 | Realizado: cotado × comprometido × realizado, lendo os lançamentos do CC (PA-16; sem tabela paralela) | **feito em parte** (2026-11-08, PT-07): comprometido ao ganhar, resultado do projeto por grupo e importação diária do consumo da Logística. Fora: apontamento digitado, fechar/reabrir realizado e mão de obra realizada por projeto (PT-10): ver §8 |
+| PJ5 | Realizado: cotado × comprometido × realizado, lendo os lançamentos do CC (PA-16; sem tabela paralela) | **feito em parte** (2026-11-08, PT-07): comprometido ao ganhar, resultado do projeto por grupo e importação diária do consumo da Logística. Mão de obra realizada por projeto (horas reais do Field × custo hora da função) **feita** em 2026-11-09 (PT-10): ver §8. Fora: apontamento digitado e fechar/reabrir realizado |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
 | PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | **feito** (2026-11-08): ver nota abaixo |
 

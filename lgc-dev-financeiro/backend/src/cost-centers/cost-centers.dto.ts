@@ -23,6 +23,25 @@ export class PeriodQuery {
   to?: string;
 }
 
+/** Importação manual das horas do Field por período (até 62 dias). */
+export class FieldLaborImportDto {
+  @Matches(DATE, { message: 'Início inválido (use AAAA-MM-DD).' })
+  from!: string;
+
+  @Matches(DATE, { message: 'Fim inválido (use AAAA-MM-DD).' })
+  to!: string;
+}
+
+export class FieldLaborPendingQuery {
+  @IsOptional()
+  @Matches(DATE, { message: 'Início inválido (use AAAA-MM-DD).' })
+  from?: string;
+
+  @IsOptional()
+  @Matches(DATE, { message: 'Fim inválido (use AAAA-MM-DD).' })
+  to?: string;
+}
+
 export class CreateEntryDto {
   @Matches(DATE, { message: 'Competência inválida (use AAAA-MM-DD).' })
   competence!: string;

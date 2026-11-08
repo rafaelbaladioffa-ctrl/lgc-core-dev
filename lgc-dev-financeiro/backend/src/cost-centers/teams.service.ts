@@ -75,6 +75,14 @@ export class TeamsService {
       members,
       hoursByActivity: [...c.hoursByActivity.entries()].map(([activity, hours]) => ({ activity, hours: hours.toFixed(2) })),
       idleHours: c.idle.toFixed(2),
+      fieldLabor: {
+        projectHours: c.fieldLabor.hours.toFixed(2),
+        idleHours: c.fieldLabor.idleHours.toFixed(2),
+        transferredCost: money(c.fieldLabor.transferredCost),
+        pendingDays: c.fieldLabor.pendingDays,
+        pendingHours: c.fieldLabor.pendingHours.toFixed(2),
+        byProject: c.fieldLabor.byProject.map((p) => ({ projectId: p.projectId, code: c.projectNames.get(p.projectId)?.code ?? null, hours: p.hours.toFixed(2) })),
+      },
       idleCost: money(c.costPerAvailableHour ? c.idle.mul(c.costPerAvailableHour) : ZERO),
       costPerAvailableHour: c.costPerAvailableHour ? money(c.costPerAvailableHour) : null,
       breakEvenMonthly: money(c.summary.directCost.div(period.months.length)),
@@ -85,6 +93,35 @@ export class TeamsService {
       advances: await this.costCenters.presentAdvances(advances),
       custody,
       warnings: c.warnings,
+    };
+  }
+
+  /**
+   * Mão de obra realizada pelas horas do Field (PT-10): horas dos técnicos da equipe em projetos × horas disponíveis
+   * (ociosas = o que sobra), e o custo que a equipe transferiu aos projetos (créditos `mao_de_obra` no CC). O custo
+   * direto do painel NÃO desconta o transferido: continua sendo o custo da equipe, contra o qual se mede a receita.
+   */
+  private async fieldLabor(costCenterAxisId: string, period: Period, availableHours: Dec) {
+    const [days, credits] = await Promise.all([
+      this.prisma.fieldLaborDay.findMany({ where: { originCostCenterAxisId: costCenterAxisId, date: { gte: period.start, lt: period.end } } }),
+      this.prisma.ccEntry.groupBy({
+        by: ['source'],
+        where: { costCenterAxisId, source: 'mao_de_obra', projectAxisId: null, sourceRef: { endsWith: ':credito' }, competence: { gte: period.start, lt: period.end } },
+        _sum: { amount: true },
+      }),
+    ]);
+    const launched = days.filter((d) => d.status === 'lancado');
+    const byProject = new Map<string, Dec>();
+    for (const d of launched) byProject.set(d.projectAxisId, (byProject.get(d.projectAxisId) ?? ZERO).plus(d.hours));
+    const hours = sum(launched.map((d) => new D(d.hours)));
+    const pendingDays = days.filter((d) => d.status === 'pendente');
+    return {
+      hours,
+      idleHours: D.max(ZERO, availableHours.minus(hours)),
+      transferredCost: new D(credits[0]?._sum.amount ?? 0).negated(),
+      pendingDays: pendingDays.length,
+      pendingHours: sum(pendingDays.map((d) => new D(d.hours))),
+      byProject: [...byProject.entries()].map(([projectId, h]) => ({ projectId, hours: h })),
     };
   }
 
@@ -116,7 +153,7 @@ export class TeamsService {
       this.ctx.paramsAt(new Date(Math.min(period.end.getTime() - 1, today.getTime()))),
       this.ctx.roleMap(),
       this.prisma.ccTeamLog.findMany({ where: { costCenterAxisId: node.id, date: { gte: period.start, lt: period.end } } }),
-      this.prisma.ccEntry.groupBy({ by: ['category'], where: { costCenterAxisId: node.id, kind: 'custo', stage: 'realizado', competence: { gte: period.start, lt: period.end } }, _sum: { amount: true } }),
+      this.prisma.ccEntry.groupBy({ by: ['category'], where: { costCenterAxisId: node.id, kind: 'custo', stage: 'realizado', source: { not: 'mao_de_obra' }, competence: { gte: period.start, lt: period.end } }, _sum: { amount: true } }),
     ]);
 
     let hoursPerDay = this.ctx.hoursPerDay(params);
@@ -193,9 +230,11 @@ export class TeamsService {
     });
 
     const idle = idleHours(availableHours, hoursByActivity);
-    const projectNames = await this.ctx.names('PROJECT', projectIds);
+    const fieldLabor = await this.fieldLabor(node.id, period, availableHours);
+    const projectNames = await this.ctx.names('PROJECT', [...projectIds, ...fieldLabor.byProject.map((p) => p.projectId)]);
     return {
       params,
+      fieldLabor,
       members,
       hoursByActivity,
       idle,

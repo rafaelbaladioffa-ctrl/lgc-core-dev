@@ -46,7 +46,7 @@ export type CcDetail = CcSummary & {
 
 export type EntryKind = 'receita' | 'custo';
 export type EntryStage = 'comprometido' | 'realizado';
-export type EntrySource = 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual' | 'projeto';
+export type EntrySource = 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual' | 'projeto' | 'mao_de_obra';
 
 export type Entry = {
   id: string;
@@ -105,6 +105,8 @@ export type TeamPanel = TeamSummary & {
   members: { collaboratorId: string; name: string | null; jobTitleName: string | null; roleKey: string | null; since: string }[];
   hoursByActivity: { activity: string; hours: string }[];
   idleHours: string;
+  /** Horas reais do Field dos técnicos da equipe (PT-10): em projetos × ociosas (disponíveis − em projeto). */
+  fieldLabor: { projectHours: string; idleHours: string; transferredCost: Money; pendingDays: number; pendingHours: string; byProject: { projectId: string; code: string | null; hours: string }[] };
   idleCost: Money;
   costPerAvailableHour: Money | null;
   breakEvenMonthly: Money;
@@ -169,6 +171,18 @@ export type BudgetRole = { roleKey: string; label: string };
 export type JobTitleMaps = { maps: JobTitleMap[]; unmapped: UnmappedJobTitle[]; roles: BudgetRole[] };
 
 export type PayrollResult = { month: string; created: number; replaced: number; unchanged: number; unmapped: { collaboratorId: string; name: string | null; jobTitleName: string | null }[] };
+export type FieldLaborPending = { collaboratorId: string; collaboratorName: string | null; projectId: string; projectCode: string | null; reason: string; reasonLabel: string; days: number; hours: string };
+export type FieldLaborImportResult = {
+  from: string;
+  to: string;
+  hours: string;
+  launchedHours: string;
+  created: number;
+  replaced: number;
+  unchanged: number;
+  invalidRows: number;
+  pending: FieldLaborPending[];
+};
 export type LogisticsImportResult = { month: string; created: number; replaced: number; unchanged: number };
 
 export type Purchase = {
@@ -220,6 +234,7 @@ export const saveJobTitleMap = (jobTitleId: string, jobTitleName: string, roleKe
   api<JobTitleMap>(`/job-title-maps/${enc(jobTitleId)}`, json('PUT', { jobTitleName, roleKey }));
 
 export const generatePayroll = (month: string) => api<PayrollResult>(`/cost-centers/payroll/${enc(month)}`, json('POST', {}));
+export const importFieldLabor = (from: string, to: string) => api<FieldLaborImportResult>('/field-labor/import', json('POST', { from, to }));
 export const importLogistics = (month: string) => api<LogisticsImportResult>(`/cost-centers/logistics-import/${enc(month)}`, json('POST', {}));
 
 export const listAdvances = (status: 'aberto' | 'prestado') => api<Advance[]>(`/advances?status=${status}`);
@@ -248,7 +263,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
 export const KIND_LABEL: Record<CcKind, string> = { divisao: 'Divisão', administrativo: 'Administrativo', operacional: 'Operacional', equipe_tecnica: 'Equipe técnica' };
 export const ENTRY_KIND_LABEL: Record<EntryKind, string> = { receita: 'Receita', custo: 'Custo' };
 export const STAGE_LABEL: Record<EntryStage, string> = { comprometido: 'Comprometido', realizado: 'Realizado' };
-export const SOURCE_LABEL: Record<EntrySource, string> = { compra: 'Compra', reembolso: 'Reembolso', adiantamento: 'Adiantamento', logistica: 'Logística', folha: 'Folha', manual: 'Manual', projeto: 'Revisão ganha' };
+export const SOURCE_LABEL: Record<EntrySource, string> = { compra: 'Compra', reembolso: 'Reembolso', adiantamento: 'Adiantamento', logistica: 'Logística', folha: 'Folha', manual: 'Manual', projeto: 'Revisão ganha', mao_de_obra: 'Mão de obra (Field)' };
 
 export const ACTIVITIES: TeamActivity[] = ['projeto', 'deslocamento', 'treinamento', 'manutencao', 'ocioso'];
 export const ACTIVITY_LABEL: Record<TeamActivity, string> = { projeto: 'Projeto', deslocamento: 'Deslocamento', treinamento: 'Treinamento', manutencao: 'Manutenção', ocioso: 'Ocioso' };
@@ -473,4 +488,18 @@ export function validateTeamLog(f: TeamLogForm): { ok: true; body: TeamLogInput 
   }
   if (f.notes.trim()) body.notes = f.notes.trim();
   return { ok: true, body };
+}
+
+/** Período de dias da importação das horas do Field (o Field aceita até 62 dias). */
+export const MAX_FIELD_IMPORT_DAYS = 62;
+export function validateDayRange(from: string, to: string, now: Date = new Date()): string | null {
+  const iso = /^\d{4}-\d{2}-\d{2}$/;
+  if (!iso.test(from) || !iso.test(to)) return 'Informe o início e o fim do período.';
+  const a = Date.parse(`${from}T00:00:00Z`);
+  const b = Date.parse(`${to}T00:00:00Z`);
+  if (Number.isNaN(a) || Number.isNaN(b)) return 'Datas inválidas.';
+  if (b < a) return 'O início não pode ser depois do fim.';
+  if ((b - a) / 86_400_000 + 1 > MAX_FIELD_IMPORT_DAYS) return `O período pode ter no máximo ${MAX_FIELD_IMPORT_DAYS} dias.`;
+  if (to > today(now)) return 'O fim do período não pode ser no futuro.';
+  return null;
 }
