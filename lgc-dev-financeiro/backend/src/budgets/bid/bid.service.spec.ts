@@ -4,7 +4,7 @@ import type { AuditService } from '../../audit/audit.service.js';
 import type { OutboxService } from '../../integration/outbox.service.js';
 import type { AuthenticatedUser } from '../../auth/authenticated-request.js';
 import type { BudgetsService } from '../budgets.service.js';
-import { BidService } from './bid.service.js';
+import { BidService, uniqueByCode } from './bid.service.js';
 import { CORE_QUOTE_EVENT } from './core-quote.js';
 
 vi.mock('./bid-fill.js', () => ({
@@ -78,5 +78,12 @@ describe('BidService.approveSend', () => {
     await service.approveSend('r2', GESTOR);
     expect(budgets.transition).toHaveBeenCalledWith('r2', 'approve_send', GESTOR);
     expect(outbox.record).not.toHaveBeenCalled();
+  });
+});
+
+describe('uniqueByCode', () => {
+  it('código repetido fica uma vez, na linha que já tem fornecedor (a mesma que o preenchimento usa)', () => {
+    const line = (row: number, code: string, supplier: string | null) => ({ row, code, supplier, description: '', category: 'Fiber', subcategory: '', free: false });
+    expect(uniqueByCode([line(112, 'A', 'CommScope'), line(113, 'B', 'Select'), line(114, 'B', 'AFL'), line(115, 'C', null)]).map((l) => l.row)).toEqual([112, 114, 115]);
   });
 });

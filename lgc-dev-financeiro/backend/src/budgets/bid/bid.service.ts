@@ -28,6 +28,20 @@ export interface BidTemplateLine {
   free: boolean;
 }
 
+/**
+ * Uma opção por código: o modelo repete alguns part numbers (uma linha com fornecedor e outra em "Select").
+ * Fica a mesma linha que o preenchimento usa — a que já tem fornecedor (bid-fill.ts).
+ */
+export function uniqueByCode(lines: BidTemplateLine[]): BidTemplateLine[] {
+  const hasSupplier = (l: BidTemplateLine) => !!l.supplier && l.supplier.trim().toLowerCase() !== 'select';
+  const byCode = new Map<string, BidTemplateLine>();
+  for (const l of lines) {
+    const prev = byCode.get(l.code);
+    if (!prev || (!hasSupplier(prev) && hasSupplier(l))) byCode.set(l.code, l);
+  }
+  return lines.filter((l) => byCode.get(l.code) === l);
+}
+
 /** Hoje em São Paulo (`AAAA-MM-DD`), a data de envio da proposta. */
 export const todaySaoPaulo = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 
@@ -115,7 +129,7 @@ export class BidService {
         free: code.startsWith('free_'),
       });
     }
-    return out;
+    return uniqueByCode(out);
   }
 
   /** Plano da Bid da revisão com o perfil atual; `blockers` explica o que falta. */
