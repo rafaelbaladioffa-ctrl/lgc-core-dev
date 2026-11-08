@@ -31,6 +31,7 @@ na mesma rede/host). Nomes de serviço têm prefixo `logistica-` para não colid
 | `WEBHOOK_MAX_AGE_HOURS` | não (72) | Janela anti-replay do webhook |
 | `AXIS_EVENTS_URL` | sim em produção | Endpoint do Axis que recebe os eventos Logística → Axis. Vazio = nada é enviado (ficam `PENDING`) |
 | `AXIS_OUTBOUND_SECRET` | recomendado | HMAC dos eventos de saída (`X-Logistica-Signature`) |
+| `INTEGRATION_API_KEY` | sim para o Financeiro | Chave das leituras de custo (`X-Api-Key` em `/api/v1/integration/consumption-by-cost-center` e `/custody-value`); mesmo valor de `LOGISTICA_API_KEY` no Financeiro. Vazia = essas rotas respondem 503. Gere com `openssl rand -hex 32` |
 | `SCHEDULER_ENABLED` | — | `true` em **uma** instância (compose já define) |
 | `DEFAULT_WAREHOUSE_CODE` | não | Almoxarifado de atendimento quando a requisição do Axis não informa |
 | `ALERT_ORDER_ANALYSIS_HOURS` / `ALERT_ORDER_PICKING_HOURS` / `ALERT_TRANSIT_HOURS` | não (2 / 24 / 48) | SLAs dos alertas |

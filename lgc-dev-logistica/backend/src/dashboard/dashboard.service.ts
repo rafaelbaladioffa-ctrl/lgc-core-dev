@@ -15,6 +15,24 @@ const avgH = (pairs: Array<[Date | null | undefined, Date | null | undefined]>) 
   return v.length === 0 ? null : Math.round((v.reduce((s, x) => s + x, 0) / v.length) * 10) / 10;
 };
 
+const brl = (v: Prisma.Decimal) => Number(v.toString()).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+/**
+ * Soma o valor de consumo (já líquido de estornos) por uma chave — projeto ou centro de custo — e ordena
+ * do maior para o menor. `value` é decimal com 2 casas; `valueBRL` já vem formatado em pt-BR.
+ */
+export function sumValueBy<R extends { value: Prisma.Decimal.Value; movements: number }>(rows: R[], key: (r: R) => string | null) {
+  const acc = new Map<string | null, { value: Prisma.Decimal; movements: number }>();
+  for (const r of rows) {
+    const k = key(r);
+    const cur = acc.get(k) ?? { value: D(0), movements: 0 };
+    cur.value = cur.value.plus(D(r.value));
+    cur.movements += Number(r.movements);
+    acc.set(k, cur);
+  }
+  return [...acc.entries()].sort((a, b) => b[1].value.comparedTo(a[1].value)).map(([k, v]) => ({ key: k, value: v.value.toFixed(2), valueBRL: brl(v.value), movements: v.movements }));
+}
+
 export class KpiQuery {
   @IsOptional() @IsUUID('all', { message: 'Almoxarifado inválido.' }) warehouseId?: string;
   @IsOptional() @IsDateString({}, { message: 'Data inicial inválida.' }) from?: string;
@@ -84,8 +102,10 @@ export class DashboardService {
 
     // Consumo por projeto e centro de custo (agregado).
     const consumption = await this.prisma.stockMovement.groupBy({ by: ['projectAxisId', 'costCenterAxisId'], where: { type: 'SAIDA_ENTREGA', reversesMovementId: null, effectiveAt: { gte: from, lte: to }, ...(inWh && { fromLocation: { warehouseId: inWh } }) }, _sum: { quantity: true }, _count: { _all: true }, orderBy: { _sum: { quantity: 'desc' } }, take: 10 });
-    const whClause = whFilter && whFilter.length > 0 ? Prisma.sql`AND from_location_id IN (SELECT id FROM locations WHERE warehouse_id IN (${Prisma.join(whFilter)}))` : whFilter ? Prisma.sql`AND false` : Prisma.empty;
-    const consumptionValue = canCost ? await this.prisma.$queryRaw<Array<{ project: string | null; value: Prisma.Decimal }>>`SELECT project_axis_id AS project, SUM(quantity * COALESCE(unit_cost, 0)) AS value FROM stock_movements WHERE type = 'SAIDA_ENTREGA' AND reverses_movement_id IS NULL AND effective_at BETWEEN ${from} AND ${to} ${whClause} GROUP BY project_axis_id` : [];
+    // Valor em R$: o estorno de uma entrega também é SAIDA_ENTREGA (origem e destino trocados) e entra
+    // negativo no período em que foi lançado; por isso o almoxarifado é o da origem ou, no estorno, o do destino.
+    const whClause = whFilter && whFilter.length > 0 ? Prisma.sql`AND COALESCE(from_location_id, to_location_id) IN (SELECT id FROM locations WHERE warehouse_id IN (${Prisma.join(whFilter)}))` : whFilter ? Prisma.sql`AND false` : Prisma.empty;
+    const consumptionValue = canCost ? await this.prisma.$queryRaw<Array<{ project: string | null; cost_center: string | null; value: Prisma.Decimal; movements: number }>>`SELECT project_axis_id AS project, cost_center_axis_id AS cost_center, SUM(CASE WHEN reverses_movement_id IS NULL THEN 1 ELSE -1 END * quantity * COALESCE(unit_cost, 0)) AS value, COUNT(*)::int AS movements FROM stock_movements WHERE type = 'SAIDA_ENTREGA' AND effective_at BETWEEN ${from} AND ${to} ${whClause} GROUP BY project_axis_id, cost_center_axis_id` : [];
 
     // Recebimento: divergências por fornecedor. Perdas e ajustes por tipo.
     const receipts = await this.prisma.receipt.groupBy({ by: ['supplierAxisId', 'hasDivergence'], where: { createdAt: { gte: from, lte: to }, status: { not: 'AGENDADO' }, ...(inWh && { warehouseId: inWh }) }, _count: { _all: true } });
@@ -119,7 +139,7 @@ export class DashboardService {
       },
       stock: { policies: policies.length, stockouts, belowMin, avgCoverageDays: coverage.length ? Math.round((coverage.reduce((s, x) => s + x, 0) / coverage.length) * 10) / 10 : null },
       expiring,
-      consumption: { top: consumption.map((c) => ({ project: c.projectAxisId, costCenter: c.costCenterAxisId, quantity: c._sum.quantity?.toString(), movements: c._count._all })), ...(canCost && { valueByProject: consumptionValue.map((v) => ({ project: v.project, valueBRL: Number(v.value.toString()).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) })) }) },
+      consumption: { top: consumption.map((c) => ({ project: c.projectAxisId, costCenter: c.costCenterAxisId, quantity: c._sum.quantity?.toString(), movements: c._count._all })), ...(canCost && { valueByProject: sumValueBy(consumptionValue, (v) => v.project).map(({ key, ...v }) => ({ project: key, ...v })), valueByCostCenter: sumValueBy(consumptionValue, (v) => v.cost_center).map(({ key, ...v }) => ({ costCenter: key, ...v })) }) },
       receiving: { bySupplier: [...bySupplier.entries()].map(([supplier, v]) => ({ supplier, ...v, divergencePct: pct(v.divergentes, v.total) })), withoutOrderException: emergency },
       lossesAndAdjustments: losses.map((l) => ({ type: l.type, movements: l._count._all, quantity: l._sum.quantity?.toString() })),
       custody: { byStatus: Object.fromEntries(custody.map((c) => [c.status, c._count._all])), overdue },

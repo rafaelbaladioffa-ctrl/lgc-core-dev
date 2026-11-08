@@ -68,7 +68,7 @@ npm run test:e2e:setup && npm run test:e2e   # testes em banco SEPARADO (.env.te
 ## Sprint 8 — reposição, alertas e indicadores
 - `PUT /stock-policies` (mínimo, máximo, segurança, ponto de reposição por material e almoxarifado). `POST /replenishment/calculate` calcula por consumo (90 dias), lead time, segurança e demanda aprovada futura, deduz compras/transferências em aberto, arredonda ao múltiplo de compra e guarda a justificativa. `…/suggestions/:id/send` envia ao Axis (`replenishment.suggested`) — **nunca gera pedido financeiro**; `purchase_order.approved|changed` do Axis registra previsão, e o recebimento contra o pedido atende a sugestão.
 - `POST /alerts/scan` (idempotente; resolve sozinho o que deixou de valer): reposição/ruptura, lotes a vencer (90/60/30/7 e vencido), reserva expirando, requisição parada além do SLA, material bloqueado ainda reservado, trânsito atrasado, custódia vencida, inventário apurado, falha de integração e consumo anômalo. Críticos geram `alert.raised` para o papel responsável. `GET /alerts`, `POST /alerts/:id/acknowledge`. Config: `ALERT_ORDER_ANALYSIS_HOURS`, `ALERT_ORDER_PICKING_HOURS`, `ALERT_TRANSIT_HOURS`.
-- `GET /dashboard/kpis`: acuracidade, nível de serviço, ciclos, ruptura/cobertura, vencimentos, consumo por projeto/CC (R$ com `material:read_cost`), divergências por fornecedor, perdas/ajustes, custódia, trânsito, ocupação, saúde da integração e alertas — agregados, sem ranking individual.
+- `GET /dashboard/kpis`: acuracidade, nível de serviço, ciclos, ruptura/cobertura, vencimentos, consumo por projeto/CC (R$ por projeto e por centro de custo, líquido de estornos, com `material:read_cost`), divergências por fornecedor, perdas/ajustes, custódia, trânsito, ocupação, saúde da integração e alertas — agregados, sem ranking individual.
 - A baixa de entrega agora grava o custo histórico do Axis (`averageCost`) no movimento.
 
 ## Sprint 9 — PWA operacional (`frontend/`) e sincronização offline
@@ -79,6 +79,7 @@ npm run test:e2e:setup && npm run test:e2e   # testes em banco SEPARADO (.env.te
 ## Sprint 10 — hardening
 - **Cenários obrigatórios (seção 23):** `backend/test/sprint10-scenarios.e2e-spec.ts` (20 cenários ponta a ponta).
 - **Outbox → Axis:** `OutboxDispatcherService` (HMAC `X-Logistica-Signature`, `Idempotency-Key`, backoff 1 min/5 min/30 min/2 h, dead-letter); `GET /integration/outbox/status`, `POST /integration/outbox/dispatch`, `POST /integration/outbox/:id/retry`.
+- **Leituras para o Financeiro (chave `X-Api-Key` = `INTEGRATION_API_KEY`, fora do JWT):** `GET /integration/consumption-by-cost-center?month=AAAA-MM` e `GET /integration/custody-value`. Regras em [docs/especificacao.md §12.3.1](docs/especificacao.md).
 - **Agendador** (`SCHEDULER_ENABLED=true`, uma instância): outbox 30 s, alertas e reservas 5 min, reconciliação 1 h.
 - **Reconciliação (12.4):** `POST /reconciliation/run`, `GET /reconciliation/issues`, `POST /reconciliation/issues/:id/resolve` — detecta e abre item; nunca corrige em silêncio.
 - **Auditoria:** toda mutação, leitura sensível e negação de acesso; `GET /audit/events`; `X-Correlation-Id` em todas as respostas.

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { call } from '../lib/api';
-import { fmtDateTime } from '../lib/format';
-import { useLoad } from '../ui';
+import { fmtBRL, fmtDateTime } from '../lib/format';
+import { DataTable, useLoad, type Column } from '../ui';
 
 interface Kpis {
   period: { from: string; to: string };
@@ -15,7 +15,17 @@ interface Kpis {
   integration: { pendingOutbound: number; failedInbound: number; lastInboundAt: string | null };
   alerts: Record<string, number>;
   receiving: { withoutOrderException: number };
+  /** `valueBy*` só vem para quem tem `material:read_cost`; valores já líquidos de estornos. */
+  consumption: { valueByProject?: ValueRow<'project'>[]; valueByCostCenter?: ValueRow<'costCenter'>[] };
 }
+
+type ValueRow<K extends string> = Record<K, string | null> & { value: string; valueBRL: string; movements: number };
+
+const valueCols = (key: 'project' | 'costCenter', header: string, none: string): Column<Record<string, unknown> & { value: string; movements: number }>[] => [
+  { key, header, render: (r) => (r[key] as string | null) ?? <span className="hint">{none}</span> },
+  { key: 'movements', header: 'Movimentos', num: true, render: (r) => r.movements.toLocaleString('pt-BR') },
+  { key: 'value', header: 'Valor', num: true, render: (r) => fmtBRL(r.value) },
+];
 
 const CYCLE: Record<string, string> = { approvalToReservation: 'Aprovação → reserva', reservationToPicking: 'Reserva → separação', pickingToDispatch: 'Separação → expedição', dispatchToDelivery: 'Expedição → entrega' };
 const pct = (v: number | null) => (v === null ? '—' : `${v.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`);
@@ -63,6 +73,18 @@ export function Dashboard({ warehouseId }: { warehouseId?: string }) {
               <h3>Ciclo do atendimento (média)</h3>
               <dl className="kv">{Object.entries(CYCLE).map(([key, label]) => <div key={key}><dt>{label}</dt><dd>{hours(k.cycleHours[key])}</dd></div>)}</dl>
             </div>
+            {k.consumption.valueByProject && (
+              <div className="card">
+                <h3>Consumo em R$ por projeto</h3>
+                <DataTable cols={valueCols('project', 'Projeto', 'Sem projeto')} rows={k.consumption.valueByProject} state="ready" empty="Nenhuma entrega no período." rowKey={(r) => String(r.project ?? '-')} />
+              </div>
+            )}
+            {k.consumption.valueByCostCenter && (
+              <div className="card">
+                <h3>Consumo em R$ por centro de custo</h3>
+                <DataTable cols={valueCols('costCenter', 'Centro de custo', 'Sem centro de custo')} rows={k.consumption.valueByCostCenter} state="ready" empty="Nenhuma entrega no período." rowKey={(r) => String(r.costCenter ?? '-')} />
+              </div>
+            )}
             <div className="card">
               <h3>Alertas abertos</h3>
               {alerts.length === 0 ? <p className="hint">Nenhum alerta aberto.</p> : alerts.map(([sev, n]) => <span key={sev} className={`pill ${sev === 'CRITICO' ? 'bad' : sev === 'ATENCAO' ? 'warn' : ''}`}>{sev === 'CRITICO' ? 'Crítico' : sev === 'ATENCAO' ? 'Atenção' : 'Informativo'}: {n}</span>)}

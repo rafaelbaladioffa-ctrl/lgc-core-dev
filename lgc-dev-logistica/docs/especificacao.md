@@ -671,6 +671,29 @@ Alternativos: `DIVERGENTE`, `QUARENTENA`, `REJEITADO` e `DEVOLVIDO_FORNECEDOR`.
 | `asset.custody.changed` | atualizar custodiante |
 | `lot.blocked/released` | risco e indisponibilidade |
 
+### 12.3.1 Logística → Financeiro (leituras por chave)
+
+Contrato em [../../docs/integracao-centros-de-custo.md §5](../../docs/integracao-centros-de-custo.md). Implementado em
+`src/integration/finance-integration.controller.ts` e `src/integration/cost-report.ts`.
+
+- **Autenticação:** fora do JWT de usuário (`@Public()`), só com o cabeçalho `X-Api-Key`, comparado em tempo
+  constante com `INTEGRATION_API_KEY` (`IntegrationApiKeyGuard`). Variável vazia → **503** (integração desligada);
+  chave ausente ou errada → **401** (registrada no log como aviso). O Financeiro usa o mesmo valor em `LOGISTICA_API_KEY`.
+- **`GET /api/v1/integration/consumption-by-cost-center?month=AAAA-MM`** → `[{ cost_center_id, project_id, value, movements }]`.
+  - Competência: mês no fuso `America/Sao_Paulo` (UTC−03:00, sem horário de verão), pelo `effective_at` do
+    movimento. `month` fora do formato → 400.
+  - Valor: Σ `quantity × unit_cost` das saídas `SAIDA_ENTREGA`, com o custo histórico gravado no movimento
+    (custo ausente vale zero).
+  - Estornos: o estorno de uma entrega também é `SAIDA_ENTREGA` (com `reverses_movement_id` e a data do estorno)
+    e entra **negativo na competência em que foi lançado**, como no razão contábil. Um mês já importado não muda
+    depois; o mês do estorno pode ficar negativo.
+  - `cost_center_id` e `project_id` podem ser nulos (entrega sem CC ou sem projeto); a linha sem CC vem por último.
+  - `movements` conta os lançamentos considerados (saídas e estornos). `value` é string decimal com 2 casas.
+- **`GET /api/v1/integration/custody-value`** → `[{ custodian_id, items, value }]`: termos de custódia `ATIVO`
+  por colaborador custodiante (id do Axis). `items` = termos ativos com saldo; `value` = Σ (quantidade − devolvida)
+  × custo médio do material (na falta, o último custo; sem custo, zero). Termos devolvidos ou perdidos não entram.
+- As duas rotas só leem; não passam pela auditoria de acesso (não há usuário) e não emitem eventos.
+
 ### 12.4 Consistência e falhas
 
 - sistemas não compartilham tabelas de banco;
@@ -878,6 +901,7 @@ Calendários, prioridades e contratos devem ser configuráveis. Espera por aprov
 - cobertura e giro de estoque;
 - excesso, obsolescência e vencimento próximo;
 - consumo por projeto, centro de custo, cliente, unidade e colaborador;
+  (no painel: valor em R$ por projeto e por centro de custo, líquido de estornos, só com `material:read_cost`);
 - compras emergenciais e causas;
 - divergências de recebimento por fornecedor;
 - produtividade e erros por processo, sem uso isolado para punição individual;
