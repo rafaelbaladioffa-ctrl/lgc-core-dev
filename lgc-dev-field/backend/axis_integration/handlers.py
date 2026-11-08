@@ -1,7 +1,8 @@
 """Aplicação dos eventos do Core ao Field.
 
-Neste pacote (PT-03) os eventos só atualizam o cache (`AxisMasterRecord`) e os vínculos `axis_*_id`;
-`project.*` não cria obra (isso é o PT-08) e nenhum dado de negócio do Field é sobrescrito.
+Os eventos de cadastro (PT-03) só atualizam o cache (`AxisMasterRecord`) e os vínculos `axis_*_id`; nenhum
+dado de negócio do Field é sobrescrito. A exceção é `project.approved` (PT-08): além do cache, cria (ou
+reaproveita) a obra do Field, ver `obra.py`.
 """
 
 import uuid
@@ -11,6 +12,7 @@ from .models import AxisMasterRecord
 
 INACTIVE_PROJECT_STATUS = {"cancelado", "encerrado", "arquivado"}
 
+APPROVED_EVENT = "project.approved"
 NOT_APPLIED = "out_of_order"
 APPLIED = "applied"
 
@@ -26,6 +28,7 @@ EVENTS = {
     "project.updated": (AxisMasterRecord.KIND_PROJECT, "project_id"),
     "project.status_changed": (AxisMasterRecord.KIND_PROJECT, "project_id"),
     "project.deleted": (AxisMasterRecord.KIND_PROJECT, "project_id"),
+    "project.approved": (AxisMasterRecord.KIND_PROJECT, "project_id"),
     "cost_center.created": (AxisMasterRecord.KIND_COST_CENTER, "cost_center_id"),
     "cost_center.updated": (AxisMasterRecord.KIND_COST_CENTER, "cost_center_id"),
     "site.created": (AxisMasterRecord.KIND_SITE, "site_id"),
@@ -81,6 +84,11 @@ def apply_event(event_type: str, payload: dict, occurred_at, extra: dict | None 
     record, _created = AxisMasterRecord.objects.select_for_update().get_or_create(
         kind=kind, axis_id=axis_id, defaults={"source_occurred_at": None}
     )
+    if event_type == APPROVED_EVENT:
+        # A aprovação é uma ação, não estado: cria a obra mesmo que o cache já tenha um evento mais novo.
+        from . import obra
+
+        obra.apply_project_approved(payload, occurred_at)
     if record.source_occurred_at and record.source_occurred_at > occurred_at:
         return NOT_APPLIED  # entrega fora de ordem: o cache já tem um estado mais novo
 

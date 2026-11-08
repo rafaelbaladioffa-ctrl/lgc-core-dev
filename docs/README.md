@@ -45,7 +45,7 @@ O que descreve código removido ou entregas passadas está em [arquivo/](arquivo
 ## Field
 
 - [../lgc-dev-field/README.md](../lgc-dev-field/README.md) — satélite de projetos e campo (antigo ERP CSTR, Django), como rodar.
-- [integracao-core-field.md](integracao-core-field.md) — decisões FD-01–FD-04 e plano de integração (nada implementado ainda).
+- [integracao-core-field.md](integracao-core-field.md) — decisões FD-01–FD-04 e plano de integração (F2/F3 e, com o PT-08, a obra a partir do projeto aprovado e os eventos ao Core estão implementados; falta o login pelo Core).
 
 ## Convenções desta pasta
 

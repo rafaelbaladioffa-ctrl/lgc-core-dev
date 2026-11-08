@@ -3,8 +3,9 @@
 Plano de integração entre o Axis Core e o satélite **Axis Field** (`lgc-dev-field/`, antigo ERP
 CSTR), escrito em 2026-11-08 quando o código entrou no repositório. **Estado:** os cadastros do Core chegam
 ao Field (webhook, carga inicial e casamento: F2/F3, PT-03 do
-plano `docs/plano-projeto-aprovado-ponta-a-ponta.md`, que ainda não está versionado); login pelo Core (F1), obra a
-partir do Core (F4) e retorno ao Core (F5) seguem pendentes.
+plano `docs/plano-projeto-aprovado-ponta-a-ponta.md`); a obra nasce de `project.approved` com a SOW processada sozinha
+(F4, PT-08, §4) e o Field avisa o Core de criação, início, avanço e conclusão (F5, PT-08, §5); o login pelo Core (F1)
+segue pendente.
 
 Decisões do dono do produto em 2026-11-08:
 
@@ -23,8 +24,8 @@ Decisões do dono do produto em 2026-11-08:
 | Login no Core pelo navegador (CORS) e access token do Core na API do Field | Core → Field | **A fazer** (F1) |
 | Webhook de dados mestres (`collaborator.*`, `client.*`, `project.*`, `cost_center.*`, `site.*`) | Core → Field | **Feito** (F2, §3). `project.*` só guarda cache e vínculo; não cria obra |
 | Carga inicial e casamento dos cadastros já existentes no Field | Core → Field | **Feito** (F3, `manage.py axis_sync`, §3) |
-| Projeto ganho no Core vira obra no Field | Core → Field | **A decidir** (F4, §4) |
-| Avanço, HH e status da obra | Field → Core | **A fazer**; depende do receptor `POST /integration/inbound` no Core, que ainda não existe (F5) |
+| Projeto aprovado no Core vira obra no Field (`project.approved`), com a SOW baixada do Core e o plano de tarefas | Core → Field | **Feito** (F4, PT-08, §4); o Core passa a emitir `project.approved` com o PT-06 |
+| Criação, início, avanço e conclusão da obra (`field.project.*`) | Field → Core | **Feito no Field** (F5, PT-08, §5), pelo outbox do Field e `POST /integration/inbound` (receptor do PT-02); o Core passa a tratar os eventos com o PT-09 |
 
 ## 1. Sobreposição de cadastros
 
@@ -90,7 +91,8 @@ cadastros.
 | `collaborator.created/updated/offboarded` | Cache + casamento. `offboarded` marca o cache inativo, **mas não desativa o colaborador do Field** (decisão pendente, §7). |
 | `collaborator.cost_center_changed` | `Collaborator.axis_cost_center_id` (ou o cache, se o colaborador ainda não casou; é aplicado quando casar). |
 | `client.created/updated` | Cache + casamento por CNPJ, senão nome normalizado. |
-| `project.created/updated/status_changed/deleted` | **Só cache e vínculo**: se uma obra já tiver `axis_project_id` igual, recebe `axis_cost_center_id`. **Não cria obra** (isso é o PT-08). Não há casamento automático de projeto: `PROP-…` e `CSTR-PROJ-…` não têm chave comum. |
+| `project.created/updated/status_changed/deleted` | **Só cache e vínculo**: se uma obra já tiver `axis_project_id` igual, recebe `axis_cost_center_id`. **Não cria obra.** Não há casamento automático de projeto: `PROP-…` e `CSTR-PROJ-…` não têm chave comum. |
+| `project.approved` | Cache **e cria (ou reaproveita) a obra** (§4). |
 | `cost_center.created/updated` | Cache (`code`, `short_code`, `name`, `active`…). |
 | `site.created/updated` | Cache + casamento por cliente já vinculado + código. Site cujo cliente ainda não casou fica sem vínculo e casa sozinho quando o cliente casar. |
 
@@ -110,7 +112,7 @@ no Core (contrato, não alterado aqui):** incluir `cnpj`/`name` em `client.*` e 
 | Colaborador | e-mail corporativo × e-mail da `Person`; senão matrícula | O Core ainda não expõe a matrícula na API de consulta. |
 | Site | cliente vinculado + código (sem diferenciar maiúsculas) | Sites do mesmo código em outro cliente não casam. |
 | Usuário | e-mail | Só pelo `axis_sync` (o Core não emite `user.*` e a consulta de lista de usuários não existe ainda). |
-| Projeto | `axis_project_id` já gravado | Quem grava é o PT-08. |
+| Projeto | `axis_project_id` já gravado | Quem grava é o `project.approved` (§4). |
 
 Sem par único: o registro **fica sem vínculo e aparece no relatório**; nada é criado nem apagado.
 
@@ -132,25 +134,128 @@ mais novo que a consulta prevalece sobre ela.
 ### Variáveis (`lgc-dev-field/.env.example`)
 
 `AXIS_WEBHOOK_SECRET`, `AXIS_WEBHOOK_MAX_AGE_HOURS`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`,
-`AXIS_API_TIMEOUT`. No Core, o satélite precisa assinar os eventos da tabela acima e apontar o webhook para
+`AXIS_API_TIMEOUT`; PT-08: `AXIS_OUTBOUND_SECRET`, `AXIS_OUTBOUND_TIMEOUT`, `AXIS_OUTBOUND_MAX_ATTEMPTS`,
+`AXIS_OUTBOUND_IMMEDIATE`, `AXIS_BACKGROUND_TASKS`, `AXIS_SOW_DOWNLOAD_TIMEOUT`, `AXIS_SOW_MAX_MB`. No Core, o satélite Field
+precisa ter o segredo HMAC igual a `AXIS_OUTBOUND_SECRET` e assinar `project.approved` (apontando o webhook para o Field). No Core, o satélite precisa assinar os eventos da tabela acima e apontar o webhook para
 `<url do Field>/api/v1/webhooks/axis`; depois, o botão **Integrações → Reenviar cadastros** reenvia
 colaboradores e centros de custo (clientes e sites entram pelo `axis_sync`).
 
-## 4. Projeto do Core × obra do Field
+## 4. F4 — Projeto aprovado vira obra (PT-08)
 
-No Core, `Project` nasce como proposta comercial (`PROP-{cliente}.{seq}-{MMAA}`, cotação com o
-Financeiro). No Field, `Project` é a obra em execução (tarefas, despacho, HH). Proposta: quando o
-projeto do Core passa para execução (`project.status_changed`), o Field cria ou vincula a obra com
-`axis_project_id`; o código `CSTR-PROJ-…` continua como código da obra. **Pendente de decisão:** em
-que status do Core a obra nasce, se uma proposta pode gerar várias obras (uma por site) e quem
-cadastra a obra se não houver proposta no Core.
+**Implementado** (`axis_integration/obra.py` e `sow_plan.py`; decisões PA-06 e PA-17 do plano). Gatilho:
+`project.approved`, que o Core emite quando o comercial muda o projeto de `proposta` para `aprovado` (PA-01). **Um
+projeto do Core = um site = uma obra** (PA-06): proposta com vários sites vira vários projetos no Core.
 
-## 5. F5 — Field → Core
+### 4.1 Criar ou vincular a obra
 
-O Core não tem receptor de eventos de satélite (mesmo bloqueio da Logística e do Financeiro). Quando
-existir, candidatos: `field.project.progress` (% de avanço, HH real × orçado) e
-`field.project.completed`. O Financeiro (módulo Projetos, resultado por projeto) é o principal
-interessado no HH real.
+Roda na transação do webhook (o evento só é dado como processado se a obra foi gravada). Se já existe obra com o
+`axis_project_id`, ela é reaproveitada (só atualiza o cache do centro de custo): evento repetido ou reaprovação não
+duplica, e há restrição de unicidade no banco contra corrida.
+
+| Campo da obra (`projects.Project`) | Origem no evento |
+|---|---|
+| `axis_project_id` | `project_id` |
+| `name` | `name` |
+| `status` | sempre `planning` (PA-17) |
+| `client` | cliente do Field com `axis_client_id` = `client_id` |
+| `site` | site do Field com `axis_site_id` = `site.site_id` (se for de outro cliente, não é usado) |
+| `responsible_cstr` | `Responsible` (tipo CSTR) da pessoa do colaborador com `axis_collaborator_id` = `responsible_collaborator_id` |
+| `planned_start`, `planned_end` | `accepted_quote.planned_start_date/end_date` (senão, as datas do projeto) |
+| `po` | `client_po_number` |
+| `planned_team` (JSON, campo novo) | `accepted_quote.team[]` como veio: `{role_key, role_name, field_role, people, days, hours}` |
+| `axis_cost_center_id` | `cost_center_id` |
+| `axis_sow_document_id` | `accepted_quote.sow_document_id` |
+| `company` | a do cliente; senão a da pessoa responsável; senão a primeira empresa ativa |
+
+O código da obra continua sendo o do Field (`CSTR-PROJ-…`); o código do Core (`PROP-…`) vai na descrição.
+
+**Sem par, a obra é criada mesmo assim** (o evento nunca se perde): cliente, site ou responsável que o Field não
+casa viram **pendências** em `Project.axis_pending_issues` (lista de textos), mostradas na tela do projeto, na API
+(`GET /api/projects/:id/`, somente leitura) e no admin, e cada administrador (superusuário ativo) recebe a
+notificação in-app "Obra criada com pendências". Depois de casar os cadastros (`axis_sync`), ajuste cliente, site e
+responsável no cadastro do projeto; o texto da pendência fica como histórico.
+
+### 4.2 Plano automático da SOW (PA-17)
+
+Roda **depois do commit** do webhook, em thread (`AXIS_BACKGROUND_TASKS`), sem travar a resposta ao Core. É
+idempotente: a obra passa de `sow_plan_status = pending` para `processing` por `UPDATE` condicional, então duas
+execuções não processam a mesma obra. Se a thread não rodar (processo reiniciado), `manage.py axis_sow_plan` retoma o
+que ficou `pending` ou `processing` há mais de 15 min.
+
+1. **Baixa o PDF** com `GET {AXIS_API_URL}/integration/projects/:id/documents/:documentId/content` e a API key do
+   satélite (limites `AXIS_SOW_MAX_MB` e `AXIS_SOW_DOWNLOAD_TIMEOUT`); extrai o texto com `pypdf`.
+2. Cria o **`SowImport` ligado à obra** (`Project.sow_import`) e roda o parser **determinístico**. A IA fica
+   desligada no modo automático (`process_sow_import(..., use_ai=False)`), mesmo que `AI_API_KEY` esteja configurada.
+3. **Todos os itens sem aviso** (`warnings` vazio, sem `requires_review`, cabo com família e quantidade): aprova os
+   itens, finaliza a importação, resolve os templates, gera as tarefas e as envia ao projeto, sozinho →
+   `sow_plan_status = generated`.
+4. **Qualquer item com aviso, ou item de escopo sem template**: para na etapa pendente do Fluxo Guiado (a nota diz
+   qual: Revisar Itens, Resolver Templates ou Gerar Tarefas, e qual importação) → `pending_review`, e o **responsável
+   da obra** (ou, sem responsável com usuário, os administradores) recebe a notificação in-app "Plano da SOW pendente
+   de revisão". Quem revisa continua em Cadastros Mestres > Fluxo Guiado (SOW), com a importação já criada.
+5. **Falha** de download, leitura do PDF (escaneado, corrompido), parse ou erro inesperado → `failed`, com o motivo
+   em `sow_plan_note` e notificação ("Plano da SOW falhou"). A obra continua criada.
+
+`sow_plan_status` na obra: `pending`, `processing`, `generated`, `pending_review`, `failed`, `no_sow` (o Axis não
+informou `sow_document_id`). Só os quatro últimos vão ao Core. Decisão de implementação: "sem aviso" é estrito
+(também `MISSING_LENGTH` e os demais avisos não críticos mandam a SOW para revisão); afrouxar é mudar `_item_is_clean`
+em `sow_plan.py`.
+
+## 5. F5 — Field → Core (PT-08)
+
+**Implementado no Field.** O Core recebe em `POST /api/v1/integration/inbound` (PT-02) e passa a tratar os eventos
+com o PT-09 (até lá ficam guardados como `ignored`).
+
+### 5.1 Outbox e entrega
+
+Os eventos entram em `axis_integration_axisoutboxevent` **na mesma transação** da escrita de negócio (regra 6 do
+AGENTS.md). O despacho tenta **logo depois do commit** (thread, `AXIS_OUTBOUND_IMMEDIATE`) e
+`manage.py axis_outbox_dispatch` reenvia os pendentes com **backoff exponencial** (30 s, 1 min, 2 min… até 1 h);
+após `AXIS_OUTBOUND_MAX_ATTEMPTS` (12) falhas o evento vira `dead` (visível no admin; `--retry-dead` reabre).
+
+- **Envelope:** `{event_id, event_type, occurred_at, source: "field", payload}`.
+- **Cabeçalhos:** `Idempotency-Key` (= `event_id`), `X-Field-Signature: sha256=<hex>` (HMAC-SHA256 do corpo bruto
+  enviado, com `AXIS_OUTBOUND_SECRET`, o segredo HMAC do satélite Field cadastrado no Core) e
+  `Authorization: Bearer <AXIS_API_KEY>`. Com a API key o guard do Core (`SatelliteInboundGuard`) identifica o
+  satélite e confere a assinatura contra o segredo **dele**; sem ela, o guard testaria todos os segredos ativos.
+- Reenviar o mesmo evento é seguro: o Core deduplica por `(satélite, event_id)`. Sem `AXIS_OUTBOUND_SECRET` ou
+  `AXIS_API_URL`, os eventos ficam na fila sem gastar tentativas.
+
+### 5.2 Eventos (contrato fixo; o PT-09 consome)
+
+Todos levam `axis_project_id` (UUID do projeto no Core) e `field_project_id` (id da obra no Field, inteiro).
+
+| Evento | Quando | Campos além dos dois ids |
+|---|---|---|
+| `field.project.created` | Obra criada e plano da SOW concluído (ou `no_sow`). Sai **depois** do plano, para já levar a situação final | `field_project_code` (`CSTR-PROJ-…`), `url` (`{FRONTEND_URL}/projetos/:id`; relativa se `FRONTEND_URL` vazia), `status` (`planning`), `sow_plan_status` (`generated`, `pending_review`, `failed` ou `no_sow`), `tasks_count`, `created_at` |
+| `field.project.started` | Primeira tarefa iniciada (uma vez por obra) | `started_at` (início real da tarefa) |
+| `field.project.progress` | Diário (`manage.py axis_progress_snapshot`) e quando a SOW gera as tarefas | `date` (`AAAA-MM-DD`, São Paulo), `percent_complete` (0–100), `tasks_total`, `tasks_done`, `real_man_hours`, `planned_man_hours` |
+| `field.project.completed` | Todas as tarefas não canceladas concluídas (uma vez por obra) | `completed_at` |
+
+- `tasks_total`, `tasks_done` e `percent_complete` **ignoram tarefas canceladas** (mesma conta do Painel de Sites).
+- `real_man_hours`: **regra 1 do CLAUDE.md §8**, soma das horas reais de cada técnico (`ProjectTask.real_man_hours`,
+  descontadas as pausas), nunca duração × técnicos; horas de tarefa cancelada contam porque foram trabalhadas.
+- `planned_man_hours`: soma de `hours` das funções de campo de `planned_team` (`field_role` falso fica de fora;
+  ausente conta como campo).
+- `started` e `completed` são marcados em `Project.axis_started_at/axis_completed_at` por
+  `UPDATE ... WHERE <marca> IS NULL` na mesma transação do evento: repetir não duplica. Os sinais cobrem o `save()`
+  da tarefa; `.update()` em massa não dispara sinal, e o comando diário refaz a checagem.
+- O comando diário gera um `progress` por obra e dia; rodar de novo no mesmo dia só gera outro se algum número mudou.
+  Ignora obra cancelada, concluída e sem tarefas.
+
+### 5.3 Agendar (VPS)
+
+```bash
+docker compose exec -T field-backend python manage.py axis_outbox_dispatch   # a cada minuto
+```
+
+```bash
+docker compose exec -T field-backend python manage.py axis_sow_plan          # a cada 10 min (retoma SOW pendente)
+```
+
+```bash
+docker compose exec -T field-backend python manage.py axis_progress_snapshot # 1x por dia, no fim do expediente
+```
 
 ## 6. Migração da produção
 
@@ -166,7 +271,7 @@ faça deploy deste diretório na produção antiga.**
    `responsible_cstr` continuam com o nome Consultimer. Trocar exige migração e afeta o que o cliente
    recebe.
 2. **Multiempresa:** o Field tem `Company`; o Core é unidade única (A3).
-3. **Status de nascimento da obra** e relação proposta → obras (§4).
+3. ~~Status de nascimento da obra e relação proposta → obras~~ — decididos pelo plano do projeto aprovado: `planning` (PA-17) e um projeto = um site = uma obra (PA-06). Falta decidir quem cadastra a obra quando **não** há proposta no Core (hoje continua a criação manual no Field, sem `axis_project_id`).
 4. **Identidade visual completa:** adotar `axis-tokens.css`/`axis-shell.css` no frontend do Field
    (hoje só nome, logotipo e ícones são do Axis).
 5. **Efeito dos eventos sobre dados do Field:** hoje o webhook não altera dado de negócio (nem desativa colaborador desligado, nem copia nome/CNPJ do cliente, nem a hierarquia `manager`). Decidir, ao revisar a FD-02, quais campos o Core passa a mandar de fato.

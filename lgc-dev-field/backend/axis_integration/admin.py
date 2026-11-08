@@ -1,7 +1,7 @@
 from django.contrib import admin
 from unfold.admin import ModelAdmin
 
-from .models import AxisInboxEvent, AxisMasterRecord
+from .models import AxisInboxEvent, AxisMasterRecord, AxisOutboxEvent
 
 
 class ReadOnlyAdmin(ModelAdmin):
@@ -29,3 +29,10 @@ class AxisMasterRecordAdmin(ReadOnlyAdmin):
     list_display = ("kind", "code", "name", "active", "axis_id", "synced_at")
     list_filter = ("kind", "active")
     search_fields = ("axis_id", "code", "name")
+
+
+@admin.register(AxisOutboxEvent)
+class AxisOutboxEventAdmin(ReadOnlyAdmin):
+    list_display = ("event_type", "status", "attempts", "created_at", "sent_at", "last_error")
+    list_filter = ("status", "event_type")
+    search_fields = ("event_id", "event_type")

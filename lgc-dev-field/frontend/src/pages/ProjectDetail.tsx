@@ -34,6 +34,9 @@ const SEVERITY_TONE: Record<string, { bg: string; color: string }> = {
 const TEXT = {
   "pt-BR": {
     loading: "Carregando...",
+    axisPendingTitle: "Pendências da integração com o Axis",
+    axisSowTitle: "Plano da SOW",
+    axisSowStatus: { pending: "Aguardando processamento", processing: "Processando", generated: "Tarefas geradas", pending_review: "Pendente de revisão", failed: "Falhou", no_sow: "Sem SOW" } as Record<string, string>,
     notFound: "Projeto não encontrado.",
     backToProjects: "Voltar para Projetos",
     projectOptions: "Opções do Projeto",
@@ -166,6 +169,9 @@ const TEXT = {
   },
   "en-US": {
     loading: "Loading...",
+    axisPendingTitle: "Axis integration issues",
+    axisSowTitle: "SOW plan",
+    axisSowStatus: { pending: "Waiting to be processed", processing: "Processing", generated: "Tasks generated", pending_review: "Pending review", failed: "Failed", no_sow: "No SOW" } as Record<string, string>,
     notFound: "Project not found.",
     backToProjects: "Back to Projects",
     projectOptions: "Project Options",
@@ -298,6 +304,9 @@ const TEXT = {
   },
   "es-ES": {
     loading: "Cargando...",
+    axisPendingTitle: "Pendientes de la integración con Axis",
+    axisSowTitle: "Plan de la SOW",
+    axisSowStatus: { pending: "Esperando procesamiento", processing: "Procesando", generated: "Tareas generadas", pending_review: "Pendiente de revisión", failed: "Falló", no_sow: "Sin SOW" } as Record<string, string>,
     notFound: "Proyecto no encontrado.",
     backToProjects: "Volver a Proyectos",
     projectOptions: "Opciones del Proyecto",
@@ -831,6 +840,28 @@ export default function ProjectDetail() {
 
   return (
     <div>
+      {/* ── integração com o Axis: pendências e situação do plano da SOW ── */}
+      {((project.axis_pending_issues?.length ?? 0) > 0 || (project.sow_plan_status && project.sow_plan_status !== "generated")) && (
+        <div className="card" style={{ marginBottom: 16, padding: "12px 16px", borderLeft: "3px solid var(--amber)" }}>
+          {(project.axis_pending_issues?.length ?? 0) > 0 && (
+            <div style={{ marginBottom: project.sow_plan_status ? 10 : 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--amber)", marginBottom: 4 }}>{p.axisPendingTitle}</div>
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: "var(--text)" }}>
+                {project.axis_pending_issues!.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {project.sow_plan_status && project.sow_plan_status !== "generated" && (
+            <div style={{ fontSize: 12, color: "var(--text)" }}>
+              <strong>{p.axisSowTitle}:</strong> {p.axisSowStatus[project.sow_plan_status] ?? project.sow_plan_status}
+              {project.sow_plan_note ? ` — ${project.sow_plan_note}` : ""}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── cabeçalho do projeto — estilo D ── */}
       <div className="card" style={{ padding: 0, marginBottom: 16, overflow: "visible" }}>
         {/* faixa laranja no topo */}

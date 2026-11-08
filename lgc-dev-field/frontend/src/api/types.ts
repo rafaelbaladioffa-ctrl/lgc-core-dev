@@ -52,6 +52,12 @@ export interface Project {
   worked_hours: number;
   historical_hours: number;
   progress_percent: number;
+  /** Integração com o Axis (PT-08): só leitura, vazio em obra que não veio do Axis. */
+  axis_project_id?: string | null;
+  axis_pending_issues?: string[];
+  planned_team?: { role_name?: string; field_role?: boolean; people?: number; days?: number; hours?: number }[];
+  sow_plan_status?: "" | "pending" | "processing" | "generated" | "pending_review" | "failed" | "no_sow";
+  sow_plan_note?: string;
 }
 
 export interface RackPosition {

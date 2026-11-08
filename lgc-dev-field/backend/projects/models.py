@@ -112,6 +112,50 @@ class Project(TimestampedModel):
     axis_cost_center_id = models.UUIDField(
         "centro de custo no Axis", null=True, blank=True, editable=False, help_text="Centro de custo do projeto no Axis Core (cache)."
     )
+    # --- Obra criada a partir do Core (PT-08; docs/integracao-core-field.md §4) -----------------
+    planned_team = models.JSONField(
+        "equipe prevista",
+        default=list,
+        blank=True,
+        help_text="Equipe da cotação aceita no Axis: lista de {role_key, role_name, field_role, people, days, hours}.",
+    )
+    axis_pending_issues = models.JSONField(
+        "pendências da integração",
+        default=list,
+        blank=True,
+        editable=False,
+        help_text="O que o Axis mandou e não casou com cadastros do Field (cliente, site, responsável). Lista de textos.",
+    )
+    SOW_PLAN_PENDING = "pending"
+    SOW_PLAN_PROCESSING = "processing"
+    SOW_PLAN_GENERATED = "generated"
+    SOW_PLAN_PENDING_REVIEW = "pending_review"
+    SOW_PLAN_FAILED = "failed"
+    SOW_PLAN_NO_SOW = "no_sow"
+    SOW_PLAN_CHOICES = (
+        (SOW_PLAN_PENDING, "Aguardando processamento"),
+        (SOW_PLAN_PROCESSING, "Processando"),
+        (SOW_PLAN_GENERATED, "Tarefas geradas"),
+        (SOW_PLAN_PENDING_REVIEW, "Pendente de revisão"),
+        (SOW_PLAN_FAILED, "Falhou"),
+        (SOW_PLAN_NO_SOW, "Sem SOW"),
+    )
+    sow_plan_status = models.CharField(
+        "plano da SOW", max_length=20, choices=SOW_PLAN_CHOICES, blank=True, default="", editable=False,
+        help_text="Situação da geração automática de tarefas a partir da SOW do Axis (vazio: obra que não veio do Axis).",
+    )
+    sow_plan_note = models.TextField("detalhe do plano da SOW", blank=True, editable=False)
+    sow_import = models.ForeignKey(
+        "master_data.SowImport", verbose_name="importação de SOW", on_delete=models.SET_NULL,
+        null=True, blank=True, editable=False, related_name="axis_projects",
+    )
+    axis_sow_document_id = models.UUIDField("documento da SOW no Axis", null=True, blank=True, editable=False)
+    axis_started_at = models.DateTimeField(
+        "primeira tarefa iniciada (evento enviado ao Axis)", null=True, blank=True, editable=False
+    )
+    axis_completed_at = models.DateTimeField(
+        "obra concluída (evento enviado ao Axis)", null=True, blank=True, editable=False
+    )
     is_active = models.BooleanField("ativo", default=True)
 
     class Meta:

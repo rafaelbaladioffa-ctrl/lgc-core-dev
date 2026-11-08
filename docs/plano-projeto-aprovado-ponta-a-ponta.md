@@ -169,6 +169,15 @@ guardado como ignorado. Primeiros handlers:
 | `field.project.progress` | Field | % de avanço e HH real × orçado no projeto |
 | `field.project.completed` | Field | alerta o responsável do projeto |
 
+**Formato real dos eventos do Field (PT-08, implementado):** envelope `{event_id, event_type, occurred_at, source: "field", payload}`,
+cabeçalhos `Idempotency-Key` (= `event_id`), `X-Field-Signature: sha256=<hmac do corpo>` e, **além do previsto**,
+`Authorization: Bearer <API key>` (o guard do Core então confere a assinatura contra o segredo daquele satélite).
+Payloads, todos com `axis_project_id` e `field_project_id`: `field.project.created` (`field_project_code`, `url`, `status`,
+`sow_plan_status` = `generated` | `pending_review` | `failed` | `no_sow`, `tasks_count`, `created_at`),
+`field.project.started` (`started_at`), `field.project.progress` (`date`, `percent_complete`, `tasks_total`, `tasks_done`,
+`real_man_hours`, `planned_man_hours`) e `field.project.completed` (`completed_at`). O `created` sai depois do plano da SOW
+(para já trazer a situação final). Detalhes: [integracao-core-field.md §5](integracao-core-field.md#5-f5--field--core-pt-08).
+
 ### 4.5 Horas reais do Field (Financeiro ← Field)
 
 Mesmo padrão do consumo da Logística (API por `X-Api-Key`):

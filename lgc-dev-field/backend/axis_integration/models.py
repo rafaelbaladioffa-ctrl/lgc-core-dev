@@ -1,4 +1,7 @@
+import uuid
+
 from django.db import models
+from django.utils import timezone
 
 
 class AxisInboxEvent(models.Model):
@@ -78,3 +81,49 @@ class AxisMasterRecord(models.Model):
 
     def __str__(self):
         return f"{self.kind} {self.code or self.axis_id} {self.name}".strip()
+
+
+class AxisOutboxEvent(models.Model):
+    """Evento do Field para o Core (`field.project.*`), gravado na MESMA transação da escrita de negócio.
+
+    O despacho (`outbox.py`) é separado: tentativa imediata depois do commit e, para o que falhar,
+    `manage.py axis_outbox_dispatch` com backoff. `event_id` é o `Idempotency-Key`: reenviar o mesmo
+    evento nunca duplica no Core (`integration_inbox` único por satélite + event_id)."""
+
+    STATUS_PENDING = "pending"
+    STATUS_SENT = "sent"
+    STATUS_DEAD = "dead"
+    STATUS_CHOICES = (
+        (STATUS_PENDING, "Pendente"),
+        (STATUS_SENT, "Enviado"),
+        (STATUS_DEAD, "Esgotou as tentativas"),
+    )
+
+    event_id = models.UUIDField("id do evento", unique=True, default=uuid.uuid4, editable=False)
+    event_type = models.CharField("tipo", max_length=100)
+    payload = models.JSONField("conteúdo", default=dict)
+    occurred_at = models.DateTimeField("ocorrido em", default=timezone.now)
+    status = models.CharField("situação", max_length=10, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    attempts = models.PositiveIntegerField("tentativas", default=0)
+    next_attempt_at = models.DateTimeField("próxima tentativa", default=timezone.now)
+    last_error = models.CharField("último erro", max_length=500, blank=True)
+    sent_at = models.DateTimeField("enviado em", null=True, blank=True)
+    created_at = models.DateTimeField("criado em", auto_now_add=True)
+
+    class Meta:
+        verbose_name = "evento para o Axis"
+        verbose_name_plural = "eventos para o Axis"
+        ordering = ("created_at", "id")
+        indexes = [models.Index(fields=("status", "next_attempt_at"), name="axis_outbox_due_idx")]
+
+    def __str__(self):
+        return f"{self.event_type} {self.event_id}"
+
+    def envelope(self) -> dict:
+        return {
+            "event_id": str(self.event_id),
+            "event_type": self.event_type,
+            "occurred_at": self.occurred_at.isoformat(),
+            "source": "field",
+            "payload": self.payload,
+        }
