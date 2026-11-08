@@ -4,7 +4,25 @@ import { useAuth } from '../context/AuthContext';
 import { Button } from './Button';
 import { translateApiError } from '../utils/apiError';
 import { formatDateTime } from '../utils/formatDate';
-import { DOCUMENT_ACCEPT, readFileAsBase64 } from '../utils/fileUpload';
+import { DOCUMENT_ACCEPT, SPREADSHEET_ACCEPT, readFileAsBase64 } from '../utils/fileUpload';
+
+/** Textos e tipos aceitos por documento (o servidor confere de novo). */
+const KIND_UI: Record<ProjectDocumentKind, { accept: string; hint: string; empty: string; attach: string; newVersion: string }> = {
+  sow: {
+    accept: DOCUMENT_ACCEPT,
+    hint: 'PDF, DOCX, XLSX, PNG ou JPG, até 25MB. As versões anteriores ficam guardadas; o Axis Financeiro usa a mais recente.',
+    empty: 'Nenhuma SOW anexada.',
+    attach: 'Anexar SOW',
+    newVersion: 'Enviar nova versão da SOW',
+  },
+  bid_template: {
+    accept: SPREADSHEET_ACCEPT,
+    hint: 'A planilha da proposta que veio no RFQ (.xlsx ou .xlsm), até 25MB. O Axis Financeiro devolve esta mesma planilha preenchida.',
+    empty: 'Nenhum Bid Template anexado.',
+    attach: 'Anexar Bid Template',
+    newVersion: 'Enviar nova versão do Bid Template',
+  },
+};
 
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -52,12 +70,12 @@ export function ProjectDocuments({ projectId, kind = 'sow' }: Props) {
     try {
       const contentBase64 = await readFileAsBase64(file);
       const created = await projectsApi.addDocument(projectId, { kind, filename: file.name, contentBase64 });
-      setNotice(`${PROJECT_DOCUMENT_LABEL[kind]} versão ${created.version} anexada.`);
+      setNotice(`${PROJECT_DOCUMENT_LABEL[kind]}: versão ${created.version} anexada.`);
       setFile(null);
       setInputKey((k) => k + 1);
       await load();
     } catch (err) {
-      setError(translateApiError(err, `Erro ao anexar a ${PROJECT_DOCUMENT_LABEL[kind]}.`));
+      setError(translateApiError(err, `Erro ao anexar: ${PROJECT_DOCUMENT_LABEL[kind]}.`));
     } finally {
       setBusy(false);
     }
@@ -81,7 +99,7 @@ export function ProjectDocuments({ projectId, kind = 'sow' }: Props) {
   };
 
   if (!canRead && !canUpload) return null;
-  const label = PROJECT_DOCUMENT_LABEL[kind];
+  const ui = KIND_UI[kind];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -90,25 +108,25 @@ export function ProjectDocuments({ projectId, kind = 'sow' }: Props) {
           <input
             key={inputKey}
             type="file"
-            accept={DOCUMENT_ACCEPT}
+            accept={ui.accept}
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             disabled={busy}
           />
           <Button type="button" variant="positive" onClick={() => void upload()} disabled={!file || busy}>
-            {busy ? 'Enviando…' : documents.length > 0 ? `Enviar nova versão da ${label}` : `Anexar ${label}`}
+            {busy ? 'Enviando…' : documents.length > 0 ? ui.newVersion : ui.attach}
           </Button>
         </div>
       )}
       {canUpload && (
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
-          PDF, DOCX, XLSX, PNG ou JPG, até 25MB. As versões anteriores ficam guardadas; o Axis Financeiro usa a mais recente.
+          {ui.hint}
         </p>
       )}
       {notice && <p style={{ color: 'var(--success)', fontSize: 13, margin: 0 }}>{notice}</p>}
       {error && <p style={{ color: 'var(--danger)', fontSize: 13, margin: 0 }}>{error}</p>}
       {canRead &&
         (documents.length === 0 ? (
-          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>Nenhuma {label} anexada.</p>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0 }}>{ui.empty}</p>
         ) : (
           <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
             {documents.map((doc, index) => (

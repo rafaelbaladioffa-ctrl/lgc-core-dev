@@ -201,6 +201,11 @@ export function ProjectFormPage() {
         )}
       </FormSection>
       {isEdit && id && (
+        <FormSection title="Bid Template do cliente">
+          <ProjectDocuments projectId={id} kind="bid_template" />
+        </FormSection>
+      )}
+      {isEdit && id && (
         <FormSection title="Cotação do Financeiro">
           <ProjectQuotes projectId={id} projectStatus={projectStatus} />
         </FormSection>

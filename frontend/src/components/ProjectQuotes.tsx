@@ -60,7 +60,7 @@ export function ProjectQuotes({ projectId, projectStatus }: Props) {
     setNotice(null);
     try {
       const created = await projectsApi.requestQuote(projectId, notes.trim() || undefined);
-      setNotice(`Cotação solicitada ao Axis Financeiro com a SOW v${created.sowVersion}.`);
+      setNotice(`Cotação solicitada ao Axis Financeiro com a SOW v${created.sowVersion} e o Bid Template v${created.bidTemplateVersion}.`);
       setNotes('');
       await load();
     } catch (err) {
@@ -91,7 +91,8 @@ export function ProjectQuotes({ projectId, projectStatus }: Props) {
           <StatusBadge label={PROJECT_QUOTE_STATUS_LABEL[status]} tone={STATUS_TONE[status]} />
           {lastRequest && (
             <span className="project-quotes__hint">
-              Último pedido em {formatDateTime(lastRequest.createdAt)} por {lastRequest.requestedByEmail}, com a SOW v{lastRequest.sowVersion}.
+              Último pedido em {formatDateTime(lastRequest.createdAt)} por {lastRequest.requestedByEmail}, com a SOW v{lastRequest.sowVersion}
+              {lastRequest.bidTemplateVersion ? ` e o Bid Template v${lastRequest.bidTemplateVersion}` : ''}.
             </span>
           )}
         </div>
@@ -108,7 +109,7 @@ export function ProjectQuotes({ projectId, projectStatus }: Props) {
               {busy ? 'Enviando…' : status === 'nao_solicitada' || !status ? 'Solicitar cotação' : 'Solicitar nova cotação'}
             </Button>
             <span className="project-quotes__hint">
-              O Axis Financeiro recebe o projeto com a SOW mais recente e devolve a Bid preenchida e a equipe orçada.
+              Exige a SOW e o Bid Template anexados acima. O Axis Financeiro devolve o Bid Template preenchido e a equipe orçada.
             </span>
           </div>
         </div>
@@ -132,6 +133,7 @@ export function ProjectQuotes({ projectId, projectStatus }: Props) {
             {data.requests.map((r) => (
               <li key={r.id}>
                 {formatDateTime(r.createdAt)} · {r.requestedByEmail} · SOW v{r.sowVersion}
+                {r.bidTemplateVersion ? ` · Bid Template v${r.bidTemplateVersion}` : ''}
                 {r.notes ? ` · “${r.notes}”` : ''}
               </li>
             ))}

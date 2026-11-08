@@ -70,19 +70,20 @@ Decidido com o dono em 2026-11-08 (P-11 a P-15 da
 
 ```
 CORE                                        FINANCEIRO
-Projeto em proposta + SOW (PDF)
+Projeto em proposta + SOW (PDF) + Bid Template do RFQ (.xlsm)
   └─ "Solicitar cotação" ──project.quote_requested──▶ orçamento aws_sow na fila do orçamentista
-                                             baixa a SOW do Core e extrai o texto do PDF
+                                             baixa SOW e Bid Template do Core; lê o PDF
                                              calcula equipe, dias, horas-meta e valores do bid
                                              revisão submetida → aprovada para envio
   Cotação Rn  ◀──POST /integration/projects/:id/quotes── Bid preenchida (.xlsx) + dias + equipe
 ```
 
 1. **Pedido (Core).** Alguém com `project:update` clica em "Solicitar cotação" (P-11). Só projeto em
-   `proposta` com SOW. O Core grava o pedido e emite `project.quote_requested` na mesma transação:
-   estado completo do projeto mais `quote_request_id`, `sow_document_id`, `sow_version`,
-   `sow_filename`, `sow_content_hash`, `notes`, `requested_by_user_id`, `requested_by_email`,
-   `requested_at`. Pedir de novo (ex.: SOW nova) emite outro evento; o Financeiro reaproveita o
+   `proposta` com SOW **e** Bid Template anexados. O Core grava o pedido e emite
+   `project.quote_requested` na mesma transação: estado completo do projeto mais `quote_request_id`,
+   `sow_document_id`, `sow_version`, `sow_filename`, `sow_content_hash`, `bid_template_document_id`,
+   `bid_template_version`, `bid_template_filename`, `bid_template_content_hash`, `notes`,
+   `requested_by_user_id`, `requested_by_email`, `requested_at`. Pedir de novo (ex.: SOW nova) emite outro evento; o Financeiro reaproveita o
    orçamento do projeto e cria nova revisão quando a SOW mudou.
 2. **SOW (Financeiro).** A SOW é PDF (P-13). O Financeiro baixa o arquivo por
    `GET /integration/projects/:id/documents/:documentId/content` (precisa assinar
@@ -117,8 +118,8 @@ Content-Type: application/json
    - Só o satélite que **assina** `project.quote_requested` pode enviar (`403`).
    - Equipe = **quantidade por função** (P-15), nunca pessoas nomeadas. Função de campo exige `people`
      e `days`; o gerente vai só com `hours`. Função repetida → `400`.
-   - A Bid é o **Bid Template do cliente preenchido** (P-14): `.xlsx`/`.xlsm`, até 25MB, tipo
-     conferido pelos bytes.
+   - A Bid é o **Bid Template do RFQ preenchido** (P-14): o mesmo arquivo anexado no Core, com as
+     células de entrada escritas pelo Financeiro. `.xlsx`/`.xlsm`, até 25MB, tipo conferido pelos bytes.
    - **Idempotência:** mesma `external_revision_id` com a mesma Bid devolve a cotação já gravada
      (`201` com o mesmo `id`); com outro conteúdo → `409` (revisão aprovada não muda; mande nova revisão).
    - Nenhum campo de custo, salário, imposto ou lucro: o DTO recusa campos extras (`400`).

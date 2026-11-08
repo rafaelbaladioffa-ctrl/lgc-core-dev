@@ -51,12 +51,13 @@ function quoteRow(overrides: Record<string, unknown> = {}) {
 function fixture({
   project = PROJECT as Record<string, unknown> | null,
   sow = { id: 'sow-2', version: 2, filename: 'SOW.pdf', contentHash: 'abc' } as Record<string, unknown> | null,
+  bidTemplate = { id: 'bt-1', version: 1, filename: 'Bid Template.xlsm', contentHash: 'def' } as Record<string, unknown> | null,
   existing = null as Record<string, unknown> | null,
 } = {}) {
   const outbox = { record: vi.fn().mockResolvedValue(undefined) };
   const prisma: any = {
     project: { findUnique: vi.fn().mockResolvedValue(project) },
-    projectDocument: { findFirst: vi.fn().mockResolvedValue(sow) },
+    projectDocument: { findFirst: vi.fn(async ({ where }) => (where.kind === 'bid_template' ? bidTemplate : sow)) },
     projectQuoteRequest: {
       create: vi.fn(async ({ data }) => ({ id: 'qr-1', createdAt: new Date('2026-11-08T10:00:00Z'), notes: data.notes, requestedBy: { email: 'comercial@lgc.test' } })),
       findMany: vi.fn().mockResolvedValue([]),
@@ -91,13 +92,14 @@ function receiveDto(overrides: Partial<ReceiveProjectQuoteDto> = {}): ReceivePro
 }
 
 describe('ProjectQuotesService.request', () => {
-  it('grava o pedido com a SOW vigente e emite project.quote_requested na mesma transação', async () => {
+  it('grava o pedido com a SOW e o Bid Template vigentes e emite project.quote_requested na mesma transação', async () => {
     const { service, prisma, outbox } = fixture();
     const result = await service.request('p-1', { notes: 'Proposta até sexta' }, 'user-1');
 
     expect(prisma.projectQuoteRequest.create.mock.calls[0][0].data).toEqual({
       projectId: 'p-1',
       sowDocumentId: 'sow-2',
+      bidTemplateDocumentId: 'bt-1',
       notes: 'Proposta até sexta',
       requestedByUserId: 'user-1',
     });
@@ -109,11 +111,21 @@ describe('ProjectQuotesService.request', () => {
       quote_request_id: 'qr-1',
       sow_document_id: 'sow-2',
       sow_version: 2,
+      bid_template_document_id: 'bt-1',
+      bid_template_version: 1,
+      bid_template_filename: 'Bid Template.xlsm',
       notes: 'Proposta até sexta',
       requested_by_email: 'comercial@lgc.test',
       requested_at: '2026-11-08T10:00:00.000Z',
     }));
     expect(result.sowVersion).toBe(2);
+    expect(result.bidTemplateVersion).toBe(1);
+  });
+
+  it('sem Bid Template não pede cotação', async () => {
+    const { service, outbox } = fixture({ bidTemplate: null });
+    await expect(service.request('p-1', {}, 'user-1')).rejects.toThrow('Anexe o Bid Template');
+    expect(outbox.record).not.toHaveBeenCalled();
   });
 
   it('sem SOW não pede cotação', async () => {
@@ -185,7 +197,7 @@ describe('ProjectQuotesService.receive', () => {
   });
 
   it('SOW de outro projeto é recusada', async () => {
-    const { service } = fixture({ sow: null });
+    const { service } = fixture({ sow: null, bidTemplate: null });
     await expect(service.receive('p-1', 'sat-1', receiveDto())).rejects.toThrow('SOW informada');
   });
 

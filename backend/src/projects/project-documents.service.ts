@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { ProjectDocumentKind } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../integration/outbox.service.js';
@@ -23,6 +23,16 @@ const METADATA_SELECT = {
  * conteúdo pela API de integração (integration-query.controller.ts). */
 export const PROJECT_DOCUMENT_EVENT = 'project.document_added';
 
+/** Planilhas aceitas como Bid (modelo do RFQ e Bid preenchida): XLSX ou XLSM, ZIP por dentro. */
+const SPREADSHEET_EXTENSIONS = ['.xlsx', '.xlsm'];
+
+/** Recusa o que não for planilha `.xlsx`/`.xlsm` (o tipo pelos bytes já foi conferido). */
+export function assertSpreadsheet(filename: string, mimeType: string, label: string): void {
+  if (mimeType !== 'application/zip' || !SPREADSHEET_EXTENSIONS.some((ext) => filename.toLowerCase().endsWith(ext))) {
+    throw new BadRequestException(`${label} deve ser uma planilha .xlsx ou .xlsm.`);
+  }
+}
+
 /** Nome original só para exibição: sem caminho nem caracteres de controle. */
 export function displayFilename(filename: string): string {
   const base = filename.split(/[\\/]/).pop() ?? filename;
@@ -45,6 +55,7 @@ export class ProjectDocumentsService {
     const content = Buffer.from(contentBase64, 'base64');
     const name = displayFilename(filename);
     const mimeType = validateAttachment(content, name);
+    if (kind === 'bid_template') assertSpreadsheet(name, mimeType, 'O Bid Template');
     const contentHash = createHash('sha256').update(content).digest('hex');
 
     return this.prisma.$transaction(async (tx) => {

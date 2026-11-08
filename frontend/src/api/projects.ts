@@ -31,9 +31,9 @@ export interface CreateProjectInput {
 /** O cliente não muda depois de criado: ele faz parte do código do projeto. */
 export type UpdateProjectInput = Partial<Omit<CreateProjectInput, 'clientId' | 'status'>>;
 
-export type ProjectDocumentKind = 'sow';
+export type ProjectDocumentKind = 'sow' | 'bid_template';
 
-export const PROJECT_DOCUMENT_LABEL: Record<ProjectDocumentKind, string> = { sow: 'SOW' };
+export const PROJECT_DOCUMENT_LABEL: Record<ProjectDocumentKind, string> = { sow: 'SOW', bid_template: 'Bid Template' };
 
 export interface ProjectDocument {
   id: string;
@@ -62,6 +62,8 @@ export interface ProjectQuoteRequest {
   notes: string | null;
   requestedByEmail: string;
   sowVersion: number;
+  /** Nulo só em pedidos anteriores à exigência do Bid Template. */
+  bidTemplateVersion: number | null;
 }
 
 /** Uma função da equipe orçada: quantidade de pessoas, nunca nomes. */
@@ -114,7 +116,7 @@ export const projectsApi = {
     api.get<Blob>(`/projects/${id}/documents/${documentId}/content`, { responseType: 'blob' }).then((r) => r.data),
   listQuotes: (id: string) => api.get<ProjectQuotes>(`/projects/${id}/quotes`).then((r) => r.data),
   requestQuote: (id: string, notes?: string) =>
-    api.post<ProjectQuoteRequest>(`/projects/${id}/quote-requests`, notes ? { notes } : {}).then((r) => r.data),
+    api.post<ProjectQuoteRequest & { bidTemplateVersion: number }>(`/projects/${id}/quote-requests`, notes ? { notes } : {}).then((r) => r.data),
   downloadBid: (id: string, quoteId: string) =>
     api.get<Blob>(`/projects/${id}/quotes/${quoteId}/bid`, { responseType: 'blob' }).then((r) => r.data),
 };

@@ -76,6 +76,15 @@ describe('ProjectDocumentsService.add', () => {
     const { service } = fixture({ project: null });
     await expect(service.add('p-x', 'sow', 'sow.pdf', PDF, 'user-1')).rejects.toBeInstanceOf(NotFoundException);
   });
+
+  it('Bid Template só aceita planilha .xlsx ou .xlsm', async () => {
+    const { service, prisma } = fixture();
+    const xlsm = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.from('planilha fictícia')]).toString('base64');
+    await service.add('p-1', 'bid_template', 'Bid Template 3.26.xlsm', xlsm, 'user-1');
+    expect(prisma.projectDocument.create.mock.calls[0][0].data).toMatchObject({ kind: 'bid_template', mimeType: 'application/zip' });
+    await expect(service.add('p-1', 'bid_template', 'Bid.pdf', PDF, 'user-1')).rejects.toThrow('planilha');
+    await expect(service.add('p-1', 'bid_template', 'Bid.docx', xlsm, 'user-1')).rejects.toThrow('planilha');
+  });
 });
 
 describe('contentDisposition', () => {

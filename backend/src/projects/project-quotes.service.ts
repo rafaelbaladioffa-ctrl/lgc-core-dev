@@ -4,15 +4,12 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../integration/outbox.service.js';
 import { validateAttachment } from '../requests/attachment-security.js';
-import { displayFilename } from './project-documents.service.js';
+import { assertSpreadsheet, displayFilename } from './project-documents.service.js';
 import { SNAPSHOT_INCLUDE, formatDateOnly, projectEventPayload, toDateOnly } from './projects.service.js';
 import type { ReceiveProjectQuoteDto, RequestProjectQuoteDto } from './dto/project-quote.dto.js';
 
 /** Evento do pedido de cotação. Só o satélite que assina este evento pode devolver cotação. */
 export const PROJECT_QUOTE_REQUESTED_EVENT = 'project.quote_requested';
-
-/** A Bid é planilha: XLSX ou XLSM (ZIP por dentro). */
-const BID_EXTENSIONS = ['.xlsx', '.xlsm'];
 
 /** Metadados da cotação (nunca o conteúdo da Bid). */
 const QUOTE_SELECT = {
@@ -88,23 +85,24 @@ export class ProjectQuotesService {
     private readonly outbox: OutboxService,
   ) {}
 
-  /** "Solicitar cotação": só proposta com SOW. Pode ser repetido (ex.: SOW nova); cada pedido fica no histórico. */
+  /**
+   * "Solicitar cotação": só proposta com SOW e Bid Template do RFQ. Pode ser repetido (ex.: SOW nova);
+   * cada pedido fica no histórico com as versões vigentes dos dois documentos.
+   */
   async request(projectId: string, dto: RequestProjectQuoteDto, userId: string) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, include: SNAPSHOT_INCLUDE });
     if (!project) throw new NotFoundException('Projeto não encontrado.');
     if (project.status !== 'proposta') {
       throw new BadRequestException('Só é possível solicitar cotação de projeto em proposta.');
     }
-    const sow = await this.prisma.projectDocument.findFirst({
-      where: { projectId, kind: 'sow' },
-      orderBy: { version: 'desc' },
-      select: { id: true, version: true, filename: true, contentHash: true },
-    });
+    const [sow, bidTemplate] = await Promise.all([this.latestDocument(projectId, 'sow'), this.latestDocument(projectId, 'bid_template')]);
+    if (!sow && !bidTemplate) throw new BadRequestException('Anexe a SOW e o Bid Template do cliente antes de solicitar a cotação.');
     if (!sow) throw new BadRequestException('Anexe a SOW do cliente antes de solicitar a cotação.');
+    if (!bidTemplate) throw new BadRequestException('Anexe o Bid Template do cliente antes de solicitar a cotação.');
 
     return this.prisma.$transaction(async (tx) => {
       const request = await tx.projectQuoteRequest.create({
-        data: { projectId, sowDocumentId: sow.id, notes: dto.notes ?? null, requestedByUserId: userId },
+        data: { projectId, sowDocumentId: sow.id, bidTemplateDocumentId: bidTemplate.id, notes: dto.notes ?? null, requestedByUserId: userId },
         select: { id: true, createdAt: true, notes: true, requestedBy: { select: { email: true } } },
       });
       await this.outbox.record(tx, PROJECT_QUOTE_REQUESTED_EVENT, {
@@ -114,12 +112,23 @@ export class ProjectQuotesService {
         sow_version: sow.version,
         sow_filename: sow.filename,
         sow_content_hash: sow.contentHash,
+        bid_template_document_id: bidTemplate.id,
+        bid_template_version: bidTemplate.version,
+        bid_template_filename: bidTemplate.filename,
+        bid_template_content_hash: bidTemplate.contentHash,
         notes: request.notes,
         requested_by_user_id: userId,
         requested_by_email: request.requestedBy.email,
         requested_at: request.createdAt.toISOString(),
       });
-      return { id: request.id, createdAt: request.createdAt, notes: request.notes, sowVersion: sow.version, requestedByEmail: request.requestedBy.email };
+      return {
+        id: request.id,
+        createdAt: request.createdAt,
+        notes: request.notes,
+        sowVersion: sow.version,
+        bidTemplateVersion: bidTemplate.version,
+        requestedByEmail: request.requestedBy.email,
+      };
     });
   }
 
@@ -131,7 +140,14 @@ export class ProjectQuotesService {
       this.prisma.projectQuoteRequest.findMany({
         where: { projectId },
         orderBy: { createdAt: 'desc' },
-        select: { id: true, createdAt: true, notes: true, requestedBy: { select: { email: true } }, sowDocument: { select: { version: true } } },
+        select: {
+          id: true,
+          createdAt: true,
+          notes: true,
+          requestedBy: { select: { email: true } },
+          sowDocument: { select: { version: true } },
+          bidTemplateDocument: { select: { version: true } },
+        },
       }),
       this.prisma.projectQuote.findMany({ where: { projectId }, orderBy: [{ revisionNumber: 'desc' }, { receivedAt: 'desc' }], select: QUOTE_SELECT }),
     ]);
@@ -143,6 +159,7 @@ export class ProjectQuotesService {
         notes: r.notes,
         requestedByEmail: r.requestedBy.email,
         sowVersion: r.sowDocument.version,
+        bidTemplateVersion: r.bidTemplateDocument?.version ?? null,
       })),
       quotes: quotes.map(toQuoteView),
     };
@@ -179,12 +196,9 @@ export class ProjectQuotesService {
     const team = normalizeTeam(dto);
 
     const filename = displayFilename(dto.bid.filename);
-    if (!BID_EXTENSIONS.some((ext) => filename.toLowerCase().endsWith(ext))) {
-      throw new BadRequestException('A Bid deve ser uma planilha .xlsx ou .xlsm.');
-    }
     const content = Buffer.from(dto.bid.content_base64, 'base64');
     const mimeType = validateAttachment(content, filename);
-    if (mimeType !== 'application/zip') throw new BadRequestException('A Bid deve ser uma planilha .xlsx ou .xlsm.');
+    assertSpreadsheet(filename, mimeType, 'A Bid');
     const contentHash = createHash('sha256').update(content).digest('hex');
 
     const existing = await this.findExisting(satelliteId, dto.external_revision_id);
@@ -223,6 +237,14 @@ export class ProjectQuotesService {
       }
       throw err;
     }
+  }
+
+  private latestDocument(projectId: string, kind: 'sow' | 'bid_template') {
+    return this.prisma.projectDocument.findFirst({
+      where: { projectId, kind },
+      orderBy: { version: 'desc' },
+      select: { id: true, version: true, filename: true, contentHash: true },
+    });
   }
 
   private findExisting(satelliteId: string, externalRevisionId: string) {

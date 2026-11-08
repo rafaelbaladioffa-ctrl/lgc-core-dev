@@ -262,11 +262,13 @@ O planning previa `cost_center_id` e flags de provisionamento no `collaborator.c
 | `project.status_changed` | `PUT /projects/:id/status` | `previous_status` |
 | `project.deleted` | exclusão de proposta | `deleted: true`; `status` vai como `encerrado` para os satélites marcarem o projeto inativo sem mudança do lado deles |
 
-### 10.1 Documentos do projeto (SOW)
+### 10.1 Documentos do projeto (SOW e Bid Template)
 
-A SOW do cliente fica anexada ao projeto do Core e é consumida pelo módulo Projetos do Financeiro (importação da SOW, §7.1 da especificação de Projetos do Financeiro).
+A SOW do cliente e o Bid Template do RFQ ficam anexados ao projeto do Core e são consumidos pelo módulo Projetos do Financeiro (importação da SOW, §7.1, e Bid preenchida, §7.4, da especificação de Projetos do Financeiro).
 
-- Tabela `project_documents`: `project_id`, `kind` (hoje só `sow`), `version`, `filename` (nome original sem caminho, só para exibição), `mime_type`, `size_bytes`, `content_hash` (SHA-256), `content` (`BYTEA`), `uploaded_by_user_id`, `created_at`. Único por (`project_id`, `kind`, `version`).
+- **Tipos:** `sow` e `bid_template` (desde 2026-11-08, migração `20261123000003_projetos_bid_template`). O Bid Template é a planilha da proposta que o cliente manda em cada RFQ, já com os dados do projeto; só aceita `.xlsx`/`.xlsm` (ZIP pelos bytes), senão `400`.
+
+- Tabela `project_documents`: `project_id`, `kind` (`sow` ou `bid_template`), `version`, `filename` (nome original sem caminho, só para exibição), `mime_type`, `size_bytes`, `content_hash` (SHA-256), `content` (`BYTEA`), `uploaded_by_user_id`, `created_at`. Único por (`project_id`, `kind`, `version`).
 - **Versões:** cada envio do mesmo tipo cria a versão seguinte; nenhuma versão é sobrescrita nem apagada. A mais recente é a vigente. Os documentos só somem com a exclusão do projeto (que só vale para proposta sem requisições).
 - **Arquivo:** mesmas regras dos anexos de requisição ([attachment-security.ts](../../backend/src/requests/attachment-security.ts)): tipo detectado pelos bytes (PDF, PNG, JPG e ZIP, que cobre DOCX/XLSX), executáveis bloqueados, até 25MB, conteúdo em base64 no corpo JSON. **Não há antivírus de verdade.**
 - **Permissões:** enviar exige `project:update`; listar e baixar exige `project:read_documents` (nova; dada a `admin` e `gestor` pela migração `20261123000001_projetos_documentos` e pelo seed), porque a SOW é documento do cliente.
@@ -291,9 +293,10 @@ O comercial pede a cotação no Core e o módulo Projetos do Financeiro devolve,
 para envio, a **Bid preenchida** e a **equipe orçada** (quantidade por função × dias). Custo, salário e
 lucro nunca vêm para o Core. Contrato: [integracao-core-financeiro.md §4](../integracao-core-financeiro.md#4-cotação-do-projeto).
 
-- **Pedido** (`project_quote_requests`): `project_id`, `sow_document_id` (a SOW vigente no momento),
-  `notes` (recado para o orçamentista, até 2000 caracteres), `requested_by_user_id`, `created_at`. Só
-  projeto em `proposta` e com SOW (`400` nos outros casos). Pode ser repetido (ex.: SOW nova); cada
+- **Pedido** (`project_quote_requests`): `project_id`, `sow_document_id` e `bid_template_document_id`
+  (as versões vigentes no momento), `notes` (recado para o orçamentista, até 2000 caracteres),
+  `requested_by_user_id`, `created_at`. Só projeto em `proposta` e com SOW **e** Bid Template (`400`
+  nos outros casos). Pode ser repetido (ex.: SOW nova); cada
   pedido fica no histórico e emite `project.quote_requested`.
 - **Cotação** (`project_quotes`): uma por revisão do Financeiro, única por (`satellite_id`,
   `external_revision_id`). Guarda `revision_number`, a SOW usada, `work_days`, início e conclusão
@@ -312,14 +315,15 @@ lucro nunca vêm para o Core. Contrato: [integracao-core-financeiro.md §4](../i
 | GET | `/projects/:id/quotes/:quoteId/bid` | `project:read_documents` | `download_project_bid` |
 
 **Evento `project.quote_requested`** (na mesma transação do pedido): estado completo do projeto (§10)
-mais `quote_request_id`, `sow_document_id`, `sow_version`, `sow_filename`, `sow_content_hash`, `notes`,
+mais `quote_request_id`, `sow_document_id`, `sow_version`, `sow_filename`, `sow_content_hash`,
+`bid_template_document_id`, `bid_template_version`, `bid_template_filename`, `bid_template_content_hash`, `notes`,
 `requested_by_user_id`, `requested_by_email`, `requested_at`.
 
 **Satélite (API key):** `POST /api/v1/integration/projects/:id/quotes`, só para o satélite que
 **assina** `project.quote_requested` (`403` para os outros). Sem `@AuditAction`, porque não há usuário: a
 cotação guarda o satélite que enviou.
 
-**Frontend:** seção "Cotação do Financeiro" em `/projects/:id/edit`: situação, botão "Solicitar
+**Frontend:** seção "Bid Template do cliente" (envio de versões e download, como a SOW) e seção "Cotação do Financeiro" em `/projects/:id/edit`: situação, botão "Solicitar
 cotação" (com recado opcional; só em proposta), cartões por revisão (dias, pessoas em campo, horas,
 equipe por função, download da Bid) e histórico de pedidos.
 
