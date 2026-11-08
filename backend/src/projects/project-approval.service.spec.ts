@@ -102,6 +102,7 @@ function fixture(options: FixtureOptions = {}) {
       findUnique: vi.fn().mockResolvedValue(null),
     },
     projectQuoteMaterial: { update: vi.fn() },
+    projectDocument: { findFirst: vi.fn().mockResolvedValue({ id: 'doc-sow-3' }) },
     request: {
       findUnique: vi.fn().mockResolvedValue(options.existingRequest ?? null),
       create: vi.fn(async ({ data }) => ({ id: 'req-1', ...data })),
@@ -430,6 +431,20 @@ describe('project.approved — payload (§4.2)', () => {
       material_request_id: 'req-1',
       approved_by_user_id: 'user-1',
     });
+  });
+
+  it('cotação sem SOW (modelo genérico): project.approved leva a SOW mais recente do projeto', async () => {
+    const { service, payload, prisma } = fixture({ quote: quoteRow({ sowDocumentId: null }) });
+    await service.approve('p-1', {}, 'user-1');
+    expect(prisma.projectDocument.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { projectId: 'p-1', kind: 'sow' }, orderBy: { version: 'desc' } }));
+    expect(payload('project.approved').accepted_quote.sow_document_id).toBe('doc-sow-3');
+  });
+
+  it('cotação com SOW: project.approved mantém a SOW usada na cotação', async () => {
+    const { service, payload, prisma } = fixture();
+    await service.approve('p-1', {}, 'user-1');
+    expect(prisma.projectDocument.findFirst).not.toHaveBeenCalled();
+    expect(payload('project.approved').accepted_quote.sow_document_id).toBe('doc-sow-1');
   });
 
   it('project.status_changed leva previous_status proposta e o estado já aprovado', async () => {

@@ -73,7 +73,12 @@ export class ProjectApprovalService {
       const shipmentRequest = quote.materials.length > 0 ? await this.createShipmentRequest(tx, updated, quote, lookup, now) : null;
 
       await this.outbox.record(tx, 'project.status_changed', { ...projectEventPayload(updated), previous_status: 'proposta' });
-      await this.outbox.record(tx, PROJECT_APPROVED_EVENT, projectApprovedPayload(updated, quote, {
+      // Cotação sem SOW (ex.: modelo genérico do Financeiro, sem pedido de cotação): o Field ainda precisa
+      // da SOW para gerar as tarefas, então vai a versão mais recente anexada ao projeto.
+      const sowDocumentId = quote.sowDocumentId
+        ?? (await tx.projectDocument.findFirst({ where: { projectId: updated.id, kind: 'sow' }, orderBy: { version: 'desc' }, select: { id: true } }))?.id
+        ?? null;
+      await this.outbox.record(tx, PROJECT_APPROVED_EVENT, projectApprovedPayload(updated, { ...quote, sowDocumentId }, {
         clientPoNumber: acceptance.clientPoNumber,
         materialRequestId: shipmentRequest?.id ?? null,
         approvedByUserId: userId,

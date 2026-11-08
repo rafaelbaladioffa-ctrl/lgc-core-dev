@@ -402,7 +402,7 @@ A resposta é o projeto mais `materialRequest` (`{id, code, status}` ou `null`) 
 | Campo | Conteúdo |
 |---|---|
 | `site` | `site_id`, `code`, `name`, `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`, `longitude` (números ou `null`) |
-| `accepted_quote` | `project_quote_id`, `external_revision_id` (id da revisão no Financeiro), `revision_number`, `work_days` (número), `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`), `team[]` (`role_key`, `role_name`, `field_role`, `people`, `days`, `hours`, como a cotação guarda) e `sow_document_id` (ou `null`) |
+| `accepted_quote` | `project_quote_id`, `external_revision_id` (id da revisão no Financeiro), `revision_number`, `work_days` (número), `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`), `team[]` (`role_key`, `role_name`, `field_role`, `people`, `days`, `hours`, como a cotação guarda) e `sow_document_id`: a SOW usada na cotação ou, quando a cotação não informa (modelo genérico do Financeiro), a versão mais recente da SOW do projeto; `null` só se o projeto não tiver SOW |
 | `client_po_number` | texto ou `null` |
 | `material_request_id` | id da requisição de envio criada, ou `null` se a cotação não tem materiais |
 | `approved_by_user_id`, `approved_at` | quem aprovou (usuário) e quando (ISO 8601) |
