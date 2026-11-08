@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { requestsApi } from '../../api/requests';
 import { certificationsApi } from '../../api/certifications';
 import { outboxApi } from '../../api/outbox';
+import { projectsApi } from '../../api/projects';
 
 interface NotificationItem {
   id: string;
@@ -53,6 +54,21 @@ export function NotificationsDropdown() {
           message: `${c.type} de ${c.collaborator.fullName} ${days < 0 ? 'venceu' : `vence em ${days}d`}`,
           tone: days < 0 ? 'danger' : 'warning',
           onClick: () => navigate(`/collaborators/${c.collaboratorId}/edit`),
+        });
+      }
+    }
+
+    if (hasPermission('project:read')) {
+      // Obra concluída no Field nos projetos do usuário: encerrar o projeto continua manual (PA-18).
+      // Aviso é auxiliar: se a consulta falhar, o resto das notificações continua valendo.
+      const completed = await projectsApi.fieldAlerts().catch(() => []);
+      total += completed.length;
+      for (const p of completed.slice(0, DISPLAY_LIMIT)) {
+        next.push({
+          id: `field-completed-${p.projectId}`,
+          message: `Obra do projeto ${p.projectCode} concluída no Field — encerre o projeto`,
+          tone: 'warning',
+          onClick: () => navigate(`/projects/${p.projectId}/edit`),
         });
       }
     }

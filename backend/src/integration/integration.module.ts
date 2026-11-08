@@ -15,6 +15,8 @@ import { InboxAdminController } from './inbound/inbox-admin.controller.js';
 import { InboundEventsService } from './inbound/inbound-events.service.js';
 import { InboundHandlerRegistry } from './inbound/inbound-handler.registry.js';
 import { INBOUND_EVENT_HANDLERS } from './inbound/inbound-handler.js';
+import { LogisticsFulfillmentHandler } from './inbound/handlers/logistics-fulfillment.handler.js';
+import { FieldProjectHandler } from './inbound/handlers/field-project.handler.js';
 import { AuthModule } from '../auth/auth.module.js';
 
 @Module({
@@ -36,8 +38,14 @@ import { AuthModule } from '../auth/auth.module.js';
     SatelliteThrottlerGuard,
     InboundEventsService,
     InboundHandlerRegistry,
-    // Handlers de evento de satélite: começa vazio (PT-02); os de negócio entram no PT-09.
-    { provide: INBOUND_EVENT_HANDLERS, useValue: [] },
+    // Handlers de evento de satélite (PT-09): Logística acompanha o envio de material; Field, a obra do projeto.
+    LogisticsFulfillmentHandler,
+    FieldProjectHandler,
+    {
+      provide: INBOUND_EVENT_HANDLERS,
+      useFactory: (logistics: LogisticsFulfillmentHandler, field: FieldProjectHandler) => [logistics, field],
+      inject: [LogisticsFulfillmentHandler, FieldProjectHandler],
+    },
   ],
   exports: [OutboxService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
 })

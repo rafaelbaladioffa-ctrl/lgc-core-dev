@@ -30,6 +30,7 @@ import { MyRequestApprovalsPage } from "./pages/MyRequestApprovalsPage";
 import { DelegationsPage } from "./pages/DelegationsPage";
 import { RequestsDashboardPage } from "./pages/RequestsDashboardPage";
 import { ProjectsDashboardPage } from "./pages/ProjectsDashboardPage";
+import { ProjectJourneyPage } from "./pages/ProjectJourneyPage";
 import { IntegrationsPage } from "./pages/IntegrationsPage";
 import { SatelliteFormPage } from "./pages/SatelliteFormPage";
 import { SensitiveAccessLogPage } from "./pages/SensitiveAccessLogPage";
@@ -291,6 +292,14 @@ function AppRoutes() {
         element={
           <PrivateRoute permission="project:update">
             <ProjectFormPage key="edit" />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/projects/:id/journey"
+        element={
+          <PrivateRoute permission="project:read">
+            <ProjectJourneyPage />
           </PrivateRoute>
         }
       />

@@ -131,6 +131,35 @@ export interface ShipmentData {
   warnings: string[];
   /** ISO; quando a Logística recebeu o pedido. Nulo antes da aprovação do responsável do CC. */
   approvedAt: string | null;
+  /** Situação na Logística (PT-09), preenchida pelos eventos `fulfillment.*`, `shipment.*` e `delivery.*`; ausente até a Logística avisar. */
+  logistics?: ShipmentLogistics;
+}
+
+/** `formData.shipment.logistics` (backend/src/requests/envio-logistica.ts). Quantidades são texto decimal. */
+export interface ShipmentLogistics {
+  orderId: string | null;
+  orderCode: string | null;
+  requestVersion: number;
+  /** `RESERVADA`, `RESERVADA_PARCIAL`, `AGUARDANDO_ESTOQUE`, `EXPEDIDA`, `ENTREGUE`, `DIVERGENCIA`… */
+  status: string;
+  statusReason: string | null;
+  statusAt: string | null;
+  stage: 1 | 2 | 3;
+  items: Array<{ materialCode: string; description: string | null; unit: string | null; quantity: string; reserved: string | null; shortage: string | null }>;
+  shipments: Array<{
+    shipmentId: string;
+    shipmentCode: string | null;
+    manifest: string | null;
+    carrier: string | null;
+    route: string | null;
+    vehicle: string | null;
+    dispatchedAt: string | null;
+    packages: number | null;
+  }>;
+  deliveries: Array<{ eventId: string; shipmentId: string | null; complete: boolean; deliveredAt: string | null; receiverName: string | null; pendingPackages: number | null; items: Array<{ materialCode: string; quantity: string }> }>;
+  refusals: Array<{ eventId: string; shipmentId: string | null; refusedAt: string | null; reason: string | null; items: Array<{ materialCode: string; quantity: string }> }>;
+  dispatchedAt: string | null;
+  deliveredAt: string | null;
 }
 
 export interface RequestAttachmentMeta {

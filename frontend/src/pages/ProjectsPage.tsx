@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { DataTable, StatusBadge, type ColumnDef } from '../components/DataTable';
 import { KpiCard, KpiRow } from '../components/KpiCard';
-import { projectsApi, type Project, type ProjectStatus } from '../api/projects';
+import { projectsApi, type Project, type ProjectJourneyStages, type ProjectStatus } from '../api/projects';
+import { JOURNEY_STATE_LABEL } from '../utils/journey';
 import { clientsApi, type Client } from '../api/clients';
 import { costCentersApi, type CostCenter } from '../api/costCenters';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
@@ -20,6 +21,14 @@ const STATUS_TONE: Record<ProjectStatus, 'default' | 'success' | 'warning' | 'da
   encerrado: 'danger',
 };
 
+/** Tom do selo da etapa atual pelo estado da etapa (feito, em andamento, pendente, atenção). */
+const STAGE_TONE: Record<'feito' | 'em_andamento' | 'pendente' | 'atencao', 'default' | 'success' | 'warning' | 'danger'> = {
+  feito: 'success',
+  em_andamento: 'default',
+  pendente: 'default',
+  atencao: 'warning',
+};
+
 const STATUS_LABEL: Record<ProjectStatus, string> = {
   proposta: 'Proposta',
   aprovado: 'Aprovado',
@@ -34,6 +43,7 @@ export function ProjectsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [collaborators, setCollaborators] = useState<CollaboratorSafe[]>([]);
+  const [stages, setStages] = useState<ProjectJourneyStages>({});
   const [error, setError] = useState<string | null>(null);
 
   const refresh = () =>
@@ -44,6 +54,13 @@ export function ProjectsPage() {
         setCostCenters(cc);
         setCollaborators(col);
       })
+      .then(() =>
+        // O selo da etapa é complementar: se falhar, a lista continua útil e o erro aparece acima dela.
+        projectsApi
+          .journeyStages()
+          .then(setStages)
+          .catch((err) => setError(translateApiError(err, 'Erro ao carregar a etapa dos projetos.'))),
+      )
       .catch((err) => setError(translateApiError(err, 'Erro ao carregar projetos.')));
 
   useEffect(() => {
@@ -96,6 +113,26 @@ export function ProjectsPage() {
       header: 'Prazo previsto',
       render: (p) =>
         p.plannedStartDate || p.plannedEndDate ? `${formatIsoDate(p.plannedStartDate)} a ${formatIsoDate(p.plannedEndDate)}` : '—',
+    },
+    {
+      key: 'etapa',
+      header: 'Etapa',
+      render: (p) => {
+        const stage = stages[p.id];
+        return stage ? (
+          <button
+            onClick={() => navigate(`/projects/${p.id}/journey`)}
+            title={`Ver a jornada do projeto — ${JOURNEY_STATE_LABEL[stage.state]}`}
+            style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer' }}
+          >
+            <StatusBadge label={stage.label} tone={STAGE_TONE[stage.state]} />
+          </button>
+        ) : (
+          '—'
+        );
+      },
+      filterable: true,
+      filterValue: (p) => stages[p.id]?.label ?? '',
     },
     {
       key: 'status',

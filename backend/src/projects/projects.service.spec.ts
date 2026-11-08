@@ -246,4 +246,21 @@ describe('buildProjectCode', () => {
     expect(buildProjectCode(7, 12, new Date('2026-12-01T01:30:00Z'))).toBe('PROP-7.012-1126');
     expect(buildProjectCode(7, 3, new Date('2026-12-01T03:30:00Z'))).toBe('PROP-7.003-1226');
   });
+
+  it('avisos de obra concluída no Field: só os projetos abertos do responsável, nada sem colaborador', async () => {
+    const { service, prisma } = fixture();
+    prisma.projectFieldWork = {
+      findMany: vi.fn().mockResolvedValue([
+        { completedAt: new Date('2026-11-30T17:00:00Z'), fieldProjectCode: 'CSTR-PROJ-0042', project: { id: 'p-1', code: 'PROP-7.012-1126', name: 'Cabeamento DC' } },
+      ]),
+    };
+    expect(await service.fieldAlerts(null)).toEqual([]);
+    expect(prisma.projectFieldWork.findMany).not.toHaveBeenCalled();
+    expect(await service.fieldAlerts('col-1')).toEqual([
+      { projectId: 'p-1', projectCode: 'PROP-7.012-1126', projectName: 'Cabeamento DC', fieldProjectCode: 'CSTR-PROJ-0042', completedAt: '2026-11-30T17:00:00.000Z' },
+    ]);
+    expect(prisma.projectFieldWork.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { completedAt: { not: null }, project: { responsibleCollaboratorId: 'col-1', status: { in: ['aprovado', 'em_execucao'] } } } }),
+    );
+  });
 });
