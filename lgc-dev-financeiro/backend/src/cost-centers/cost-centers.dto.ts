@@ -164,10 +164,11 @@ export class OverheadRuleDto {
 }
 
 export class JobTitleMapDto {
+  /** Ignorado quando o cargo está no cache do Core (o nome vem de lá); só vale para cargo ainda desconhecido. */
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(120)
-  jobTitleName!: string;
+  jobTitleName?: string;
 
   @IsString()
   @MinLength(1, { message: 'Escolha a função.' })

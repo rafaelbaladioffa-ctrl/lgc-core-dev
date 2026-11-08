@@ -35,13 +35,18 @@ export interface AwsQuoteInput {
   hoursOverrides: Record<string, number>;
   justifications: Partial<Record<KpiKey, string>>;
   bid: { proposalName: string; start: string | null; end: string | null; platformDays: number; platformDaily: string | null };
+  /** Feriados ativos do Core (`AAAA-MM-DD`). `null`/ausente = o cache ainda não tem o calendário do Core. */
+  holidays?: ReadonlySet<string> | null;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const ratio = (a: number, b: number) => (b > 0 ? a / b : null);
 
-/** Dias úteis (seg–sex) de `start` a `end`, inclusive. Feriados ainda não entram (o Core não expõe a agenda). */
-export function businessDays(start: string | null, end: string | null): number | null {
+/**
+ * Dias úteis de `start` a `end`, inclusive: segunda a sexta, menos os feriados do Core (`holidays`, datas
+ * `AAAA-MM-DD` do cache `HOLIDAY`). Sem feriados, conta só segunda a sexta.
+ */
+export function businessDays(start: string | null, end: string | null, holidays?: ReadonlySet<string> | null): number | null {
   if (!start || !end) return null;
   const a = new Date(`${start}T00:00:00Z`);
   const b = new Date(`${end}T00:00:00Z`);
@@ -49,7 +54,7 @@ export function businessDays(start: string | null, end: string | null): number |
   let n = 0;
   for (const d = new Date(a); d <= b; d.setUTCDate(d.getUTCDate() + 1)) {
     const wd = d.getUTCDay();
-    if (wd !== 0 && wd !== 6) n++;
+    if (wd !== 0 && wd !== 6 && !holidays?.has(d.toISOString().slice(0, 10))) n++;
   }
   return n;
 }
@@ -109,9 +114,9 @@ export function computeAwsQuote(input: AwsQuoteInput) {
   const hoursTMatches = Math.abs(hoursTSum - fieldHours) <= 0.01;
 
   const suggestedDays = input.hoursPerDay && fieldPeople > 0 && targetHours > 0 ? Math.ceil(targetHours / (fieldPeople * input.hoursPerDay)) : null;
-  const windowBusinessDays = businessDays(input.window.start, input.window.end);
+  const windowBusinessDays = businessDays(input.window.start, input.window.end, input.holidays);
   const fitsWindow = windowBusinessDays === null || !result.workDays ? null : result.workDays <= windowBusinessDays;
-  if (windowBusinessDays !== null) warnings.push('Dias úteis da janela contam só segunda a sexta (feriados ainda não entram).');
+  if (windowBusinessDays !== null && !input.holidays) warnings.push('Sem o calendário de feriados do Axis Core: os dias úteis da janela contam só segunda a sexta.');
 
   const revenue = Number(result.revenue.total) || 0;
   const laborBilled = Number(result.revenue.labor) || 0;

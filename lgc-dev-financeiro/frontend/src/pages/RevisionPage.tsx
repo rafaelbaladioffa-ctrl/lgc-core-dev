@@ -11,7 +11,7 @@ import {
   type BudgetResult,
   type Revision,
 } from '../lib/budgets';
-import { listDestinations, listMaterials, type BudgetDestination, type BudgetMaterial } from '../lib/budgetParams';
+import { destinationForSite, listDestinations, listMaterials, type BudgetDestination, type BudgetMaterial } from '../lib/budgetParams';
 import { decimalToInput, formatNumber, formatPercent, fractionToPercentInput, parseDecimal, parsePercent } from '../lib/decimal';
 import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -213,6 +213,9 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
       : { uid: uid(), materialId: null, logisticsMaterialCode: null, logisticsMaterialId: null, description: '', unit: 'un', quantity: '1', billedUnitPrice: '', realUnitCost: '' };
     setForm((f) => ({ ...f, materials: [...f.materials, row] }));
   }
+
+  // F1: revisão sem deslocamento escolhido sugere o destino ligado ao site do projeto no Core (km e pedágio do Financeiro).
+  const siteDestination = editable && !form.travel.destinationId && !form.travel.kmRoundTrip ? destinationForSite(destinations, rev.project?.site?.axisId) : null;
 
   function pickDestination(destId: string) {
     const dest: BudgetDestination | undefined = destinations.find((x) => x.id === destId);
@@ -449,6 +452,14 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
                     </option>
                   ))}
                 </select>
+                {siteDestination && (
+                  <small className="muted">
+                    Site do projeto: {siteDestination.name}.{' '}
+                    <button className="btn btn-ghost btn-sm" type="button" onClick={() => pickDestination(siteDestination.id)}>
+                      Usar este destino
+                    </button>
+                  </small>
+                )}
               </Field>
               {money('Km ida e volta', 'travel.kmRoundTrip', form.travel.kmRoundTrip, (v) => setIn('travel', 'kmRoundTrip', v))}
               {money('Pedágio por dia (R$)', 'travel.tollPerDay', form.travel.tollPerDay, (v) => setIn('travel', 'tollPerDay', v))}

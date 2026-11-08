@@ -26,6 +26,8 @@ export interface LogisticsMaterial {
 const TIMEOUT_MS = 15_000;
 export const MIN_SEARCH_LENGTH = 2;
 export const MAX_SEARCH_LIMIT = 50;
+/** Limite de códigos por consulta da Logística (PT-04). */
+export const MAX_CODES_PER_LOOKUP = 200;
 
 @Injectable()
 export class LogisticsClient {
@@ -69,6 +71,22 @@ export class LogisticsClient {
     if (codes.length === 0) return [];
     const body = await this.get<{ items?: unknown }>(`/integration/materials?codes=${encodeURIComponent(codes.join(','))}`, fetchFn);
     return toMaterials(body);
+  }
+
+  /**
+   * Confere códigos na Logística (`GET /integration/materials?codes=`, de 200 em 200). Devolve os que não voltaram
+   * como material ativo: inexistentes (`notFound`) ou inativos. Erro de comunicação sobe como a Logística respondeu
+   * (`ServiceUnavailableException` sem configuração, `BadGatewayException` fora do ar ou recusando).
+   */
+  async missingCodes(codes: string[], fetchFn: typeof fetch = fetch): Promise<string[]> {
+    const unique = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
+    const active = new Set<string>();
+    for (let i = 0; i < unique.length; i += MAX_CODES_PER_LOOKUP) {
+      const chunk = unique.slice(i, i + MAX_CODES_PER_LOOKUP);
+      const body = await this.get<{ items?: unknown }>(`/integration/materials?codes=${encodeURIComponent(chunk.join(','))}`, fetchFn);
+      for (const m of toMaterials(body)) active.add(m.code);
+    }
+    return unique.filter((c) => !active.has(c));
   }
 
   consumption(month: string, fetchFn: typeof fetch = fetch) {

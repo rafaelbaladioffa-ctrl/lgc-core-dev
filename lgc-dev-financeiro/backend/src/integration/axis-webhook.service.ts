@@ -9,6 +9,7 @@ import { refreshBudgetStatus } from '../cost-centers/cc-budget-status.js';
 import { todaySaoPaulo } from '../cost-centers/cc-engine.js';
 import { winRevisionFromCore, type ProjectApproval } from '../budgets/revision-won.js';
 import { UnprocessableEventError } from './unprocessable-event.error.js';
+import { missingFromCache, type MasterKind } from './master-cache.js';
 
 export interface Envelope {
   event_id: string;
@@ -18,7 +19,7 @@ export interface Envelope {
 }
 
 export interface MasterRecord {
-  kind: 'USER' | 'COLLABORATOR' | 'CLIENT' | 'PROJECT' | 'COST_CENTER';
+  kind: MasterKind;
   axisId: string;
   code?: string;
   name?: string;
@@ -27,6 +28,7 @@ export interface MasterRecord {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const CLOCK_SKEW_MS = 5 * 60_000;
 /** Projeto encerrado deixa de aceitar novo rateio (ProjectStatus do Core). */
 const INACTIVE_PROJECT_STATUS = ['encerrado'];
@@ -34,10 +36,14 @@ const INACTIVE_PROJECT_STATUS = ['encerrado'];
 /**
  * Traduz um evento do Core em registro do cache de mestres. `null` = evento que o Financeiro não guarda
  * no cache (ex.: request.*, que serão tratados pelos módulos de domínio a partir da F4).
+ *
+ * Contrato V1 do Core (mapa-interoperabilidade §6): todo evento de cadastro leva o estado completo, `name` e
+ * `active`. Evento antigo sem `active` cai na regra de antes (ação `disabled`/`offboarded`/`deleted`, status).
  */
 export function toMasterRecord(env: Envelope): MasterRecord | null {
   const p = env.payload;
   const str = (k: string) => (typeof p[k] === 'string' && p[k] !== '' ? (p[k] as string) : undefined);
+  const bool = (k: string) => (typeof p[k] === 'boolean' ? (p[k] as boolean) : undefined);
   const required = (k: string) => {
     const v = str(k);
     if (!v) throw new BadRequestException(`${k} ausente.`);
@@ -45,19 +51,44 @@ export function toMasterRecord(env: Envelope): MasterRecord | null {
   };
   const [family, action] = env.event_type.split('.');
   switch (family) {
-    case 'user':
-      return { kind: 'USER', axisId: required('user_id'), name: str('email'), active: action !== 'disabled', data: p };
-    case 'collaborator':
-      return { kind: 'COLLABORATOR', axisId: required('collaborator_id'), name: str('name'), active: action === 'offboarded' ? false : undefined, data: p };
+    case 'user': {
+      // user.disabled sempre bloqueia; nos demais vale `active` e, sem ele, `status` (`active`/`disabled`).
+      const status = str('status');
+      const active = action === 'disabled' ? false : (bool('active') ?? (status ? status !== 'disabled' : true));
+      return { kind: 'USER', axisId: required('user_id'), code: str('email'), name: str('name') ?? str('email'), active, data: p };
+    }
+    case 'collaborator': {
+      // F6: desligado = inativo também no `updated` (não só no `offboarded`).
+      const status = str('status');
+      const active = action === 'offboarded' ? false : (bool('active') ?? (status ? status !== 'desligado' : undefined));
+      return { kind: 'COLLABORATOR', axisId: required('collaborator_id'), code: str('matricula'), name: str('name'), active, data: p };
+    }
     case 'client':
-      // O código do cliente no Core é numérico.
-      return { kind: 'CLIENT', axisId: required('client_id'), code: typeof p['code'] === 'number' ? String(p['code']) : str('code'), name: str('name'), data: p };
+      // O código do cliente no Core é numérico; `name` é a razão social (evento antigo só tinha `legal_name` ou nada).
+      return {
+        kind: 'CLIENT',
+        axisId: required('client_id'),
+        code: typeof p['code'] === 'number' ? String(p['code']) : str('code'),
+        name: str('name') ?? str('legal_name'),
+        active: action === 'deleted' ? false : bool('active'),
+        data: p,
+      };
     case 'project': {
       const status = str('status');
       return { kind: 'PROJECT', axisId: required('project_id'), code: str('code'), name: str('name'), active: status ? !INACTIVE_PROJECT_STATUS.includes(status) : undefined, data: p };
     }
     case 'cost_center':
-      return { kind: 'COST_CENTER', axisId: required('cost_center_id'), code: str('code'), name: str('name'), active: typeof p['active'] === 'boolean' ? (p['active'] as boolean) : undefined, data: p };
+      return { kind: 'COST_CENTER', axisId: required('cost_center_id'), code: str('code'), name: str('name'), active: bool('active'), data: p };
+    case 'site':
+      return { kind: 'SITE', axisId: required('site_id'), code: str('code'), name: str('name'), active: bool('active'), data: p };
+    case 'job_title':
+      return { kind: 'JOB_TITLE', axisId: required('job_title_id'), name: str('name'), active: action === 'deleted' ? false : (bool('active') ?? true), data: p };
+    case 'holiday': {
+      // A data do feriado vai em `code` (`AAAA-MM-DD`): é por ela que o cálculo de dias úteis procura.
+      const date = required('date').slice(0, 10);
+      if (!DATE_ONLY.test(date)) throw new BadRequestException('date inválida no feriado (use AAAA-MM-DD).');
+      return { kind: 'HOLIDAY', axisId: required('holiday_id'), code: date, name: str('name'), active: action === 'deleted' ? false : (bool('active') ?? true), data: p };
+    }
     default:
       return null;
   }
@@ -73,10 +104,31 @@ const PROJECT_STATE_KEYS = [
   'cost_center_id',
   'cost_center_code',
   'cost_center_name',
+  'site_id',
+  'site_code',
+  'site_name',
   'responsible_collaborator_id',
   'planned_start_date',
   'planned_end_date',
 ];
+
+/**
+ * F5: ids do Core citados por compra, reembolso, adiantamento ou alocação que o cache ainda não conhece. O
+ * lançamento é gravado assim mesmo (dado financeiro não se perde); o aviso fica no inbox e no log, e some quando o
+ * cadastro chegar (o cache é por id). Ex.: centro de custo criado no Core antes de o Financeiro assinar `cost_center.*`.
+ */
+export async function unknownReferences(tx: Pick<Prisma.TransactionClient, 'axisMasterCache'>, p: Record<string, unknown>): Promise<string[]> {
+  const id = (k: string) => (typeof p[k] === 'string' && p[k] !== '' ? (p[k] as string) : null);
+  const checks: Array<[MasterKind, string | null, string]> = [
+    ['COST_CENTER', id('cost_center_id'), 'centro de custo'],
+    ['PROJECT', id('project_id'), 'projeto'],
+  ];
+  const out: string[] = [];
+  for (const [kind, value, label] of checks) {
+    if (value && (await missingFromCache(tx, kind, [value])).length > 0) out.push(`${label} ${value} não está no cache do Core.`);
+  }
+  return out;
+}
 
 /** Pedido de cotação do Core (integracao-core-financeiro §4) → linha da fila do orçamentista. */
 export function toQuoteRequest(env: Envelope) {
@@ -199,12 +251,16 @@ export class AxisWebhookService {
     if (!message) return { status: 'duplicate', event_id: env.event_id };
 
     try {
-      const outcome = await this.prisma.$transaction((tx) => this.handle(tx, env));
+      const warnings: string[] = [];
+      const outcome = await this.prisma.$transaction((tx) => this.handle(tx, env, warnings));
+      // Aviso (F5): o evento foi aplicado, mas citou id que o cache não conhece. Fica no inbox e no log.
+      const warning = warnings.length ? `aviso: ${warnings.join(' ')}`.slice(0, 500) : null;
+      if (warning) this.logger.warn(`Evento ${env.event_type} ${env.event_id} aplicado com ${warning}`);
       await this.prisma.integrationMessage.update({
         where: { id: message.id },
-        data: { status: outcome === 'ignored' ? 'IGNORED' : 'PROCESSED', processedAt: new Date(), attempts: { increment: 1 }, lastError: outcome === 'out_of_order' ? 'out_of_order' : null },
+        data: { status: outcome === 'ignored' ? 'IGNORED' : 'PROCESSED', processedAt: new Date(), attempts: { increment: 1 }, lastError: outcome === 'out_of_order' ? 'out_of_order' : warning },
       });
-      return { status: outcome === 'ignored' ? 'ignored' : 'processed', event_id: env.event_id };
+      return { status: outcome === 'ignored' ? 'ignored' : 'processed', event_id: env.event_id, ...(warning ? { warning } : {}) };
     } catch (err) {
       if (err instanceof UnprocessableEventError) {
         // Nada a reentregar: a transação foi desfeita, o evento fica FAILED com a causa legível e o Core recebe 200.
@@ -218,15 +274,18 @@ export class AxisWebhookService {
     }
   }
 
-  private async handle(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed' | 'ignored' | 'out_of_order'> {
+  private async handle(tx: Prisma.TransactionClient, env: Envelope, warnings: string[] = []): Promise<'processed' | 'ignored' | 'out_of_order'> {
     // Documento novo: o Financeiro baixa quando precisa (pelo pedido de cotação); não é estado do projeto.
     if (env.event_type === 'project.document_added') return 'ignored';
     if (env.event_type === 'project.quote_requested') return this.handleQuoteRequested(tx, env);
     if (env.event_type === 'project.approved') return this.handleProjectApproved(tx, env);
-    if (isCcEvent(env.event_type)) return this.handleCostCenterEvent(tx, env);
+    if (isCcEvent(env.event_type)) return this.handleCostCenterEvent(tx, env, warnings);
     const master = toMasterRecord(env);
     if (!master) return 'ignored';
-    return (await this.upsertMaster(tx, master, new Date(env.occurred_at))) ? 'processed' : 'out_of_order';
+    if (!(await this.upsertMaster(tx, master, new Date(env.occurred_at)))) return 'out_of_order';
+    // F2: o mapa cargo → função mostra o nome do cargo do Core; renomear no Core renomeia aqui.
+    if (master.kind === 'JOB_TITLE' && master.name) await tx.jobTitleRoleMap.updateMany({ where: { axisJobTitleId: master.axisId, jobTitleName: { not: master.name } }, data: { jobTitleName: master.name } });
+    return 'processed';
   }
 
   /**
@@ -261,8 +320,9 @@ export class AxisWebhookService {
    * Compras, reembolsos, adiantamentos e alocação (centros-de-custo-especificacao §2): viram lançamentos e
    * vigências; a alocação também atualiza o colaborador no cache. Depois, a faixa do orçamento do CC.
    */
-  private async handleCostCenterEvent(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed' | 'ignored'> {
+  private async handleCostCenterEvent(tx: Prisma.TransactionClient, env: Envelope, warnings: string[] = []): Promise<'processed' | 'ignored'> {
     const outcome = await handleCcEvent(tx, env.event_type, env.event_id, env.occurred_at, env.payload);
+    if (outcome === 'processed') warnings.push(...(await unknownReferences(tx, env.payload)));
     if (env.event_type === 'collaborator.cost_center_changed') {
       const master = toMasterRecord(env);
       if (master) await this.upsertMaster(tx, master, new Date(env.occurred_at));

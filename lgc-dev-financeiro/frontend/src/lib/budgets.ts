@@ -26,6 +26,8 @@ export interface CoreProject {
   active: boolean;
   client: { code: string | null; name: string | null } | null;
   costCenter: { code: string | null; name: string | null } | null;
+  /** Site do projeto no Core (nulo enquanto o projeto não tem site). */
+  site?: { axisId: string; code: string | null; name: string | null } | null;
   plannedStartDate: string | null;
   plannedEndDate: string | null;
 }

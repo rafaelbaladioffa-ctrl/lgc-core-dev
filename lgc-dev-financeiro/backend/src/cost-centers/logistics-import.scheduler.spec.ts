@@ -16,7 +16,14 @@ const CC1 = '11111111-1111-4111-8111-111111111111';
 const CC2 = '22222222-2222-4222-8222-222222222222';
 const P1 = '33333333-3333-4333-8333-333333333333';
 
-function fixture(consumption: Consumption) {
+/** Cache do Core com os CCs e o projeto do exemplo (F5: id fora do cache gera aviso, não bloqueia). */
+const CACHE = [
+  { kind: 'COST_CENTER', axisId: CC1 },
+  { kind: 'COST_CENTER', axisId: CC2 },
+  { kind: 'PROJECT', axisId: P1 },
+];
+
+function fixture(consumption: Consumption, cache: Row[] = CACHE) {
   const entries: Row[] = [];
   const reversed = () => new Set(entries.filter((e) => e.reversesId).map((e) => e.reversesId));
   const tx = {
@@ -31,6 +38,7 @@ function fixture(consumption: Consumption) {
     ccBudget: { aggregate: async () => ({ _sum: { amount: null } }) },
     ccSetting: { findUnique: async () => null, upsert: async () => ({}) },
     $executeRaw: vi.fn().mockResolvedValue(1),
+    axisMasterCache: { findMany: async ({ where }: Row) => cache.filter((c) => c.kind === where.kind && where.axisId.in.includes(c.axisId)) },
   };
   const prisma = { ...tx, $transaction: async (fn: (t: unknown) => unknown) => fn(tx) } as unknown as PrismaService;
   const logistics = { consumption: vi.fn(async (month: string) => consumption[month] ?? []) } as unknown as LogisticsClient & { consumption: ReturnType<typeof vi.fn> };
@@ -65,8 +73,8 @@ describe('importação diária do consumo da Logística', () => {
     const f = fixture(consumptionOf());
     const out = await f.scheduler.runOnce('2026-11-08');
     expect(out).toEqual([
-      { month: '2026-10', created: 1, replaced: 0, unchanged: 0, withoutCostCenter: 0 },
-      { month: '2026-11', created: 2, replaced: 0, unchanged: 0, withoutCostCenter: 1 },
+      { month: '2026-10', created: 1, replaced: 0, unchanged: 0, withoutCostCenter: 0, unknownCostCenters: [], unknownProjects: [] },
+      { month: '2026-11', created: 2, replaced: 0, unchanged: 0, withoutCostCenter: 1, unknownCostCenters: [], unknownProjects: [] },
     ]);
     expect(f.live().map((e) => [e.sourceRef, e.amount.toFixed(2)]).sort((a, b) => a[0].localeCompare(b[0]))).toEqual([
       [`logistica:2026-10:${CC1}:${P1}`, '300.00'],
@@ -86,8 +94,8 @@ describe('importação diária do consumo da Logística', () => {
 
     const again = await f.scheduler.runOnce('2026-11-09');
     expect(again).toEqual([
-      { month: '2026-10', created: 0, replaced: 0, unchanged: 1, withoutCostCenter: 0 },
-      { month: '2026-11', created: 0, replaced: 0, unchanged: 2, withoutCostCenter: 1 },
+      { month: '2026-10', created: 0, replaced: 0, unchanged: 1, withoutCostCenter: 0, unknownCostCenters: [], unknownProjects: [] },
+      { month: '2026-11', created: 0, replaced: 0, unchanged: 2, withoutCostCenter: 1, unknownCostCenters: [], unknownProjects: [] },
     ]);
     expect(f.entries).toHaveLength(before);
 
@@ -114,6 +122,13 @@ describe('importação diária do consumo da Logística', () => {
     const out = await f.scheduler.runOnce('2026-11-08');
     expect(out[0]).toEqual({ month: '2026-10', error: 'A Logística não respondeu. Tente de novo em instantes.' });
     expect(out[1]).toMatchObject({ month: '2026-11', created: 2 });
+  });
+
+  it('CC ou projeto fora do cache do Core: lança assim mesmo e devolve os ids para a tela avisar (F5)', async () => {
+    const f = fixture({ '2026-11': novemberOf() }, [{ kind: 'COST_CENTER', axisId: CC1 }]);
+    const out = await f.service.importLogistics({ userId: 'u1' } as never, '2026-11');
+    expect(out).toMatchObject({ created: 2, unknownCostCenters: [CC2], unknownProjects: [P1] });
+    expect(f.live()).toHaveLength(2);
   });
 
   it('só roda agendada com SCHEDULER_ENABLED=true', async () => {

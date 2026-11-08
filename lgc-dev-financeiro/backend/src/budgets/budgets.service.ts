@@ -14,6 +14,7 @@ import { parseDate, todaySaoPaulo } from '../cost-centers/cc-engine.js';
 import { raiseBudgetAlert } from './budget-alerts.js';
 import { cachedCostCenter } from './revision-won.js';
 import { commitmentAlert, postWonCommitments } from './won-commitments.js';
+import { holidaySet } from '../integration/master-cache.js';
 
 export const COST_PERMISSION = 'budget:read_cost';
 const canSeeCost = (u: AuthenticatedUser) => u.permissions.includes(COST_PERMISSION);
@@ -96,6 +97,8 @@ export function projectInfo(p: CacheRow, client: ClientRow) {
     active: p.active,
     client: client ? { code: client.code, name: client.name } : null,
     costCenter: ccCode || ccName ? { code: ccCode, name: ccName } : null,
+    /** Site do projeto no Core (`site_id` do evento project.*): o deslocamento da revisão sugere o destino ligado a ele. */
+    site: str(data.site_id) ? { axisId: str(data.site_id)!, code: str(data.site_code), name: str(data.site_name) } : null,
     plannedStartDate: start && DATE_ONLY.test(start) ? start : null,
     plannedEndDate: end && DATE_ONLY.test(end) ? end : null,
   };
@@ -324,6 +327,11 @@ export class BudgetsService {
     return this.loadRevision(id);
   }
 
+  /** Feriados ativos do Core (cache `HOLIDAY`); `null` enquanto o Core não enviou o calendário. */
+  holidays(tx: Prisma.TransactionClient = this.prisma) {
+    return holidaySet(tx);
+  }
+
   /** Projeto do cache do Core, ou nulo se ainda não sincronizado. */
   projectInfoOrNull(axisProjectId: string) {
     return this.project(axisProjectId).catch(() => null);
@@ -346,7 +354,7 @@ export class BudgetsService {
    * Modelo `aws_sow` (§7.2–§7.4): horas-meta, horas T, indicadores e valores do bid, com o que ainda impede
    * submeter. Nulo nos outros modelos.
    */
-  awsInfo(rev: RevisionFull, project: ProjectInfo | null) {
+  awsInfo(rev: RevisionFull, project: ProjectInfo | null, holidays: ReadonlySet<string> | null = null) {
     if (rev.budget.model !== 'aws_sow') return null;
     const missing: Array<'sow' | 'bid_template'> = [];
     if (!rev.sow) missing.push('sow');
@@ -376,6 +384,7 @@ export class BudgetsService {
           platformDays: inputs.platform?.days ?? 0,
           platformDaily: inputs.platform?.dailyBilled ?? null,
         },
+        holidays,
       });
     }
     const blockers = [
@@ -389,14 +398,15 @@ export class BudgetsService {
   async getRevision(id: string, user: AuthenticatedUser) {
     const rev = await this.loadRevision(id);
     const cost = canSeeCost(user);
-    const [project, siblings, current, events] = await Promise.all([
+    const [project, siblings, current, events, holidays] = await Promise.all([
       this.project(rev.budget.axisProjectId).catch(() => null),
       this.prisma.budgetRevision.findMany({ where: { budgetId: rev.budgetId }, orderBy: { number: 'desc' }, select: { id: true, number: true, status: true } }),
       this.prisma.parameterSet.findFirst({ where: { status: 'vigente' }, select: { id: true, code: true } }),
       this.prisma.budgetRevisionEvent.findMany({ where: { revisionId: id }, orderBy: { createdAt: 'asc' } }),
+      rev.budget.model === 'aws_sow' ? this.holidays() : Promise.resolve(null),
     ]);
     const set = rev.parameterSet;
-    const aws = this.awsInfo(rev, project);
+    const aws = this.awsInfo(rev, project, holidays);
     return {
       id: rev.id,
       number: rev.number,
@@ -597,7 +607,8 @@ export class BudgetsService {
       const extra: Record<string, unknown> = {};
       if (action === 'submit') {
         const project = rev.budget.model === 'aws_sow' ? await this.project(rev.budget.axisProjectId).catch(() => null) : null;
-        const blockers = [...submitBlockers(rev.result as never), ...(this.awsInfo(rev, project)?.blockers ?? [])];
+        const holidays = rev.budget.model === 'aws_sow' ? await this.holidays(tx) : null;
+        const blockers = [...submitBlockers(rev.result as never), ...(this.awsInfo(rev, project, holidays)?.blockers ?? [])];
         if (blockers.length) throw new BadRequestException(`Não dá para submeter: ${blockers.join(' ')}`);
         data.submittedAt = now;
       }

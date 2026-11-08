@@ -201,12 +201,12 @@ Valores em reais como string com 2 casas; percentuais como fração string com 4
 | `GET /overhead-rules` | read | `OverheadRule[]` |
 | `PUT /overhead-rules/:sourceCostCenterId` | write | `{ driver, active, notes?, targets: [{ costCenterId, percent? }] }` |
 | `DELETE /overhead-rules/:sourceCostCenterId` | write | 204 |
-| `GET /job-title-maps` | write | `{ maps, unmapped, roles }` |
-| `PUT /job-title-maps/:jobTitleId` | write | `{ jobTitleName, roleKey }` |
+| `GET /job-title-maps` | write | `{ maps: [{ jobTitleId, jobTitleName, roleKey, active }], unmapped, roles }`: nome do cargo do cache `JOB_TITLE` do Core (`active: false` = excluído no Core); `unmapped` junta os cargos do cache e os dos colaboradores |
+| `PUT /job-title-maps/:jobTitleId` | write | `{ roleKey, jobTitleName? }`: o nome gravado é o do Core; `jobTitleName` só vale para cargo que o Financeiro ainda não recebeu; cargo excluído é recusado |
 | `POST /cost-centers/payroll/:month` | write | `{ month, created, replaced, unchanged, unmapped: [{ collaboratorId, name, jobTitleName }] }` |
 | `POST /field-labor/import` | write | corpo `{ from, to }` (AAAA-MM-DD, até 62 dias) → `{ from, to, hours, launchedHours, created, replaced, unchanged, invalidRows, pending: [{ collaboratorId, collaboratorName, projectId, projectCode, reason, reasonLabel, days, hours }] }` (a rotina diária chama a mesma importação, §2.2) |
 | `GET /field-labor/pending?from&to` | write | pendências vigentes (último estado importado), mesmo formato de `pending` |
-| `POST /cost-centers/logistics-import/:month` | write | `{ month, created, replaced, unchanged, withoutCostCenter }` (a rotina diária chama a mesma importação, §2.1) |
+| `POST /cost-centers/logistics-import/:month` | write | `{ month, created, replaced, unchanged, withoutCostCenter, unknownCostCenters, unknownProjects }` (a rotina diária chama a mesma importação, §2.1). `unknown*` = ids que o cache do Core não conhece: lançados assim mesmo, com aviso na tela e no log (F5) |
 | `GET /advances?status=aberto\|prestado` | read ou read_own | `Advance[]` |
 | `POST /advances/:id/settle` | write | `{ spentAmount, notes? }` → `Advance` |
 | `GET /purchases?costCenterId&status` | read ou read_own | `Purchase[]` |

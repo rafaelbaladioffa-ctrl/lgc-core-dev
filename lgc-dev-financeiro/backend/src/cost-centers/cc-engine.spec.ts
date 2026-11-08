@@ -37,6 +37,14 @@ describe('período', () => {
     // 2026-11-02 (seg), 03, 04
     expect(days.map((x) => x.toISOString().slice(0, 10))).toEqual(['2026-11-02', '2026-11-03', '2026-11-04']);
   });
+
+  it('dias úteis sem os feriados do Core (F3)', () => {
+    const days = workingDays(parsePeriod('2026-11', '2026-11'), '2026-11-30', new Set(['2026-11-02', '2026-11-20', '2026-11-15']));
+    const iso = days.map((x) => x.toISOString().slice(0, 10));
+    expect(iso).not.toContain('2026-11-02');
+    expect(iso).not.toContain('2026-11-20');
+    expect(days).toHaveLength(21 - 2); // novembro/2026 tem 21 dias úteis; 15/11 é domingo
+  });
 });
 
 describe('alocação', () => {

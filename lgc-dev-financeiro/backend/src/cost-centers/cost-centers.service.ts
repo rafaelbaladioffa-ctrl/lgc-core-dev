@@ -32,6 +32,7 @@ import { CcContext, type CcNode } from './cc-context.js';
 import { NOT_PROJECT_COMMITMENT, refreshBudgetStatus, yearConsumption } from './cc-budget-status.js';
 import { advanceRef, releaseCommitments } from './cc-events.js';
 import { LogisticsClient } from './logistics.client.js';
+import { missingFromCache } from '../integration/master-cache.js';
 import { COST_CATEGORIES, type BudgetDto, type CreateEntryDto, type JobTitleMapDto, type OverheadRuleDto, type SettleAdvanceDto } from './cost-centers.dto.js';
 
 /** Ator dos lançamentos da importação diária. */
@@ -91,7 +92,7 @@ export class CostCentersService {
     const rules = await this.prisma.ccOverheadRule.findMany({ where: { active: true }, include: { targets: true } });
     let overhead: PeriodTotals['overhead'] = { received: new Map(), ceded: new Map(), warnings: [] };
     if (rules.length > 0) {
-      const days = workingDays(period);
+      const days = workingDays(period, undefined, await this.ctx.holidays(period));
       const allocations = await this.ctx.allocations(null, period);
       const headcount = new Map<string, Dec>();
       for (const a of allocations) {
@@ -455,37 +456,69 @@ export class CostCentersService {
   // Cargos × funções e folha
   // -------------------------------------------------------------------------
 
+  /**
+   * Cargos do Core × funções do orçamento (F2). O nome do cargo vem do cache `JOB_TITLE` (evento `job_title.*`);
+   * sem o cargo no cache, do nome que o colaborador trouxe; o gravado no mapa é só o último recurso. A lista de
+   * cargos sem função junta os cargos ativos do cache e os cargos dos colaboradores ativos.
+   */
   async jobTitleMaps() {
-    const [maps, params, collaborators] = await Promise.all([
+    const [maps, params, collaborators, jobTitles] = await Promise.all([
       this.prisma.jobTitleRoleMap.findMany({ orderBy: { jobTitleName: 'asc' } }),
       this.ctx.paramsAt(parseDate(todaySaoPaulo())),
       this.prisma.axisMasterCache.findMany({ where: { kind: 'COLLABORATOR', active: true } }),
+      this.prisma.axisMasterCache.findMany({ where: { kind: 'JOB_TITLE' }, orderBy: { name: 'asc' } }),
     ]);
+    const cached = new Map(jobTitles.map((j) => [j.axisId, j]));
     const mapped = new Set(maps.map((m) => m.axisJobTitleId));
     const unmapped = new Map<string, { jobTitleId: string; jobTitleName: string | null; collaborators: number }>();
+    for (const j of jobTitles) if (j.active && !mapped.has(j.axisId)) unmapped.set(j.axisId, { jobTitleId: j.axisId, jobTitleName: j.name, collaborators: 0 });
     for (const c of collaborators) {
       const data = (c.data ?? {}) as Record<string, unknown>;
       const jt = typeof data['job_title_id'] === 'string' ? (data['job_title_id'] as string) : null;
       if (!jt || mapped.has(jt)) continue;
-      const row = unmapped.get(jt) ?? { jobTitleId: jt, jobTitleName: typeof data['job_title_name'] === 'string' ? (data['job_title_name'] as string) : null, collaborators: 0 };
+      const fallbackName = typeof data['job_title_name'] === 'string' ? (data['job_title_name'] as string) : null;
+      const row = unmapped.get(jt) ?? { jobTitleId: jt, jobTitleName: cached.get(jt)?.name ?? fallbackName, collaborators: 0 };
       row.collaborators++;
       unmapped.set(jt, row);
     }
     return {
-      maps: maps.map((m) => ({ jobTitleId: m.axisJobTitleId, jobTitleName: m.jobTitleName, roleKey: m.roleKey })),
-      unmapped: [...unmapped.values()],
+      maps: maps
+        .map((m) => {
+          const j = cached.get(m.axisJobTitleId);
+          return { jobTitleId: m.axisJobTitleId, jobTitleName: j?.name ?? m.jobTitleName, roleKey: m.roleKey, active: j ? j.active : true };
+        })
+        .sort((a, b) => a.jobTitleName.localeCompare(b.jobTitleName, 'pt-BR')),
+      unmapped: [...unmapped.values()].sort((a, b) => (a.jobTitleName ?? '').localeCompare(b.jobTitleName ?? '', 'pt-BR')),
       roles: (params?.roles ?? []).map((r) => ({ roleKey: r.roleKey, label: r.label })),
     };
   }
 
+  /**
+   * Mapeia o cargo do Core para a função. O nome gravado é o do Core (cache `JOB_TITLE`, ou o que o colaborador
+   * trouxe), nunca o enviado pelo navegador; o `jobTitleName` do corpo só vale para cargo que o Financeiro ainda não
+   * conhece por nenhum dos dois caminhos. Cargo excluído no Core não recebe mapeamento novo.
+   */
   async putJobTitleMap(user: AuthenticatedUser, jobTitleId: string, dto: JobTitleMapDto) {
     if (!/^[0-9a-f-]{36}$/i.test(jobTitleId)) throw new BadRequestException('Cargo inválido.');
+    const name = await this.coreJobTitleName(jobTitleId, dto.jobTitleName);
     const row = await this.prisma.jobTitleRoleMap.upsert({
       where: { axisJobTitleId: jobTitleId },
-      create: { axisJobTitleId: jobTitleId, jobTitleName: dto.jobTitleName.trim(), roleKey: dto.roleKey, updatedBy: user.userId },
-      update: { jobTitleName: dto.jobTitleName.trim(), roleKey: dto.roleKey, updatedBy: user.userId },
+      create: { axisJobTitleId: jobTitleId, jobTitleName: name, roleKey: dto.roleKey, updatedBy: user.userId },
+      update: { jobTitleName: name, roleKey: dto.roleKey, updatedBy: user.userId },
     });
     return { jobTitleId: row.axisJobTitleId, jobTitleName: row.jobTitleName, roleKey: row.roleKey };
+  }
+
+  private async coreJobTitleName(jobTitleId: string, sent: string | undefined): Promise<string> {
+    const cached = await this.prisma.axisMasterCache.findUnique({ where: { kind_axisId: { kind: 'JOB_TITLE', axisId: jobTitleId } } });
+    if (cached && !cached.active) throw new BadRequestException('Este cargo foi excluído no Axis Core e não pode ser mapeado.');
+    if (cached?.name) return cached.name;
+    const collaborator = await this.prisma.axisMasterCache.findFirst({ where: { kind: 'COLLABORATOR', data: { path: ['job_title_id'], equals: jobTitleId } } });
+    const fromCollaborator = (collaborator?.data as Record<string, unknown> | undefined)?.['job_title_name'];
+    if (typeof fromCollaborator === 'string' && fromCollaborator.trim()) return fromCollaborator.trim();
+    const typed = sent?.trim();
+    if (typed) return typed;
+    throw new BadRequestException('Cargo não encontrado nos cadastros do Axis Core. Reenvie os cadastros pelo Core e tente de novo.');
   }
 
   /** Folha da competência por CC: custo mensal da função × dias alocados ÷ dias do mês (spec §4). */
@@ -523,7 +556,11 @@ export class CostCentersService {
     return { month: monthText, ...stats, unmapped: [...unmapped.values()] };
   }
 
-  /** Consumo de material da Logística na competência (spec §2). Linhas sem CC são contadas e ignoradas. */
+  /**
+   * Consumo de material da Logística na competência (spec §2). Linhas sem CC são contadas e ignoradas. CC ou projeto
+   * que o cache do Core não conhece (F5) não bloqueia: o lançamento é feito e os ids voltam em `unknownCostCenters` /
+   * `unknownProjects` para a tela avisar (o lançamento só aparece no CC quando o cadastro chegar do Core).
+   */
   importLogistics(user: AuthenticatedUser, monthText: string) {
     return this.runLogisticsImport(monthText, user.userId);
   }
@@ -551,15 +588,20 @@ export class CostCentersService {
       const amount = new D(r.value || 0).toDecimalPlaces(2).plus(prev?.amount ?? 0);
       lines.set(ref, { ref, costCenterAxisId: r.cost_center_id, projectAxisId: r.project_id, amount, description: `Consumo de material da Logística ${monthText}` });
     }
+    const values = [...lines.values()];
+    const [unknownCostCenters, unknownProjects] = await Promise.all([
+      missingFromCache(this.prisma, 'COST_CENTER', values.map((l) => l.costCenterAxisId)),
+      missingFromCache(this.prisma, 'PROJECT', values.map((l) => l.projectAxisId)),
+    ]);
     const stats = await this.prisma.$transaction(
       async (tx) => {
         // Botão e agendador não correm juntos na mesma competência: o segundo espera o primeiro e então compara com o vigente.
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`financeiro-logistics-import:${monthText}`}))`;
-        return this.replaceMonth(tx, `logistica:${monthText}:`, [...lines.values()], { competence: month.start, category: 'material', source: 'logistica', actor });
+        return this.replaceMonth(tx, `logistica:${monthText}:`, values, { competence: month.start, category: 'material', source: 'logistica', actor });
       },
       { timeout: 60_000 },
     );
-    return { month: monthText, ...stats, withoutCostCenter };
+    return { month: monthText, ...stats, withoutCostCenter, unknownCostCenters, unknownProjects };
   }
 
   /**

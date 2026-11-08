@@ -226,6 +226,7 @@ describe('SowService.applySuggestedTeam', () => {
       loadRevisionFull: vi.fn().mockResolvedValue(rev),
       projectInfoOrNull: vi.fn().mockResolvedValue(null),
       awsInfo: vi.fn().mockReturnValue({ quote: { suggestedTeam } }),
+      holidays: vi.fn().mockResolvedValue(null),
       updateRevision: vi.fn().mockResolvedValue({}),
     };
     const audit = { record: vi.fn().mockResolvedValue({}) };

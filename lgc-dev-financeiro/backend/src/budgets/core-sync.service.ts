@@ -23,7 +23,9 @@ interface CoreClient {
   id: string;
   code: number | string;
   legalName: string;
+  tradeName?: string | null;
   cnpj?: string | null;
+  active?: boolean;
   updatedAt: string;
 }
 
@@ -71,7 +73,9 @@ export class CoreSyncService {
     let updated = 0;
     await this.prisma.$transaction(async (tx) => {
       for (const c of clients) {
-        updated += await this.upsert(tx, 'CLIENT', c.id, String(c.code), c.legalName, true, { client_id: c.id, code: c.code, name: c.legalName, cnpj: c.cnpj ?? null }, c.updatedAt);
+        // Mesmas chaves do evento client.* (contrato V1): `name` = razão social, mais `legal_name` e `trade_name`.
+        const data = { client_id: c.id, code: c.code, name: c.legalName, legal_name: c.legalName, trade_name: c.tradeName ?? null, cnpj: c.cnpj ?? null };
+        updated += await this.upsert(tx, 'CLIENT', c.id, String(c.code), c.legalName, c.active ?? true, data, c.updatedAt);
       }
       for (const p of projects) {
         // Mesmas chaves do evento project.* (cadastros §10 do Core): quem lê o cache não depende da origem.

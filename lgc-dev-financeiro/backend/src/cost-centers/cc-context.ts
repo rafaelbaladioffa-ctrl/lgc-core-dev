@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { D, descendantsMap, type AllocationSpan, type Period } from './cc-engine.js';
 import type { PayrollParams, RoleCostInput } from '../budget-params/hourly-cost.js';
+import { holidaySet } from '../integration/master-cache.js';
 
 export type CcKind = 'divisao' | 'administrativo' | 'operacional' | 'equipe_tecnica';
 
@@ -114,6 +115,13 @@ export class CcContext {
   async roleMap() {
     const rows = await this.prisma.jobTitleRoleMap.findMany();
     return new Map(rows.map((r) => [r.axisJobTitleId, r.roleKey]));
+  }
+
+  /** Feriados ativos do Core no período (datas `AAAA-MM-DD`), para tirar dos dias úteis. Vazio sem calendário no cache. */
+  async holidays(period: Pick<Period, 'start' | 'end'>): Promise<Set<string>> {
+    const from = period.start.toISOString().slice(0, 10);
+    const to = new Date(period.end.getTime() - 1).toISOString().slice(0, 10);
+    return (await holidaySet(this.prisma, { from, to })) ?? new Set();
   }
 
   hoursPerDay(params: ParamsWithRoles | null) {

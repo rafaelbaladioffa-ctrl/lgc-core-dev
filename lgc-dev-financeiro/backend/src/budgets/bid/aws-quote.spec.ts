@@ -123,6 +123,24 @@ describe('peças', () => {
     expect(businessDays(null, '2030-02-01')).toBeNull();
   });
 
+  it('dias úteis descontam os feriados ativos do Core (F3); feriado no fim de semana não conta duas vezes', () => {
+    // 2030-02-01 (sex) a 2030-02-08 (sex): 6 dias úteis; 04/02 (seg) feriado, 02/02 (sáb) também.
+    expect(businessDays('2030-02-01', '2030-02-08')).toBe(6);
+    expect(businessDays('2030-02-01', '2030-02-08', new Set(['2030-02-04', '2030-02-02']))).toBe(5);
+    expect(businessDays('2030-02-04', '2030-02-04', new Set(['2030-02-04']))).toBe(0);
+  });
+
+  it('a janela da cotação usa os feriados e só avisa quando o Core ainda não mandou o calendário', () => {
+    // Janela 2030-02-01 a 2030-02-10: 6 dias úteis; com o feriado de 04/02, 5.
+    const semCalendario = computeAwsQuote(input());
+    expect(semCalendario.windowBusinessDays).toBe(6);
+    expect(semCalendario.warnings).toContain('Sem o calendário de feriados do Axis Core: os dias úteis da janela contam só segunda a sexta.');
+    const comFeriado = computeAwsQuote(input({ holidays: new Set(['2030-02-04']) }));
+    expect(comFeriado.windowBusinessDays).toBe(5);
+    expect(comFeriado.warnings.some((w) => w.includes('feriados'))).toBe(false);
+    expect(computeAwsQuote(input({ holidays: new Set() })).warnings.some((w) => w.includes('feriados'))).toBe(false);
+  });
+
   it('distribuição com sobra na primeira linha', () => {
     expect(distribute(10, [1, 1, 1])).toEqual([4, 3, 3]);
     expect(distribute(10, [0, 0])).toEqual([0, 0]);

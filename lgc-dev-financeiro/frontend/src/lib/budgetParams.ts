@@ -87,14 +87,41 @@ export interface BudgetMaterial {
   updatedAt: string;
 }
 
+/** Site do Core ligado ao destino (cache do Financeiro). */
+export interface CoreSite {
+  axisId: string;
+  code: string | null;
+  name: string | null;
+  city: string | null;
+  state: string | null;
+  clientId: string | null;
+  active: boolean;
+}
+
 export interface BudgetDestination {
   id: string;
   name: string;
   kmRoundTrip: string;
   tollPerDay: string;
   routeNotes: string | null;
+  /** Site do Core (nulo = destino sem site cadastrado no Core). */
+  siteAxisId: string | null;
+  site: CoreSite | null;
   active: boolean;
   updatedAt: string;
+}
+
+/** "GRU53 — Prédio 53, Guarulhos/SP" (mesmo texto do seletor). */
+export function siteLabel(site: Pick<CoreSite, 'code' | 'name' | 'city' | 'state'>): string {
+  const head = [site.code, site.name].filter(Boolean).join(' — ');
+  const place = [site.city, site.state].filter(Boolean).join('/');
+  return place ? `${head}, ${place}` : head;
+}
+
+/** Destino ligado ao site do projeto, para o deslocamento da revisão vir preenchido. */
+export function destinationForSite(destinations: BudgetDestination[], siteAxisId: string | null | undefined): BudgetDestination | null {
+  if (!siteAxisId) return null;
+  return destinations.find((d) => d.active && d.siteAxisId === siteAxisId) ?? null;
 }
 
 const qs = (includeInactive: boolean) => (includeInactive ? '?includeInactive=true' : '');

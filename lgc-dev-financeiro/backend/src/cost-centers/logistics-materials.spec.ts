@@ -86,6 +86,25 @@ describe('LogisticsClient — materiais', () => {
     await expect(new LogisticsClient(config(env)).materialsByCodes(['A-1'], down)).rejects.toBeInstanceOf(BadGatewayException);
   });
 
+  it('missingCodes (F4): devolve os códigos que não voltaram como material ativo, consultando de 200 em 200', async () => {
+    const client = new LogisticsClient(config(env));
+    const fetchFn = ok({
+      items: [
+        { id: 'u1', code: 'A-1', shortDescription: 'Ativo', unit: 'un', active: true },
+        { id: 'u2', code: 'A-2', shortDescription: 'Inativo', unit: 'un', active: false },
+      ],
+      notFound: ['A-3'],
+    });
+    expect(await client.missingCodes(['A-1', 'A-2', 'A-3', 'A-1'], fetchFn)).toEqual(['A-2', 'A-3']);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    const many = Array.from({ length: 450 }, (_, i) => `C-${i}`);
+    const paged = ok({ items: [], notFound: [] });
+    expect(await client.missingCodes(many, paged)).toHaveLength(450);
+    expect(paged).toHaveBeenCalledTimes(3);
+    const down = (async () => new Response('', { status: 503 })) as unknown as typeof fetch;
+    await expect(client.missingCodes(['A-1'], down)).rejects.toBeInstanceOf(BadGatewayException);
+  });
+
   it('linha sem id ou código é ignorada; a descrição vem de shortDescription', () => {
     expect(toLogisticsMaterial({ code: 'A' })).toBeNull();
     expect(toLogisticsMaterial({ id: 'u', code: 'A', shortDescription: 'Parafuso', unit: 'un' })).toEqual({ id: 'u', code: 'A', description: 'Parafuso', unit: 'un' });

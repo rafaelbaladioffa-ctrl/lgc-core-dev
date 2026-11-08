@@ -1,9 +1,10 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadGatewayException, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import type { PrismaService } from '../../prisma/prisma.service.js';
 import type { AuditService } from '../../audit/audit.service.js';
 import type { OutboxService } from '../../integration/outbox.service.js';
 import type { AuthenticatedUser } from '../../auth/authenticated-request.js';
 import type { BudgetsService } from '../budgets.service.js';
+import type { LogisticsClient } from '../../cost-centers/logistics.client.js';
 import { BidService, resolveClientRef, uniqueByCode } from './bid.service.js';
 import { CORE_QUOTE_EVENT } from './core-quote.js';
 
@@ -17,7 +18,7 @@ const GESTOR: AuthenticatedUser = { userId: 'g', email: 'gestor@lgc.test', axisR
 
 const LINKED = [{ description: 'Cabo óptico 12F', unit: 'm', quantity: '1200', logisticsMaterialCode: 'RED-CAB-0123' }];
 
-function fixture({ model = 'aws_sow', blockers = [] as string[], materials = LINKED as unknown[] } = {}) {
+function fixture({ model = 'aws_sow', blockers = [] as string[], materials = LINKED as unknown[], missing = [] as string[] | Error } = {}) {
   const rev = {
     id: 'r2',
     number: 2,
@@ -46,16 +47,19 @@ function fixture({ model = 'aws_sow', blockers = [] as string[], materials = LIN
     loadRevisionFull: vi.fn().mockResolvedValue(rev),
     projectInfoOrNull: vi.fn().mockResolvedValue(null),
     awsInfo: vi.fn().mockReturnValue({ quote: blockers.length ? null : quote, blockers }),
+    holidays: vi.fn().mockResolvedValue(null),
     header: vi.fn().mockReturnValue({ schedule: { start: { value: '2030-02-01' }, end: { value: '2030-02-08' } } }),
     transition: vi.fn(async (_id: string, _a: string, _u: unknown, _r: unknown, hook?: (t: unknown, at: Date) => Promise<unknown>) => {
       if (hook) await hook(tx, new Date('2030-01-15T13:00:00Z'));
       return { id: 'r2' };
     }),
   } as unknown as BudgetsService & { transition: ReturnType<typeof vi.fn> };
-  const service = new BidService(prisma, { record: vi.fn() } as unknown as AuditService, outbox, budgets);
+  // F4: a Logística reconfere os códigos na aprovação; `missing` simula os que não voltaram (ou a Logística fora do ar).
+  const logistics = { missingCodes: vi.fn(async () => (missing instanceof Error ? Promise.reject(missing) : missing)) } as unknown as LogisticsClient & { missingCodes: ReturnType<typeof vi.fn> };
+  const service = new BidService(prisma, { record: vi.fn() } as unknown as AuditService, outbox, budgets, logistics);
   // O modelo do teste é fictício: as linhas do Bid Template (para sugestões e referências) vêm simuladas.
   vi.spyOn(service as unknown as { allTemplateLines: () => Promise<unknown[]> }, 'allTemplateLines').mockResolvedValue([]);
-  return { service, tx, outbox, budgets };
+  return { service, tx, outbox, budgets, logistics };
 }
 
 describe('BidService.approveSend', () => {
@@ -107,6 +111,30 @@ describe('BidService.approveSend', () => {
       quote: expect.objectContaining({ external_revision_id: 'r2', work_days: 6, materials: [expect.objectContaining({ material_code: 'RED-CAB-0123', quantity: '1200.000' })] }),
     });
     expect(JSON.stringify(outbox.record.mock.calls[0][2])).not.toMatch(/sow_document_id/);
+  });
+
+  it('reconfere os códigos na Logística: código inexistente ou inativo bloqueia com a lista (F4)', async () => {
+    const materials = [...LINKED, { description: 'Conector LC', unit: 'un', quantity: '40', logisticsMaterialCode: 'RED-CON-0001' }];
+    const { service, budgets, logistics, outbox } = fixture({ model: 'generico', materials, missing: ['RED-CON-0001'] });
+    await expect(service.approveSend('r2', GESTOR)).rejects.toThrow(/o código RED-CON-0001 não existe ou está inativo no catálogo da Logística/);
+    expect(logistics.missingCodes).toHaveBeenCalledWith(['RED-CAB-0123', 'RED-CON-0001']);
+    expect(budgets.transition).not.toHaveBeenCalled();
+    expect(outbox.record).not.toHaveBeenCalled();
+    // aws_sow passa pela mesma conferência depois do plano da Bid (o plano tem testes próprios).
+    const aws = fixture({ materials: LINKED, missing: ['RED-CAB-0123'] });
+    await expect(aws.service.assertMaterialsInLogistics({ materials: LINKED } as never)).rejects.toThrow(BadRequestException);
+    const dois = fixture({ model: 'generico', materials, missing: ['RED-CAB-0123', 'RED-CON-0001'] });
+    await expect(dois.service.approveSend('r2', GESTOR)).rejects.toThrow('os códigos RED-CAB-0123, RED-CON-0001 não existem ou estão inativos');
+  });
+
+  it('Logística fora do ar ou sem configuração: não envia material sem conferir (F4)', async () => {
+    const fora = fixture({ model: 'generico', missing: new BadGatewayException('A Logística não respondeu. Tente de novo em instantes.') });
+    await expect(fora.service.approveSend('r2', GESTOR)).rejects.toThrow(ServiceUnavailableException);
+    await expect(fora.service.approveSend('r2', GESTOR)).rejects.toThrow('Não dá para aprovar o envio sem conferir os materiais na Logística. A Logística não respondeu.');
+    expect(fora.budgets.transition).not.toHaveBeenCalled();
+    const semMaterial = fixture({ model: 'generico', materials: [], missing: new Error('não deveria consultar') });
+    await semMaterial.service.approveSend('r2', GESTOR);
+    expect(semMaterial.logistics.missingCodes).not.toHaveBeenCalled();
   });
 
   it('modelo genérico também recusa material sem código e revisão sem equipe', async () => {

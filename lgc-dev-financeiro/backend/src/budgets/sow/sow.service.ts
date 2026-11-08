@@ -217,7 +217,7 @@ export class SowService {
   async applySuggestedTeam(revisionId: string, user: AuthenticatedUser, opts: { onlyIfEmpty: boolean }) {
     const rev = await this.budgets.loadRevisionFull(revisionId);
     if (rev.status !== 'rascunho') throw new ConflictException(`A revisão R${rev.number} não está em rascunho.`);
-    const aws = this.budgets.awsInfo(rev, await this.budgets.projectInfoOrNull(rev.budget.axisProjectId));
+    const aws = this.budgets.awsInfo(rev, await this.budgets.projectInfoOrNull(rev.budget.axisProjectId), await this.budgets.holidays());
     const team = aws?.quote?.suggestedTeam;
     if (!team) throw new BadRequestException('Importe a SOW e o Bid Template para calcular a equipe pelas horas-meta da AWS.');
     const inputs = rev.inputs as unknown as BudgetInputs;
