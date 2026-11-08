@@ -259,6 +259,7 @@ model Warehouse {
   unitAxisId            String?         @map("unit_axis_id")
   projectAxisId         String?         @map("project_axis_id") // estoque de projeto/obra
   responsibleAxisUserId String?         @map("responsible_axis_user_id")
+  siteAxisId            String?         @map("site_axis_id") // site do Axis onde o almoxarifado fica (opcional; o endereço em texto continua)
   addressText           String?         @map("address_text")
   createdBy             String          @map("created_by")
   createdAt             DateTime        @default(now()) @map("created_at")
@@ -760,6 +761,8 @@ model Shipment {
   orderId      String         @map("order_id")
   status       ShipmentStatus @default(PRONTO)
   destination  String?
+  /// Site do Axis de destino (copiado da ordem; pode ser trocado na embalagem/expedição). `destination` é o texto do romaneio.
+  destinationSiteAxisId String? @map("destination_site_axis_id")
   carrier      String?
   route        String?
   vehicle      String?

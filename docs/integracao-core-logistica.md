@@ -13,7 +13,8 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
 | SSO por JWT compartilhado | Core → Logística | Funciona; tem falhas de segurança (§1) |
 | Launcher (`axisToken` de 90 s) | Core → Logística | Funciona |
 | Catálogo de compra e disponibilidade | Navegador do Core → Logística | Funciona via nginx; sem proxy no `vite dev` |
-| Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística entende `material_request.*` com destino, `site.*` e `cost_center.*`; o Core emite `site.*` e, desde 2026-11-08, `material_request.approved/cancel_requested` do **envio de material para obra** (§3.1); a compra de material ainda não emite `material_request.*` |
+| Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística entende `material_request.*` com destino, `site.*`, `cost_center.*` e, desde a onda V2 (2026-11-08), `user.*`, `client.*` com nome e `collaborator.*` com a situação (§3.2); o Core emite `material_request.approved/cancel_requested` do **envio de material para obra** (§3.1); a compra de material ainda não emite `material_request.*` |
+| Consulta do cache de cadastros | Telas da Logística → Logística | `GET /axis/lookup` (§3.3): seletores e nomes de projeto, centro de custo, pessoa, site e cliente |
 | Eventos de saída da Logística | Logística → Core | Formato fixado (§4.1); receptor `POST /integration/inbound` no Core (§4); sem handlers de negócio ainda (PT-09): tudo é guardado como `ignored` |
 | API de consulta por API key | Logística → Core | Disponível no Core; **a Logística não usa** |
 | Consulta de materiais e custo por API key | Core e Financeiro → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); o Core a chama no servidor ao aprovar um projeto (valor estimado do envio, `LOGISTICA_API_URL`/`LOGISTICA_API_KEY`); o Financeiro a usa no seletor de materiais da cotação |
@@ -38,7 +39,9 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
    `aud`/`jti` de uso único), e devolve sessão de 8 h. O `JwtStrategy` do Core não verifica `iss`
    nem fixa o algoritmo, então aceita de volta esse token de 8 h. Efeito: contornar o TTL de 15 min e
    a revogação do Core.
-2. O bloqueio de usuário desativado na Logística depende do evento `user.disabled`, que o Core não emite.
+2. O bloqueio de usuário desativado vale para a **sessão da Logística** (troca do launcher, `iss=axis-logistica`) e para a própria
+   troca: o `user.disabled` do Core (contrato V1) grava o usuário inativo no cache `USER` e a Logística responde `401`. O access token
+   normal do Core continua aceito até expirar (15 min); o Core é quem recusa o refresh.
 3. `#token=<JWT>` na URL do PWA é gravado como sessão sem troca (`frontend/src/lib/api.ts:18-23`).
 4. Mapeamento de papéis: `gestor` (gestor de área no Core) vira `GESTOR_ALMOXARIFADO`, com
    `warehouse:access_all`, `stock:adjust` e `reconciliation:manage`; `tecnico` vira `ALMOXARIFE`.
@@ -74,22 +77,27 @@ e idempotência por `event_id`.
 
 | Evento | Core emite? | Logística consome? |
 |---|---|---|
-| `collaborator.created/updated/offboarded` | sim | sim |
-| `client.created/updated` | sim | sim |
+| `collaborator.created/updated/offboarded` | sim | sim (cache `COLLABORATOR`; `active` do payload ou `status != desligado`; `offboarded` sempre inativa) |
+| `collaborator.cost_center_changed` | sim | sim (mescla os dados; **não** reativa: mantém a situação que o cache tinha) |
+| `client.created/updated/deleted` | sim | sim (cache `CLIENT`; nome = `name`, senão `legal_name`/`trade_name`; `deleted` inativa) |
 | `project.created/updated/status_changed/deleted` | sim (estado completo; ver [cadastros.md §10](dominio/cadastros.md#10-projetos)) | sim (qualquer `project.*` atualiza o cache; `deleted` chega com `status: encerrado`; desde 2026-11-08 o payload traz `site_id`, `site_code` e `site_name`) |
 | `cost_center.created/updated` | sim | **sim** (cache `COST_CENTER`; antes ignorado): a ordem confere o centro de custo, sem bloquear |
 | `site.created/updated` (site do cliente, com endereço e coordenadas; ver [cadastros.md §9.1](dominio/cadastros.md#91-sites)) | sim (desde 2026-11-08) | **sim** (cache `SITE`): destino das ordens de envio para obra |
 | `project.document_added` (SOW) | sim | não assina; o evento só vai para quem assinar |
 | `project.quote_requested` (cotação pelo Financeiro) | sim | não assina; o evento só vai para quem assinar |
-| `user.*` (inclui `user.disabled`) | **não** | sim |
-| `request.submitted/status_changed/completed` | sim | **não (ignora)** |
-| `sla.warning/breached` | sim | não |
+| `user.created/updated/disabled` | sim (contrato V1) | sim (cache `USER`: nome, situação, `collaborator_id`, papéis; `disabled` inativa e bloqueia a sessão da Logística) |
+| `job_title.*`, `holiday.*` | sim (contrato V1) | **não usa**: se assinados, ficam `IGNORED` com o motivo em `last_error` |
+| `request.submitted/status_changed/completed` | sim | **não (ignora)**, com o motivo registrado |
+| `sla.warning/breached`, `finance_request.approved` | sim | não (ignora, com o motivo registrado) |
+| `purchase.approved`, `purchase.order_registered` | sim ([integracao-centros-de-custo.md §3](integracao-centros-de-custo.md)) | **só com `warehouse_code`**: vira previsão de compra da reposição (como `purchase_order.approved`), com os itens que têm `material_id` fora do grupo Estoque. Hoje o Core não manda `warehouse_code` (a compra é entregue ao solicitante, não ao almoxarifado), então os eventos ficam `IGNORED` com o motivo — contá-los como compra em aberto esconderia faltas na reposição |
+| `purchase.delivery_received`, `purchase.cancelled` | sim | não (ignora) |
 | `material_request.approved`, `material_request.cancel_requested` | **sim, só do envio de material para obra** (desde 2026-11-08; categoria `envio_material`, §3.1); a compra não emite | sim (`material-request.adapter.ts`), inclusive o `destination` do envio para obra |
 | `ticket.status_changed` | **não** (módulo não existe) | sim (adaptador legado) |
-| `purchase_order.approved/changed` | **não** | sim |
+| `purchase_order.approved/changed` | **não** | sim (itens por `material_code` ou `material_id`) |
 
 **Consequência:** o envio de material para obra aprovado no Core gera a ordem de atendimento na
-Logística (§3.1); a compra de material continua sem gerar ordem, e a desativação de usuário não chega.
+Logística (§3.1); a compra de material continua sem gerar ordem nem previsão de reposição (falta `warehouse_code`), e a
+desativação de usuário chega pelo `user.disabled` (§3.2).
 
 ### 3.1 Envio de material para obra (`material_request.approved` com destino)
 
@@ -124,6 +132,62 @@ Do lado do Core: `request_id` é o id da requisição; `version` é sempre `1` (
 
 **`site.created/updated`** (a confirmar com o PT-01 do Core): a Logística lê `site_id` (obrigatório), `code` (ou `site_code`), `name`,
 `active` (opcional) e guarda o payload inteiro no cache. **`cost_center.*`** usa `cost_center_id`, `code`, `name` e `active`, como o Core já emite.
+
+### 3.2 Cache de cadastros do Core (`axis_master_cache`)
+
+O Core é o dono; a Logística guarda o id do Core e um cache (`kind`, `axis_id`, `code`, `name`, `active`, `data`) alimentado pelos
+eventos ([mapa-interoperabilidade.md §1](mapa-interoperabilidade.md)). Regras comuns: evento mais antigo que o cache é descartado
+(`out_of_order`); campos ausentes não apagam os que já existem (os dados são mesclados); `active` explícito no payload vale sempre e
+`deleted: true` inativa.
+
+| Tipo | Evento | Nome | Situação |
+|---|---|---|---|
+| `USER` | `user.*` | `name` (nome do colaborador ou o e-mail), senão `email` | `user.disabled` → inativo; senão `active`, senão `status != disabled` |
+| `COLLABORATOR` | `collaborator.*` | `name` | `offboarded` → inativo; senão `active`, senão `status != desligado`; sem os dois (ex.: `cost_center_changed`) mantém a atual. O **reenvio de cadastros** não reativa desligados |
+| `CLIENT` | `client.*` | `name`, senão `legal_name`, senão `trade_name` | `active`; `deleted` → inativo |
+| `PROJECT` | `project.*` | `name` | `active`, senão inativo em `cancelado`, `encerrado`, `arquivado` |
+| `COST_CENTER`, `SITE` | `cost_center.*`, `site.*` | `name` | `active` |
+
+**Pessoa = usuário + colaborador.** O Core manda destinatário e custodiante como id de **colaborador**; o token traz o id de usuário
+(`sub`) e, às vezes, o colaborador. A Logística considera "seus" os registros com o id de usuário, o colaborador do token ou o
+`collaborator_id` do cache `USER`: vale para as ordens de atendimento, "minha custódia" (`GET /custody`) e o termo de custódia
+(`GET /documents/custody/:id`). Na entrega, o termo de custódia novo guarda o **colaborador** quando o recebedor informado é um usuário
+ligado a um colaborador (a prova de entrega continua com o id informado). Termos antigos não foram alterados; o relatório
+`GET /integration/custody-value` soma o termo antigo (id de usuário) na linha do colaborador ligado.
+
+**Validação nas escritas** (L1): o id do Core informado é conferido no cache. Ausente do cache gera aviso (nunca bloqueia, inclusive
+com o cache vazio); inativo segue a regra do fluxo:
+
+| Escrita | Campos | Inativo |
+|---|---|---|
+| Ordem de atendimento (evento) | projeto / destinatário / CC e site | bloqueia / ordem `BLOQUEADA` / aviso (sem mudança) |
+| Movimento manual `POST /stock/movements` | projeto, CC, cliente, custodiante | na `SAIDA_ENTREGA`, projeto e custodiante → `422`; o resto e os demais tipos → aviso. Avisos voltam em `referenceWarnings` e vão ao log |
+| Devolução `POST /returns` | quem devolveu, projeto | **nunca bloqueia** (devolver o que está com um desligado ou sobrou de projeto encerrado é o caso normal): aviso na resposta e no log |
+| Almoxarifado `POST /warehouses` | responsável (pessoa), projeto, site | `422`; avisos na resposta e na auditoria |
+| Romaneio (embalar/expedir) | site de destino escolhido | `422` |
+| Recebimento `POST /receipts` | — | não se aplica: pedido e fornecedor não estão no cache (fornecedor é decisão F-01) |
+
+**Romaneio com site** (L6): a expedição (`shipments.destination_site_axis_id`) nasce com o site de destino da ordem; `pack` e `dispatch`
+aceitam `destinationSiteAxisId` para trocar o site e o texto `destination` continua como ajuste manual. Os eventos `shipment.dispatched`
+e `delivery.*` levam em `destination.site_id` o site do romaneio. Os PDFs mostram o nome do site, do projeto, de quem devolveu e do
+custodiante pelo cache; o painel traz `projectLabel`/`costCenterLabel` no consumo.
+
+**Almoxarifado** (L7): `responsibleAxisUserId` (escolhido entre colaboradores do cache) e `siteAxisId` (novo, opcional) vêm de seletores;
+o endereço em texto continua. Caches `COMPANY`/`UNIT` seguem sem uso (multiempresa é decisão V5).
+
+### 3.3 Consulta do cache: `GET /axis/lookup`
+
+Rota da Logística, com o JWT do usuário e a permissão `stock:read` (leitura básica de todos os perfis, inclusive o solicitante). Usada
+pelos seletores e para trocar ids por nomes nas telas.
+
+| Parâmetro | Uso |
+|---|---|
+| `kind` (obrigatório) | `PROJECT`, `COST_CENTER`, `COLLABORATOR`, `USER`, `SITE` ou `CLIENT`; vários separados por vírgula (pessoa: `COLLABORATOR,USER`) |
+| `search` | texto contido no nome ou no código, sem diferenciar maiúsculas; só **ativos** (com `includeInactive=true`, todos); ordem por nome; `limit` padrão 20, máximo 50 |
+| `ids` | até 200 ids separados por vírgula; devolve ativos e inativos (para mostrar nomes). Não combina com `search` (`400`) |
+
+Resposta: `{ "items": [{ "kind": "PROJECT", "id": "<uuid>", "code": "PRJ-001", "name": "Data center Sumaré", "active": true }] }`.
+Não devolve e-mail nem o restante do payload.
 
 ## 4. Eventos Logística → Core
 
@@ -207,7 +271,8 @@ disponível publicável. O custo médio é móvel e recalculado a cada recebimen
 
 1. Endurecer o SSO (§1) — risco de segurança.
 2. ~~Definir e implementar o contrato de requisição de material~~ (feito para o envio de material para obra, §3.1: o Core emite
-   `material_request.approved/cancel_requested`). Falta `user.disabled` e, se a compra de material passar a ir à Logística, `material_request.*` dela.
+   `material_request.approved/cancel_requested`). `user.*` já é consumido (§3.2). Falta, se a compra de material passar a ir ao
+   almoxarifado, o Core mandar `warehouse_code` em `purchase.*` (ou `material_request.*` dela).
 3. ~~Criar o receptor de eventos da Logística no Core~~ (feito: `POST /integration/inbound`, HMAC,
    idempotência, §4). Falta ligar `AXIS_EVENTS_URL`/`AXIS_OUTBOUND_SECRET` e escrever os handlers de
    negócio dos eventos da §4.1 (PT-09).

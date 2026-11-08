@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import { StockService } from '../stock/stock.service.js';
 import { problem } from '../common/errors.js';
+import { checkAxisRefs, PERSON_KINDS, resolveOwnIds } from '../common/axis-cache.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import type { ClassifyDto, CloseCustodyDto, CreateReturnDto, ListCustodyQuery } from './returns.dto.js';
 
@@ -15,6 +16,8 @@ export const custodyCode = (seq: number) => `CUS-${String(seq).padStart(8, '0')}
 
 @Injectable()
 export class ReturnsService {
+  private readonly logger = new Logger(ReturnsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
@@ -31,7 +34,13 @@ export class ReturnsService {
 
   async create(dto: CreateReturnDto, user: AuthenticatedUser) {
     await this.rbac.assertWarehouseAccess(user, dto.warehouseId);
-    return this.prisma.$transaction(async (tx) => {
+    // Ids do Core conferidos no cache (L1): a devolução nunca é recusada por cadastro inativo — devolver o que está com um
+    // desligado ou sobrou de um projeto encerrado é justamente o caso normal. Ausente ou inativo vira aviso.
+    const referenceWarnings = await checkAxisRefs(this.prisma, [
+      { id: dto.returnedByAxisId, kinds: PERSON_KINDS, label: 'Quem devolveu', onInactive: 'warn' },
+      { id: dto.projectAxisId, kinds: ['PROJECT'], label: 'Projeto', onInactive: 'warn' },
+    ]);
+    const created = await this.prisma.$transaction(async (tx) => {
       const loc = await tx.location.findFirst({ where: { id: dto.receivingLocationId, warehouseId: dto.warehouseId } });
       if (!loc || loc.status !== 'ATIVO') throw new UnprocessableEntityException(problem('Endereço de recebimento inexistente, inativo ou de outro almoxarifado.', 'INVALID_LOCATION'));
 
@@ -85,6 +94,8 @@ export class ReturnsService {
       }
       return this.get(ret.id, user, tx);
     });
+    for (const w of referenceWarnings) this.logger.warn(`Devolução ${created.code}: ${w}`);
+    return { ...created, referenceWarnings };
   }
 
   async get(id: string, user: AuthenticatedUser, tx: Tx | PrismaService = this.prisma) {
@@ -150,8 +161,11 @@ export class ReturnsService {
     const page = q.page ?? 1;
     const pageSize = q.pageSize ?? 20;
     const all = user.permissions.includes('custody:execute') || user.permissions.includes('audit:read');
-    if (!all && q.custodianAxisId && q.custodianAxisId !== user.userId) throw new ForbiddenException('Você só pode consultar a própria custódia.');
-    const where: Prisma.CustodyTermWhereInput = { ...(q.status && { status: q.status }), ...(all ? (q.custodianAxisId && { custodianAxisId: q.custodianAxisId }) : { custodianAxisId: user.userId }) };
+    // "Minha custódia": o termo guarda o colaborador (como o Core identifica pessoas) ou, em termos antigos, o usuário.
+    const own = all ? [] : await resolveOwnIds(this.prisma, user);
+    if (!all && q.custodianAxisId && !own.includes(q.custodianAxisId)) throw new ForbiddenException('Você só pode consultar a própria custódia.');
+    const mine = q.custodianAxisId ? { custodianAxisId: q.custodianAxisId } : { custodianAxisId: { in: own } };
+    const where: Prisma.CustodyTermWhereInput = { ...(q.status && { status: q.status }), ...(all ? (q.custodianAxisId && { custodianAxisId: q.custodianAxisId }) : mine) };
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.custodyTerm.count({ where }),
       this.prisma.custodyTerm.findMany({ where, orderBy: { seq: 'desc' }, skip: (page - 1) * pageSize, take: pageSize }),

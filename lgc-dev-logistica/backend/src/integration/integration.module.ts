@@ -9,6 +9,7 @@ import { AxisWebhookService } from './axis-webhook.service.js';
 import { IntegrationApiKeyGuard } from './api-key.guard.js';
 import { FinanceIntegrationController, FinanceIntegrationService } from './finance-integration.controller.js';
 import { MaterialsLookupController, MaterialsLookupService } from './materials-lookup.controller.js';
+import { AxisLookupController, AxisLookupService } from './axis-lookup.controller.js';
 
-@Module({ imports: [FulfillmentModule, ReplenishmentModule, StockModule], controllers: [AxisWebhookController, OutboxController, FinanceIntegrationController, MaterialsLookupController], providers: [AxisWebhookService, OutboxDispatcherService, FinanceIntegrationService, MaterialsLookupService, IntegrationApiKeyGuard], exports: [AxisWebhookService, OutboxDispatcherService] })
+@Module({ imports: [FulfillmentModule, ReplenishmentModule, StockModule], controllers: [AxisWebhookController, OutboxController, FinanceIntegrationController, MaterialsLookupController, AxisLookupController], providers: [AxisWebhookService, OutboxDispatcherService, FinanceIntegrationService, MaterialsLookupService, AxisLookupService, IntegrationApiKeyGuard], exports: [AxisWebhookService, OutboxDispatcherService] })
 export class IntegrationModule {}

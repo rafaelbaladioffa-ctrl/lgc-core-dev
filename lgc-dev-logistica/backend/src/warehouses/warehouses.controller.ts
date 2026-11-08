@@ -1,4 +1,4 @@
-import { BadRequestException, Body, ConflictException, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { BadRequestException, Body, ConflictException, Controller, Get, Logger, NotFoundException, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
@@ -6,6 +6,7 @@ import { RbacService } from '../rbac/rbac.service.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
+import { checkAxisRefs, PERSON_KINDS } from '../common/axis-cache.js';
 import { CreateLocationDto, CreateWarehouseDto, UpdateLocationDto } from './warehouses.dto.js';
 
 /** Hierarquia 5.1: cada nível só pode ficar sob o imediatamente superior (AREA é raiz). */
@@ -13,6 +14,8 @@ const LEVEL_ORDER = ['AREA', 'CORREDOR', 'ESTANTE', 'NIVEL', 'POSICAO'] as const
 
 @Controller('warehouses')
 export class WarehousesController {
+  private readonly logger = new Logger(WarehousesController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
@@ -29,10 +32,17 @@ export class WarehousesController {
   @Post()
   @RequirePermissions('warehouse:write')
   async create(@Body() dto: CreateWarehouseDto, @CurrentUser() user: AuthenticatedUser) {
+    // Cadastros do Core (L1/L7): ausente do cache só avisa; responsável, projeto ou site inativo é recusado (422).
+    const referenceWarnings = await checkAxisRefs(this.prisma, [
+      { id: dto.responsibleAxisUserId, kinds: PERSON_KINDS, label: 'Responsável', onInactive: 'block' },
+      { id: dto.projectAxisId, kinds: ['PROJECT'], label: 'Projeto', onInactive: 'block' },
+      { id: dto.siteAxisId, kinds: ['SITE'], label: 'Site', onInactive: 'block' },
+    ]);
     try {
       const warehouse = await this.prisma.warehouse.create({ data: { ...dto, createdBy: user.userId } });
-      await this.audit.record(user.userId, 'warehouse.created', 'warehouse', warehouse.id, { code: warehouse.code });
-      return warehouse;
+      await this.audit.record(user.userId, 'warehouse.created', 'warehouse', warehouse.id, { code: warehouse.code, ...(referenceWarnings.length > 0 && { referenceWarnings }) });
+      for (const w of referenceWarnings) this.logger.warn(`Almoxarifado ${warehouse.code}: ${w}`);
+      return { ...warehouse, referenceWarnings };
     } catch (e) {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw new ConflictException(`Já existe um almoxarifado com o código ${dto.code}.`);
       throw e;

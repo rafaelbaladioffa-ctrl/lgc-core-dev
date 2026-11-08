@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
 import { dateBr, todaySaoPaulo } from '../lib/dates';
 import { fmtDateTime, fmtQty } from '../lib/format';
-import { allMaterials, matLabel } from '../lib/lookups';
+import { allMaterials, axisName, matLabel, PERSON } from '../lib/lookups';
+import { useAxisNames } from '../AxisPicker';
 import { fetchAllPages } from '../lib/paging';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
@@ -142,11 +143,12 @@ function CustodyList({ canClose }: { canClose: boolean }) {
   const data = res.state === 'ready' ? res.data : null;
   const today = todaySaoPaulo();
   const rows = overdue ? (data?.items ?? []).slice((page - 1) * PAGE, page * PAGE) : (data?.items ?? []);
+  const people = useAxisNames(PERSON, rows.map((t) => t.custodianAxisId));
   const cols: Column<Custody>[] = [
     { key: 'c', header: 'Termo', render: (t) => <strong>{t.code}</strong> },
     { key: 'm', header: 'Material', render: (t) => matLabel(byId, t.materialId) },
     { key: 'q', header: 'Qtd. / devolvida', num: true, render: (t) => `${fmtQty(t.quantity)} / ${fmtQty(t.returnedQty)}` },
-    { key: 'cu', header: 'Custodiante', render: (t) => <code>{t.custodianAxisId.slice(0, 8)}</code> },
+    { key: 'cu', header: 'Custodiante', render: (t) => axisName(people, t.custodianAxisId) },
     { key: 's', header: 'Situação', render: (t) => <span className={`pill ${t.status === 'ATIVO' ? 'warn' : t.status === 'PERDIDO' ? 'bad' : 'ok'}`}>{CUSTODY[t.status] ?? t.status}</span> },
     { key: 'e', header: 'Devolução prevista', render: (t) => (t.expectedReturnAt ? <span className={isOverdueCustody(t, today) ? 'err' : undefined}>{dateBr(t.expectedReturnAt)}</span> : '—') },
     { key: 'a', header: '', render: (t) => (canClose && t.status === 'ATIVO' ? <button className="btn ghost" disabled={busy} onClick={() => void lost(t)}>Marcar perdido</button> : null) },

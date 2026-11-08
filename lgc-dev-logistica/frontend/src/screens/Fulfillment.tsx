@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { call } from '../lib/api';
 import { dateBr, todaySaoPaulo } from '../lib/dates';
 import { fmtDateTime, fmtQty } from '../lib/format';
-import { allMaterials, allWarehouses, matLabel, whLabel } from '../lib/lookups';
+import { allMaterials, allWarehouses, axisName, matLabel, PERSON, whLabel } from '../lib/lookups';
+import { useAxisNames } from '../AxisPicker';
 import { fetchAllPages } from '../lib/paging';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
@@ -44,12 +45,13 @@ export function Fulfillment({ canManage = false }: { canManage?: boolean }) {
   }, [status, page, late]);
   const data = res.state === 'ready' ? res.data : null;
   const rows = late ? (data?.items ?? []).slice((page - 1) * PAGE, page * PAGE) : (data?.items ?? []);
+  const sites = useAxisNames(['SITE'], rows.map((o) => o.destinationSiteAxisId));
   const cols: Column<Order>[] = [
     { key: 'c', header: 'Ordem', render: (o) => <strong>{code(o.seq)}</strong> },
     { key: 'r', header: 'Requisição no Axis', render: (o) => <code>{o.axisRequestId.slice(0, 8)}</code> },
     { key: 's', header: 'Situação', render: (o) => <span className={`pill ${tone(o.status)}`}>{STATUS[o.status] ?? o.status}</span> },
     { key: 'n', header: 'Necessário até', render: (o) => { const s = sla(o); return o.neededBy ? <span className={s === 'late' ? 'err' : undefined}>{dateBr(o.neededBy)}{s === 'late' ? ' · atrasada' : s === 'soon' ? ' · vence em breve' : ''}</span> : '—'; } },
-    { key: 'd', header: 'Destino (site)', render: (o) => o.destinationText ?? (o.destinationSiteAxisId ? <code>{o.destinationSiteAxisId.slice(0, 8)}</code> : '—') },
+    { key: 'd', header: 'Destino (site)', render: (o) => (o.destinationSiteAxisId ? axisName(sites, o.destinationSiteAxisId) : (o.destinationText ?? '—')) },
     { key: 'm', header: 'Motivo', render: (o) => o.statusReason ?? '—' },
     { key: 'u', header: 'Atualizada em', render: (o) => fmtDateTime(o.updatedAt) },
   ];
@@ -79,6 +81,11 @@ function FulfillmentDetail({ id, canManage, onBack }: { id: string; canManage: b
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [whPick, setWhPick] = useState('');
+  const o0 = res.state === 'ready' ? res.data : null;
+  const projects = useAxisNames(['PROJECT'], [o0?.projectAxisId]);
+  const ccs = useAxisNames(['COST_CENTER'], [o0?.costCenterAxisId]);
+  const people = useAxisNames(PERSON, [o0?.requesterAxisId, o0?.recipientAxisId]);
+  const sites = useAxisNames(['SITE'], [o0?.destinationSiteAxisId]);
   const run = async (path: 'reserve' | 'cancel-request' | 'warehouse') => {
     if (busy) return;
     let body: unknown = {};
@@ -109,12 +116,12 @@ function FulfillmentDetail({ id, canManage, onBack }: { id: string; canManage: b
       <div className="card"><dl className="kv">
         <div><dt>Almoxarifado</dt><dd>{o.warehouseId ? whLabel(wmap, o.warehouseId) : 'Não definido'}</dd></div>
         <div><dt>Necessário até</dt><dd>{o.neededBy ? <span className={s === 'late' ? 'err' : undefined}>{dateBr(o.neededBy)}{s === 'late' ? ' · atrasada' : s === 'soon' ? ' · vence em breve' : ''}</span> : '—'}</dd></div>
-        <div><dt>Destino (site)</dt><dd>{o.destinationText ?? short(o.destinationSiteAxisId)}</dd></div>
+        <div><dt>Destino (site)</dt><dd>{o.destinationSiteAxisId ? axisName(sites, o.destinationSiteAxisId) : '—'}{o.destinationText && <div className="hint">{o.destinationText}</div>}</dd></div>
         <div><dt>Requisição no Axis</dt><dd>{short(o.axisRequestId)} · versão {o.requestVersion}</dd></div>
-        <div><dt>Projeto</dt><dd>{short(o.projectAxisId)}</dd></div>
-        <div><dt>Centro de custo</dt><dd>{short(o.costCenterAxisId)}</dd></div>
-        <div><dt>Solicitante</dt><dd>{short(o.requesterAxisId)}</dd></div>
-        <div><dt>Destinatário</dt><dd>{short(o.recipientAxisId)}</dd></div>
+        <div><dt>Projeto</dt><dd>{axisName(projects, o.projectAxisId)}</dd></div>
+        <div><dt>Centro de custo</dt><dd>{axisName(ccs, o.costCenterAxisId)}</dd></div>
+        <div><dt>Solicitante</dt><dd>{o.requesterAxisId ? axisName(people, o.requesterAxisId) : 'Sistema (integração)'}</dd></div>
+        <div><dt>Destinatário</dt><dd>{axisName(people, o.recipientAxisId)}</dd></div>
         <div><dt>Criada em</dt><dd>{fmtDateTime(o.createdAt)}</dd></div>
         <div><dt>Atualizada em</dt><dd>{fmtDateTime(o.updatedAt)}</dd></div>
       </dl>{o.notes && <p className="hint">{o.notes}</p>}</div>

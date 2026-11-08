@@ -115,9 +115,22 @@ describe('FinanceIntegrationService', () => {
   it('custódia: só termos ATIVO, com o custo do material', async () => {
     const terms = vi.fn().mockResolvedValue([{ custodianAxisId: 'col', materialId: 'm1', quantity: new Prisma.Decimal(2), returnedQty: new Prisma.Decimal(0) }]);
     const mats = vi.fn().mockResolvedValue([{ id: 'm1', averageCost: new Prisma.Decimal('99.995'), lastCost: null }]);
-    const svc = new FinanceIntegrationService({ custodyTerm: { findMany: terms }, material: { findMany: mats } } as unknown as PrismaService);
+    const svc = new FinanceIntegrationService({ custodyTerm: { findMany: terms }, material: { findMany: mats }, axisMasterCache: { findMany: vi.fn().mockResolvedValue([]) } } as unknown as PrismaService);
     await expect(svc.custodyValue()).resolves.toEqual([{ custodian_id: 'col', items: 1, value: '199.99' }]);
     expect(terms.mock.calls[0][0].where).toEqual({ status: 'ATIVO' });
+  });
+
+  it('custódia: termo antigo com id de usuário soma na linha do colaborador ligado (cache USER)', async () => {
+    const D = (v: string) => new Prisma.Decimal(v);
+    const terms = vi.fn().mockResolvedValue([
+      { custodianAxisId: 'col', materialId: 'm1', quantity: D('1'), returnedQty: D('0') },
+      { custodianAxisId: 'user-1', materialId: 'm1', quantity: D('1'), returnedQty: D('0') },
+    ]);
+    const mats = vi.fn().mockResolvedValue([{ id: 'm1', averageCost: D('10'), lastCost: null }]);
+    const cache = vi.fn().mockResolvedValue([{ axisId: 'user-1', data: { collaborator_id: 'col' } }]);
+    const svc = new FinanceIntegrationService({ custodyTerm: { findMany: terms }, material: { findMany: mats }, axisMasterCache: { findMany: cache } } as unknown as PrismaService);
+    await expect(svc.custodyValue()).resolves.toEqual([{ custodian_id: 'col', items: 2, value: '20.00' }]);
+    expect(cache.mock.calls[0][0].where).toEqual({ kind: 'USER', axisId: { in: ['col', 'user-1'] } });
   });
 
   it('custódia vazia não consulta materiais', async () => {

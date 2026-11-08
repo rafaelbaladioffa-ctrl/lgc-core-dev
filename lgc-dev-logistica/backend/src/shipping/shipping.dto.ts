@@ -58,6 +58,8 @@ export class PackDto {
   packages!: PackageDto[];
 
   @IsOptional() @IsString() @MaxLength(300) destination?: string;
+  /** Site do Axis de destino; sem ele vale o site da ordem. O texto `destination` continua como ajuste manual. */
+  @IsOptional() @IsString() @MaxLength(60) destinationSiteAxisId?: string;
 }
 
 export class DispatchDto {
@@ -65,6 +67,7 @@ export class DispatchDto {
   @IsOptional() @IsString() @MaxLength(120) route?: string;
   @IsOptional() @IsString() @MaxLength(40) vehicle?: string;
   @IsOptional() @IsString() @MaxLength(300) destination?: string;
+  @IsOptional() @IsString() @MaxLength(60) destinationSiteAxisId?: string;
 }
 
 export class ConfirmDeliveryDto {
