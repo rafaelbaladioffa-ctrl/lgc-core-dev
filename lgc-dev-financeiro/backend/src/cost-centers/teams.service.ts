@@ -226,8 +226,8 @@ export class TeamsService {
     const period = parsePeriod(from, to);
     await this.ctx.requireVisible(user, id);
     const rows = await this.prisma.ccTeamLog.findMany({ where: { costCenterAxisId: id, date: { gte: period.start, lt: period.end } }, orderBy: [{ date: 'desc' }, { createdAt: 'desc' }], take: 2000 });
-    const projects = await this.ctx.names('PROJECT', rows.map((r) => r.projectAxisId ?? ''));
-    return rows.map((r) => this.presentLog(r, projects.get(r.projectAxisId ?? '')?.code ?? null));
+    const [projects, users] = await Promise.all([this.ctx.names('PROJECT', rows.map((r) => r.projectAxisId ?? '')), this.ctx.userLabels(rows.map((r) => r.createdBy))]);
+    return rows.map((r) => ({ ...this.presentLog(r, projects.get(r.projectAxisId ?? '')?.code ?? null), createdByName: users.get(r.createdBy) ?? null }));
   }
 
   private presentLog(r: Awaited<ReturnType<PrismaService['ccTeamLog']['create']>>, projectCode: string | null) {

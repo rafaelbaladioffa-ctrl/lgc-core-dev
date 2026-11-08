@@ -74,6 +74,16 @@ export class CcContext {
     return { node, nodes, visible };
   }
 
+  /** Quem lançou: e-mail do usuário no cache do Core; lançamentos automáticos aparecem como sistema. */
+  async userLabels(ids: Iterable<string>): Promise<Map<string, string>> {
+    const list = [...new Set(ids)];
+    const out = new Map<string, string>();
+    for (const id of list) if (id.startsWith('sistema:')) out.set(id, 'Sistema (Core)');
+    const rows = await this.prisma.axisMasterCache.findMany({ where: { kind: 'USER', axisId: { in: list.filter((i) => !i.startsWith('sistema:')) } } });
+    for (const r of rows) if (r.name) out.set(r.axisId, r.name);
+    return out;
+  }
+
   async names(kind: 'PROJECT' | 'COLLABORATOR', ids: Iterable<string>) {
     const list = [...new Set(ids)].filter(Boolean);
     if (list.length === 0) return new Map<string, { code: string | null; name: string | null; data: Record<string, unknown> }>();

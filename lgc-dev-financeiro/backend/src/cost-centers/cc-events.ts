@@ -169,10 +169,11 @@ async function registerPurchase(tx: Prisma.TransactionClient, eventType: string,
   const total = p['total'] !== undefined ? amount(p['total'], 'total') : totalOf(groups);
   const date = new Date(instant);
   const status = current && ['recebida_parcial', 'recebida', 'cancelada'].includes(current.status) ? current.status : approved && current?.status !== 'pedido' ? 'aprovada' : 'pedido';
+  // Evento parcial não apaga o que já se sabe da compra (código e projeto).
   const data = {
-    code: str(p, 'code') ?? requestAxisId,
+    code: str(p, 'code') ?? current?.code ?? requestAxisId,
     costCenterAxisId,
-    projectAxisId: str(p, 'project_id'),
+    projectAxisId: str(p, 'project_id') ?? current?.projectAxisId ?? null,
     total,
     status,
     groups: groupsJson(groups),

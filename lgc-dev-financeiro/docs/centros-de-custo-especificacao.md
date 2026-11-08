@@ -163,7 +163,7 @@ type Entry = {
   id: string; costCenterId: string; competence: string; kind: 'receita' | 'custo'; category: string;
   stage: 'comprometido' | 'realizado'; source: 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual';
   amount: Money; description: string; projectId: string | null; projectCode: string | null;
-  sourceRef: string | null; reversesId: string | null; reversed: boolean; reason: string | null; createdBy: string; createdAt: string;
+  sourceRef: string | null; reversesId: string | null; reversed: boolean; reason: string | null; createdBy: string; createdByName: string | null; createdAt: string;
 };
 type TeamSummary = {
   id: string; code: string | null; shortCode: string | null; name: string | null; headcount: number;
@@ -183,7 +183,7 @@ type TeamPanel = TeamSummary & {
   custody: { items: { collaboratorId: string; name: string | null; items: number; value: Money }[]; total: Money; error: string | null };
   warnings: string[];
 };
-type TeamLog = { id: string; date: string; activity: string; projectId: string | null; projectCode: string | null; people: number; hoursPerPerson: string; km: string | null; producedQuantity: string | null; producedUnit: string | null; notes: string | null; createdBy: string };
+type TeamLog = { id: string; date: string; activity: string; projectId: string | null; projectCode: string | null; people: number; hoursPerPerson: string; km: string | null; producedQuantity: string | null; producedUnit: string | null; notes: string | null; createdBy: string; createdByName: string | null };
 type OverheadRule = { sourceCostCenterId: string; sourceName: string | null; driver: 'headcount' | 'receita' | 'custo_direto' | 'percentual'; active: boolean; notes: string | null; targets: { costCenterId: string; name: string | null; percent: string | null }[] };
 type Advance = { id: string; requestCode: string; collaboratorId: string; collaboratorName: string | null; costCenterId: string; amount: Money; approvedAt: string; status: 'aberto' | 'prestado'; spentAmount: Money | null; settledAt: string | null };
 type Purchase = { id: string; requestId: string; code: string; costCenterId: string; projectId: string | null; total: Money; status: string; approvedAt: string | null; orderedAt: string | null; receivedAt: string | null; cancelledAt: string | null };

@@ -66,7 +66,7 @@ const approved = {
   request_id: REQ,
   code: 'REQ-0001',
   cost_center_id: CC,
-  project_id: null,
+  project_id: 'p-1',
   approved_at: '2026-03-10T15:00:00.000Z',
   total: '1500.00',
   groups: [
@@ -92,8 +92,9 @@ describe('compras no centro de custo', () => {
   it('pedido avança o funil; recebimento baixa o comprometido na competência original e realiza', async () => {
     const db = fakeTx();
     await handleCcEvent(db.tx, 'purchase.approved', randomUUID(), at, approved);
-    await handleCcEvent(db.tx, 'purchase.order_registered', randomUUID(), at, { ...approved, ordered_at: '2026-03-12T10:00:00Z' });
-    expect(db.purchases.get(REQ)!.status).toBe('pedido');
+    // Pedido sem código e sem projeto não apaga o que veio na aprovação.
+    await handleCcEvent(db.tx, 'purchase.order_registered', randomUUID(), at, { request_id: REQ, cost_center_id: CC, ordered_at: '2026-03-12T10:00:00Z', groups: approved.groups });
+    expect(db.purchases.get(REQ)!).toMatchObject({ status: 'pedido', code: 'REQ-0001', projectAxisId: 'p-1' });
 
     await handleCcEvent(db.tx, 'purchase.delivery_received', randomUUID(), at, {
       request_id: REQ,
@@ -108,6 +109,7 @@ describe('compras no centro de custo', () => {
     expect(release!.competence.toISOString().slice(0, 10)).toBe('2026-03-10');
     expect(db.entries.find((e) => e.stage === 'realizado')!.competence.toISOString().slice(0, 10)).toBe('2026-04-02');
     expect(db.purchases.get(REQ)!.status).toBe('recebida_parcial');
+    expect(db.entries.find((e) => e.stage === 'realizado')).toMatchObject({ projectAxisId: 'p-1', description: 'Compra REQ-0001 — Fornecedor A (recebida)' });
 
     // Mesmo recebimento reentregue: nada muda.
     await handleCcEvent(db.tx, 'purchase.delivery_received', randomUUID(), at, { request_id: REQ, cost_center_id: CC, received_at: '2026-04-02T13:00:00Z', groups: [{ group_id: 'g1', total: '1000.00' }] });

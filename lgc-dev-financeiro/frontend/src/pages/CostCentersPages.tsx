@@ -143,7 +143,7 @@ export function CostCentersPage({ period }: { period: Period }) {
                             <span className="tree-toggle-spacer" />
                           )}
                           <span>
-                            <a href={href}>{item.code ?? item.shortCode ?? '—'}</a>
+                            <a href={href}>{item.shortCode ?? item.code ?? '—'}</a>
                             <div className="cell-sub">
                               {item.name ?? <span className="muted">Sem nome</span>} {!item.active && <Badge tone="neutral">inativo</Badge>}
                             </div>
@@ -720,7 +720,7 @@ function Entries({ id, state, canWrite, onChanged, detail }: { id: string; state
                         {en.description}
                         <div className="cell-sub muted">
                           {en.projectCode && `${en.projectCode} · `}
-                          {en.createdBy} em {formatDateTime(en.createdAt)}
+                          {en.createdByName ?? 'Usuário do Axis'} em {formatDateTime(en.createdAt)}
                         </div>
                         {en.reversesId && <div className="cell-sub">Estorno{en.reason ? `: ${en.reason}` : ''}</div>}
                         {en.reversed && (

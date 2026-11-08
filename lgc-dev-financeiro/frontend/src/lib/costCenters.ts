@@ -65,6 +65,8 @@ export type Entry = {
   reversed: boolean;
   reason: string | null;
   createdBy: string;
+  /** E-mail de quem lançou (ou "Sistema (Core)"); nulo quando o usuário não está no cache. */
+  createdByName?: string | null;
   createdAt: string;
 };
 
@@ -130,6 +132,8 @@ export type TeamLog = {
   producedUnit: string | null;
   notes: string | null;
   createdBy: string;
+  /** E-mail de quem lançou (ou "Sistema (Core)"); nulo quando o usuário não está no cache. */
+  createdByName?: string | null;
 };
 
 export type TeamLogInput = {
@@ -272,7 +276,7 @@ export function labelOf(map: Record<string, string>, key: string | null | undefi
 
 /** "DC-001-JAI — Equipe Jaime"; sem nada, "Centro sem nome". */
 export function ccLabel(cc: { code: string | null; shortCode?: string | null; name: string | null }): string {
-  const code = cc.code ?? cc.shortCode ?? null;
+  const code = cc.shortCode ?? cc.code ?? null;
   return [code, cc.name].filter(Boolean).join(' — ') || 'Centro sem nome';
 }
 

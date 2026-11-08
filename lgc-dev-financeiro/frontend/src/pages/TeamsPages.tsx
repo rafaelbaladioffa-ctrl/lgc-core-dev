@@ -70,7 +70,7 @@ export function TeamsPage({ period }: { period: Period }) {
               {data.map((t) => (
                 <tr key={t.id} className="row-link" onClick={() => navigate(teamHref(t.id, period))}>
                   <td>
-                    <a href={`#${teamHref(t.id, period)}`}>{t.code ?? t.shortCode ?? '—'}</a>
+                    <a href={`#${teamHref(t.id, period)}`}>{t.shortCode ?? t.code ?? '—'}</a>
                     {t.name && <div className="cell-sub">{t.name}</div>}
                   </td>
                   <td className="num">{t.headcount}</td>
@@ -571,7 +571,7 @@ function TeamDiary({ id, state, canLog, known, onChanged }: { id: string; state:
                   <td>{l.producedQuantity ? `${formatNumber(l.producedQuantity)} ${l.producedUnit ?? ''}` : '—'}</td>
                   <td>
                     {l.notes ?? '—'}
-                    <div className="cell-sub muted">por {l.createdBy}</div>
+                    {l.createdByName && <div className="cell-sub muted">por {l.createdByName}</div>}
                   </td>
                   {canLog && (
                     <td>

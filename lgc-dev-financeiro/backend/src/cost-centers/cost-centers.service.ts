@@ -274,8 +274,8 @@ export class CostCentersService {
       orderBy: [{ competence: 'desc' }, { createdAt: 'desc' }],
       take: 2000,
     });
-    const projects = await this.ctx.names('PROJECT', rows.map((r) => r.projectAxisId ?? ''));
-    return rows.map((r) => this.presentEntry(r, projects.get(r.projectAxisId ?? '')?.code ?? null, !!r.reversedBy));
+    const [projects, users] = await Promise.all([this.ctx.names('PROJECT', rows.map((r) => r.projectAxisId ?? '')), this.ctx.userLabels(rows.map((r) => r.createdBy))]);
+    return rows.map((r) => ({ ...this.presentEntry(r, projects.get(r.projectAxisId ?? '')?.code ?? null, !!r.reversedBy), createdByName: users.get(r.createdBy) ?? null }));
   }
 
   private presentEntry(r: CcEntry, projectCode: string | null, reversed: boolean) {
