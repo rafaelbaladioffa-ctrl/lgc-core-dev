@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsInt, IsNumber, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsInt, IsNumber, IsObject, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { decimalPattern } from '../budget-params/parameter-sets.dto.js';
 
 /** Entradas da revisão (projetos-especificacao §5). Dinheiro como texto decimal; vazio/nulo = 0. */
@@ -215,4 +215,23 @@ export class UpdateSowCablesDto {
   @ValidateNested({ each: true })
   @Type(() => SowCableLineDto)
   cables!: SowCableLineDto[];
+}
+
+/** Bid Template do pedido de cotação (o informado ou o mais recente do projeto). */
+export class ImportBidTemplateDto {
+  @IsOptional()
+  @IsUUID()
+  quoteRequestId?: string;
+}
+
+/** Horas T por tipo de cabo (número) ou `null` para voltar ao proporcional. Conferido no serviço. */
+export class UpdateHoursTDto {
+  @IsObject()
+  hours!: Record<string, number | null>;
+}
+
+/** Justificativas por indicador (efficiency, costPerPort, laborCostPerPort, hoursPerPort, hoursPerMeter). */
+export class UpdateKpiJustificationsDto {
+  @IsObject()
+  justifications!: Record<string, string | null>;
 }

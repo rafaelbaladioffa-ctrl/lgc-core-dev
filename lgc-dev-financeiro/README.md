@@ -13,9 +13,9 @@ Satélite do Axis Core, mantido como subpasta deste repositório, como a Logíst
 > versionados com custo hora da equipe, catálogo de materiais e destinos, perfis do módulo), **PJ2
 > entregue** (orçamento do projeto com revisões, resultado, preço mínimo e preço da meta) e **PJ3
 > entregue** (submeter, devolver, aprovar envio, ganha/perdida e avisos de divergência com o Core).
-> PJ4 parte 1 entregue (fila de pedidos de cotação do Core e SOW em PDF lida na revisão). Próximo: PJ4
-> parte 2 (horas-meta e indicadores) e PJ7 (Bid preenchida e devolução ao Core); contas a pagar
-> (F1–F6) vem depois de Projetos.
+> **PJ4 entregue** (fila de pedidos de cotação do Core, SOW em PDF e Bid Template do RFQ lidos na
+> revisão, horas-meta, horas T e indicadores do cliente). Próximo: PJ7 (Bid preenchida e devolução ao
+> Core); contas a pagar (F1–F6) vem depois de Projetos.
 >
 > **Primeiro uso do PJ1:** conceda `CONTROLADORIA` a quem mantém os custos, crie o rascunho em
 > Parâmetros (já vem com as referências legais de encargos e impostos), preencha ISS, veículo, meta e

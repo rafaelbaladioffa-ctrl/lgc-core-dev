@@ -8,6 +8,8 @@ import { CoreDocumentsClient } from './core-documents.client.js';
 import { extractPdfText } from './pdf-text.js';
 import { normalizeType, parseSow, summarizeTypes, totalsOf, type SowCableLine } from './sow-parser.js';
 import { presentSow } from './sow-view.js';
+import { readBidTargets } from '../bid/bid-template-reader.js';
+import { KPI_LABEL, type KpiKey } from '../bid/aws-quote.js';
 
 export interface SowCableInput {
   type: string;
@@ -111,12 +113,18 @@ export class SowService {
       await tx.quoteRequest.update({ where: { id }, data: { budgetId, ...(request.startedAt ? {} : { startedAt: new Date(), startedBy: user.userId }) } });
       await this.audit.record(user.userId, 'quote_request.started', 'quote_request', id, { project: request.projectCode, budgetId, revisionId }, tx);
     });
+    const out = { revisionId, sowImported: true, sowError: null as string | null, bidTemplateImported: true, bidTemplateError: null as string | null };
     try {
       await this.importFromCore(revisionId, { quoteRequestId: id }, user);
-      return { revisionId, sowImported: true, sowError: null };
     } catch (e) {
-      return { revisionId, sowImported: false, sowError: (e as Error).message };
+      Object.assign(out, { sowImported: false, sowError: (e as Error).message });
     }
+    try {
+      await this.importBidTemplate(revisionId, { quoteRequestId: id }, user);
+    } catch (e) {
+      Object.assign(out, { bidTemplateImported: false, bidTemplateError: (e as Error).message });
+    }
+    return out;
   }
 
   // -------------------------------------------------------------------------
@@ -133,17 +141,98 @@ export class SowService {
   /** Baixa a SOW do pedido (o informado ou o mais recente do projeto), extrai o texto e lê. */
   async importFromCore(revisionId: string, opts: { quoteRequestId?: string | null }, user: AuthenticatedUser) {
     const rev = await this.draftRevision(revisionId);
-    const request = opts.quoteRequestId
-      ? await this.prisma.quoteRequest.findUnique({ where: { id: opts.quoteRequestId } })
-      : await this.prisma.quoteRequest.findFirst({ where: { axisProjectId: rev.budget.axisProjectId }, orderBy: { requestedAt: 'desc' } });
-    if (!request) throw new BadRequestException('Este projeto não tem pedido de cotação do Axis Core. Cole o texto da SOW.');
-    if (request.axisProjectId !== rev.budget.axisProjectId) throw new BadRequestException('O pedido de cotação é de outro projeto.');
+    const request = await this.requestFor(rev.budget.axisProjectId, opts.quoteRequestId, 'Este projeto não tem pedido de cotação do Axis Core. Cole o texto da SOW.');
     const pdf = await this.core.download(request.axisProjectId, request.sowDocumentId, request.sowContentHash);
     const { text, pages } = await extractPdfText(pdf);
     if (!text.replace(/=== página \d+ ===/g, '').trim()) {
       throw new BadRequestException('O PDF da SOW não tem texto (provavelmente escaneado). Cole o texto da SOW.');
     }
     return this.save(revisionId, { source: 'core_pdf', text, pages, quoteRequestId: request.id, sowDocumentId: request.sowDocumentId, sowVersion: request.sowVersion }, user);
+  }
+
+  private async requestFor(axisProjectId: string, quoteRequestId: string | null | undefined, notFound: string) {
+    const request = quoteRequestId
+      ? await this.prisma.quoteRequest.findUnique({ where: { id: quoteRequestId } })
+      : await this.prisma.quoteRequest.findFirst({ where: { axisProjectId }, orderBy: { requestedAt: 'desc' } });
+    if (!request) throw new BadRequestException(notFound);
+    if (request.axisProjectId !== axisProjectId) throw new BadRequestException('O pedido de cotação é de outro projeto.');
+    return request;
+  }
+
+  /**
+   * Bid Template do pedido (o informado ou o mais recente do projeto): baixa do Core, lê as metas do cluster e
+   * guarda o arquivo na revisão, para a PJ7 preencher (§7.3–§7.4).
+   */
+  async importBidTemplate(revisionId: string, opts: { quoteRequestId?: string | null }, user: AuthenticatedUser) {
+    const rev = await this.draftRevision(revisionId);
+    const request = await this.requestFor(rev.budget.axisProjectId, opts.quoteRequestId, 'Este projeto não tem pedido de cotação do Axis Core.');
+    if (!request.bidTemplateDocumentId || !request.bidTemplateContentHash || !request.bidTemplateVersion) {
+      throw new BadRequestException('O pedido de cotação não trouxe o Bid Template. Anexe-o no projeto do Axis Core e peça a cotação de novo.');
+    }
+    const content = await this.core.download(request.axisProjectId, request.bidTemplateDocumentId, request.bidTemplateContentHash);
+    const targets = await readBidTargets(content);
+    const data = {
+      quoteRequestId: request.id,
+      documentId: request.bidTemplateDocumentId,
+      version: request.bidTemplateVersion,
+      filename: request.bidTemplateFilename ?? 'Bid Template.xlsm',
+      contentHash: request.bidTemplateContentHash,
+      content,
+      targets: targets as unknown as Prisma.InputJsonValue,
+      importedAt: new Date(),
+      importedBy: user.userId,
+    };
+    await this.prisma.$transaction(async (tx) => {
+      await tx.revisionBidTemplate.upsert({ where: { revisionId }, create: { revisionId, ...data }, update: data });
+      await this.audit.record(
+        user.userId,
+        'budget_revision.bid_template_imported',
+        'budget_revision',
+        revisionId,
+        { version: request.bidTemplateVersion, templateVersion: targets.templateVersion, cluster: targets.cluster, currency: targets.currency, warnings: targets.warnings.length } as unknown as Prisma.InputJsonValue,
+        tx,
+      );
+    });
+    return { version: data.version, filename: data.filename, targets };
+  }
+
+  /** Horas T à mão por tipo de cabo; `null` volta ao proporcional (§7.2). */
+  async updateHours(revisionId: string, hours: Record<string, number | null>, user: AuthenticatedUser) {
+    await this.draftRevision(revisionId);
+    const row = await this.prisma.budgetRevisionSow.findUnique({ where: { revisionId }, select: { cables: true, fieldHoursOverrides: true } });
+    if (!row) throw new BadRequestException('Importe a SOW antes de ajustar as horas por tipo de cabo.');
+    const known = new Set((row.cables as unknown as SowCableLine[]).map((c) => c.type));
+    const next: Record<string, number> = { ...(row.fieldHoursOverrides as Record<string, number>) };
+    for (const [type, value] of Object.entries(hours)) {
+      if (!known.has(type)) throw new BadRequestException(`Tipo de cabo que não está na SOW: ${type}.`);
+      if (value === null) delete next[type];
+      else if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1_000_000) throw new BadRequestException(`Horas inválidas para ${type}.`);
+      else next[type] = Math.round(value * 100) / 100;
+    }
+    for (const type of Object.keys(next)) if (!known.has(type)) delete next[type];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.budgetRevisionSow.update({ where: { revisionId }, data: { fieldHoursOverrides: next, updatedBy: user.userId } });
+      await this.audit.record(user.userId, 'budget_revision.hours_t_changed', 'budget_revision', revisionId, { before: row.fieldHoursOverrides as Prisma.InputJsonValue, after: next }, tx);
+    });
+  }
+
+  /** Justificativas (em inglês, vão para a Bid) dos indicadores fora da meta; `null` ou vazio apaga. */
+  async updateJustifications(revisionId: string, justifications: Record<string, string | null>, user: AuthenticatedUser) {
+    await this.draftRevision(revisionId);
+    const row = await this.prisma.budgetRevisionSow.findUnique({ where: { revisionId }, select: { kpiJustifications: true } });
+    if (!row) throw new BadRequestException('Importe a SOW antes de justificar os indicadores.');
+    const next: Record<string, string> = { ...(row.kpiJustifications as Record<string, string>) };
+    for (const [key, value] of Object.entries(justifications)) {
+      if (!(key in KPI_LABEL)) throw new BadRequestException(`Indicador desconhecido: ${key}.`);
+      const textValue = typeof value === 'string' ? value.trim() : '';
+      if (textValue.length > 2000) throw new BadRequestException(`Justificativa de "${KPI_LABEL[key as KpiKey]}": até 2000 caracteres.`);
+      if (textValue) next[key] = textValue;
+      else delete next[key];
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.budgetRevisionSow.update({ where: { revisionId }, data: { kpiJustifications: next, updatedBy: user.userId } });
+      await this.audit.record(user.userId, 'budget_revision.kpi_justified', 'budget_revision', revisionId, { keys: Object.keys(next) }, tx);
+    });
   }
 
   /** Alternativa ao PDF: o orçamentista cola o texto da SOW. */

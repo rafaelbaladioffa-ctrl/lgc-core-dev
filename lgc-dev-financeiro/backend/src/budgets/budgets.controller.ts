@@ -2,7 +2,18 @@ import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, 
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
-import { CreateBudgetDto, ImportSowDto, RevisionTransitionDto, SimulateRevisionDto, UpdateBudgetDto, UpdateRevisionDto, UpdateSowCablesDto } from './budget-inputs.dto.js';
+import {
+  CreateBudgetDto,
+  ImportBidTemplateDto,
+  ImportSowDto,
+  RevisionTransitionDto,
+  SimulateRevisionDto,
+  UpdateBudgetDto,
+  UpdateHoursTDto,
+  UpdateKpiJustificationsDto,
+  UpdateRevisionDto,
+  UpdateSowCablesDto,
+} from './budget-inputs.dto.js';
 import { SowService } from './sow/sow.service.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
@@ -99,6 +110,29 @@ export class RevisionsController {
   @RequirePermissions('budget:write')
   updateSowCables(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSowCablesDto, @CurrentUser() user: AuthenticatedUser) {
     return this.sow.updateCables(id, dto.cables, user);
+  }
+
+  // Modelo aws_sow (§7.2–§7.4): Bid Template do RFQ, horas T e justificativas dos indicadores.
+  @Post(':id/bid-template/import')
+  @HttpCode(200)
+  @RequirePermissions('budget:write')
+  async importBidTemplate(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ImportBidTemplateDto, @CurrentUser() user: AuthenticatedUser) {
+    await this.sow.importBidTemplate(id, { quoteRequestId: dto.quoteRequestId }, user);
+    return this.budgets.getRevision(id, user);
+  }
+
+  @Put(':id/aws/hours')
+  @RequirePermissions('budget:write')
+  async updateHoursT(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateHoursTDto, @CurrentUser() user: AuthenticatedUser) {
+    await this.sow.updateHours(id, dto.hours, user);
+    return this.budgets.getRevision(id, user);
+  }
+
+  @Put(':id/aws/justifications')
+  @RequirePermissions('budget:write')
+  async updateJustifications(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateKpiJustificationsDto, @CurrentUser() user: AuthenticatedUser) {
+    await this.sow.updateJustifications(id, dto.justifications, user);
+    return this.budgets.getRevision(id, user);
   }
 
   @Get(':id/sow/text')

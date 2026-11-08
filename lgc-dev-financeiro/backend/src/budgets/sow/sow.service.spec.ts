@@ -15,6 +15,10 @@ vi.mock('./pdf-text.js', () => ({
   })),
 }));
 
+vi.mock('../bid/bid-template-reader.js', () => ({
+  readBidTargets: vi.fn(async () => ({ templateVersion: '9.1', cluster: 'TST', currency: 'BRL', fx: 5, targets: {}, converted: {}, weights: {}, thresholds: {}, warnings: [] })),
+}));
+
 /** Fila de pedidos do Core e SOW da revisão (PJ4). Prisma simulado; valores fictícios. */
 
 const ORC: AuthenticatedUser = { userId: 'orc', email: 'orc@lgc.test', axisRoles: [], collaboratorId: null, mustChangePassword: false, permissions: ['budget:read', 'budget:write'] };
@@ -26,6 +30,10 @@ const REQUEST = {
   sowDocumentId: 'doc-sow',
   sowVersion: 2,
   sowContentHash: 'hash-sow',
+  bidTemplateDocumentId: 'doc-bt',
+  bidTemplateVersion: 1,
+  bidTemplateFilename: 'Bid Template.xlsm',
+  bidTemplateContentHash: 'hash-bt',
   requestedAt: new Date('2030-01-10T12:00:00Z'),
   startedAt: null,
   budgetId: null,
@@ -36,6 +44,7 @@ function fixture({ revisionStatus = 'rascunho', budget = null as unknown, reques
     quoteRequest: { findUnique: vi.fn().mockResolvedValue(request), findFirst: vi.fn().mockResolvedValue(request), update: vi.fn().mockResolvedValue({}) },
     projectBudget: { findUnique: vi.fn().mockResolvedValue(budget) },
     budgetRevision: { findUnique: vi.fn().mockResolvedValue({ id: 'r1', number: 1, status: revisionStatus, budget: { axisProjectId: 'p1' } }) },
+    revisionBidTemplate: { upsert: vi.fn().mockResolvedValue({}) },
     budgetRevisionSow: {
       upsert: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
@@ -59,7 +68,8 @@ describe('SowService.startQuote', () => {
     expect(budgets.createBudget).toHaveBeenCalledWith({ axisProjectId: 'p1' }, ORC, 'aws_sow');
     expect(tx.quoteRequest.update).toHaveBeenCalledWith({ where: { id: 'q1' }, data: expect.objectContaining({ budgetId: 'b-new', startedBy: 'orc' }) });
     expect(core.download).toHaveBeenCalledWith('p1', 'doc-sow', 'hash-sow');
-    expect(out).toEqual({ revisionId: 'r-new', sowImported: true, sowError: null });
+    expect(core.download).toHaveBeenCalledWith('p1', 'doc-bt', 'hash-bt');
+    expect(out).toEqual({ revisionId: 'r-new', sowImported: true, sowError: null, bidTemplateImported: true, bidTemplateError: null });
   });
 
   it('orçamento existente: usa o rascunho; sem rascunho, cria nova revisão', async () => {
@@ -73,8 +83,14 @@ describe('SowService.startQuote', () => {
 
   it('falha no download não perde o rascunho: devolve o erro para a tela', async () => {
     const { service, core } = fixture();
-    core.download.mockRejectedValueOnce(new ServiceUnavailableException('Não foi possível falar com o Axis Core.'));
-    expect(await service.startQuote('q1', ORC)).toEqual({ revisionId: 'r-new', sowImported: false, sowError: 'Não foi possível falar com o Axis Core.' });
+    core.download.mockRejectedValue(new ServiceUnavailableException('Não foi possível falar com o Axis Core.'));
+    expect(await service.startQuote('q1', ORC)).toEqual({
+      revisionId: 'r-new',
+      sowImported: false,
+      sowError: 'Não foi possível falar com o Axis Core.',
+      bidTemplateImported: false,
+      bidTemplateError: 'Não foi possível falar com o Axis Core.',
+    });
   });
 });
 
@@ -121,6 +137,36 @@ describe('SowService — SOW da revisão', () => {
       { type: '8F 4LC-MPO', kind: 'fibra', fibers: 8, lengthM: 25, quantity: 4 },
     ]);
     expect((audit.record as ReturnType<typeof vi.fn>).mock.calls[0][4]).toMatchObject({ before: { cables: 2, ports: 2 }, after: { cables: 7, ports: 19 } });
+  });
+});
+
+describe('SowService — Bid Template, horas T e justificativas (PJ4 parte 2)', () => {
+  it('importa o Bid Template do pedido, guarda o arquivo e as metas lidas', async () => {
+    const { service, tx, core } = fixture();
+    const out = await service.importBidTemplate('r1', { quoteRequestId: 'q1' }, ORC);
+    expect(core.download).toHaveBeenCalledWith('p1', 'doc-bt', 'hash-bt');
+    expect(tx.revisionBidTemplate.upsert.mock.calls[0][0].create).toMatchObject({ revisionId: 'r1', quoteRequestId: 'q1', documentId: 'doc-bt', version: 1, contentHash: 'hash-bt', importedBy: 'orc' });
+    expect(out.targets).toMatchObject({ cluster: 'TST', currency: 'BRL' });
+  });
+
+  it('pedido sem Bid Template explica o que fazer', async () => {
+    const { service } = fixture({ request: { ...REQUEST, bidTemplateDocumentId: null, bidTemplateContentHash: null, bidTemplateVersion: null } });
+    await expect(service.importBidTemplate('r1', {}, ORC)).rejects.toThrow('não trouxe o Bid Template');
+  });
+
+  it('horas T: grava número, apaga com null e recusa tipo fora da SOW', async () => {
+    const { service, tx } = fixture({ sowRow: { cables: [{ type: '2F LC-LC' }, { type: 'Cat6 green' }], fieldHoursOverrides: { 'Cat6 green': 5 } } });
+    await service.updateHours('r1', { '2F LC-LC': 70.555, 'Cat6 green': null }, ORC);
+    expect(tx.budgetRevisionSow.update.mock.calls[0][0].data.fieldHoursOverrides).toEqual({ '2F LC-LC': 70.56 });
+    await expect(service.updateHours('r1', { 'Coax': 1 }, ORC)).rejects.toThrow('não está na SOW');
+    await expect(service.updateHours('r1', { '2F LC-LC': -1 }, ORC)).rejects.toThrow('Horas inválidas');
+  });
+
+  it('justificativas: grava, apaga vazio e recusa indicador desconhecido', async () => {
+    const { service, tx } = fixture({ sowRow: { kpiJustifications: { efficiency: 'old' } } });
+    await service.updateJustifications('r1', { efficiency: '  ', hoursPerMeter: 'Long cable runs between rooms' }, ORC);
+    expect(tx.budgetRevisionSow.update.mock.calls[0][0].data.kpiJustifications).toEqual({ hoursPerMeter: 'Long cable runs between rooms' });
+    await expect(service.updateJustifications('r1', { foo: 'x' }, ORC)).rejects.toThrow('Indicador desconhecido');
   });
 });
 

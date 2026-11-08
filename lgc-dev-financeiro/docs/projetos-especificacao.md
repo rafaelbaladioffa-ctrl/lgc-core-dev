@@ -562,7 +562,7 @@ de custo; outros modelos de cliente além do AWS.
 | PJ1 | Parâmetros versionados, funções e custo hora (§6.1), catálogos de material e destinos, permissões e perfis; testes do cálculo com valores fictícios | **feito** (2026-11-07): ver nota abaixo |
 | PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
 | PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | **feito** (2026-11-08): ver nota abaixo |
-| PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | **parte 1 feita** (2026-11-08): fila, SOW em PDF, leitura e correção dos cabos. **Parte 2 pendente:** horas-meta, indicadores e metas lidas do Bid Template, horas T e valores do bid |
+| PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | **feito** (2026-11-08), em duas partes: ver notas abaixo. O perfil de cliente com o mapeamento tipo de cabo/função → linha do Bid Template fica para a PJ7, onde é usado |
 | PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
 | PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | pendente |
@@ -643,6 +643,35 @@ de custo; outros modelos de cliente além do AWS.
   totais da conferência manual (fora do Git); testes com SOWs fictícias nos dois formatos e com um PDF
   mínimo gerado no teste; migrações e gatilhos num Postgres em memória. Não verificado: tela com login
   real e download contra um Core rodando.
+
+**Notas da PJ4 (parte 2).**
+- Migração `20261108170000_pj4_bid_template`: `revision_bid_template` (arquivo do Bid Template do RFQ e
+  metas lidas, só muda em rascunho, copiado na nova revisão) e, em `budget_revision_sow`,
+  `field_hours_overrides` (horas T à mão) e `kpi_justifications`.
+- Leitura do modelo (`bid/bid-template-reader.ts`, com `jszip` e `fast-xml-parser` em versão fixa):
+  cluster, moeda e versão pelos intervalos nomeados da aba *Summary*; metas do cluster na tabela
+  `Table8` e câmbio na `Table12` (aba *Bid KPIs*); pesos das horas-meta e tolerâncias pelas próprias
+  fórmulas. Fora do formato esperado, vale o padrão da versão 3.26 com aviso. Conferida com o modelo
+  real (fora do Git): os números batem com o que a planilha calcula.
+- Cálculo (`bid/aws-quote.ts`): horas-meta por tipo = peso_m × qtd × comprimento médio × meta_h_metro +
+  peso_p × portas × meta_h_porta; o termo de dispositivos fica 0 (o modelo só conta linhas de
+  dispositivo preenchidas, o que uma proposta só de cabeamento não tem). Dias sugeridos, dias úteis da
+  janela da SOW (segunda a sexta; **feriados ainda não entram**, aviso na tela), horas T proporcionais
+  com sobra na primeira linha ou digitadas à mão, indicadores com meta, desvio e tolerância do modelo,
+  e os valores para a Bid. As "horas" dos indicadores são todas as horas de mão de obra.
+- A meta de mão de obra por porta do cluster vem muito baixa no modelo (§7.3: "meta do cliente
+  inconsistente"), então esse indicador sai sempre fora da meta e pede justificativa — sem regra
+  especial no código.
+- Submeter uma revisão `aws_sow` exige SOW e Bid Template importados, horas T somando as horas de campo
+  e justificativa em todo indicador fora da meta (vai em `workflow.submitBlockers` e é conferido no
+  servidor ao submeter).
+- Rotas: `POST /revisions/:id/bid-template/import`, `PUT /revisions/:id/aws/hours`,
+  `PUT /revisions/:id/aws/justifications` (`budget:write`); a revisão traz `aws` (metas, cotação,
+  bloqueios). "Iniciar cotação" importa a SOW e o Bid Template.
+- Tela: painel "Cotação AWS" na revisão (metas do cluster, horas-meta, dias sugeridos × janela, horas T
+  por tipo, indicadores com justificativa em inglês, valores para a Bid).
+- Conferido: testes do leitor com uma planilha mínima fictícia, do cálculo com números conferidos à mão
+  e do serviço; migrações e gatilhos num Postgres em memória. Não verificado: tela com login real.
 
 ## 17. Decisões pendentes
 

@@ -151,3 +151,53 @@ describe('BudgetsService.newRevision com o fluxo', () => {
     await expect(serviceWith([{ number: 2, status: 'ganha' }]).newRevision('b1', ORCAMENTISTA)).rejects.toThrow('foi ganha');
   });
 });
+
+describe('BudgetsService.awsInfo (modelo aws_sow)', () => {
+  const service = new BudgetsService({} as PrismaService, { record: vi.fn() } as unknown as AuditService);
+  const base = {
+    number: 1,
+    inputs: { workDays: 5, team: [], materials: [], platform: { days: 0 } },
+    result: { workDays: 5, fieldHours: '80.00', vehicleDays: 0, labor: [{ roleKey: 't', label: 'T', fieldRole: true, people: 2, hours: '80.00', billingRate: '50', billed: '4000' }], revenue: { total: '4000', labor: '4000', travel: '0', platform: '0' } },
+    budget: { model: 'aws_sow', projectCode: 'PROP-1', title: null, plannedStartDate: null, plannedEndDate: null },
+    parameterSet: { hoursPerDay: '8' },
+  };
+
+  it('nos outros modelos não existe', () => {
+    expect(service.awsInfo({ ...base, budget: { ...base.budget, model: 'generico' } } as never, null)).toBeNull();
+  });
+
+  it('sem SOW e sem Bid Template, pede os dois para submeter', () => {
+    expect(service.awsInfo({ ...base, sow: null, bidTemplate: null } as never, null)).toMatchObject({
+      missing: ['sow', 'bid_template'],
+      quote: null,
+      blockers: ['Importe a SOW do cliente.', 'Importe o Bid Template do cliente.'],
+    });
+  });
+
+  it('com os dois, calcula a cotação e repassa os bloqueios dela', () => {
+    const info = service.awsInfo(
+      {
+        ...base,
+        sow: { header: { startDate: '2030-02-01', endDate: '2030-02-08' }, cables: [{ type: '2F LC-LC', kind: 'fibra', fibers: 2, lengthM: 30, quantity: 10 }], fieldHoursOverrides: {}, kpiJustifications: {} },
+        bidTemplate: {
+          documentId: 'd',
+          version: 1,
+          filename: 'b.xlsm',
+          importedAt: new Date(),
+          quoteRequestId: null,
+          targets: {
+            targets: { hoursPerMeter: 0.03, hoursPerPort: 0.3 },
+            converted: { costPerPort: null, laborCostPerPort: null },
+            weights: { meters: 0.4, ports: 0.6, devices: 1 },
+            thresholds: { efficiency: -0.15, costPerPort: 0.1, laborCostPerPort: 0.15, hoursPerPort: 0.25, hoursPerMeter: 0.25 },
+          },
+        },
+      } as never,
+      null,
+    );
+    expect(info?.missing).toEqual([]);
+    expect(info?.quote?.totals).toMatchObject({ targetHours: 5.4, ports: 10, meters: 300 });
+    expect(info?.quote?.bidValues.proposalName).toBe('PROP-1 R1');
+    expect(info?.blockers.some((b) => b.startsWith('Justifique o indicador'))).toBe(true);
+  });
+});

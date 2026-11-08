@@ -218,6 +218,53 @@ export interface RevisionSow {
   updatedAt: string;
 }
 
+export type KpiKey = 'efficiency' | 'costPerPort' | 'laborCostPerPort' | 'hoursPerPort' | 'hoursPerMeter';
+
+/** Metas lidas do Bid Template do RFQ (§7.3). */
+export interface BidTargets {
+  templateVersion: string | null;
+  cluster: string | null;
+  currency: string | null;
+  fx: number | null;
+  targets: { costPerPortUsd: number | null; hoursPerPort: number | null; hoursPerMeter: number | null; laborCostPerPortUsd: number | null; hoursPerDevice: number | null };
+  converted: { costPerPort: number | null; laborCostPerPort: number | null };
+  weights: { meters: number; ports: number; devices: number };
+  thresholds: Record<KpiKey, number>;
+  warnings: string[];
+}
+
+/** Cotação no modelo aws_sow (§7.2–§7.4), calculada no servidor. */
+export interface AwsQuote {
+  totals: { targetHours: number; meters: number; ports: number; fieldHours: number; totalLaborHours: number; fieldPeople: number };
+  perType: Array<{ type: string; kind: string; fibers: number; quantity: number; averageLengthM: number; consideredMeters: number; ports: number; targetHours: number; hoursTAuto: number; hoursT: number; overridden: boolean }>;
+  hoursTSum: number;
+  hoursTMatches: boolean;
+  suggestedDays: number | null;
+  workDays: number;
+  windowBusinessDays: number | null;
+  fitsWindow: boolean | null;
+  kpis: Array<{ key: KpiKey; label: string; value: number | null; target: number | null; delta: number | null; threshold: number; flagged: boolean; justification: string | null; missingJustification: boolean }>;
+  blockers: string[];
+  warnings: string[];
+  bidValues: {
+    proposalName: string;
+    start: string | null;
+    end: string | null;
+    labor: Array<{ roleKey: string; label: string; rate: string; hours: string }>;
+    travel: { perCarDay: number | null; vehicleDays: number };
+    platform: { days: number; daily: string | null };
+    cables: Array<{ type: string; averageLengthM: number; quantity: number; hoursT: number }>;
+  };
+}
+
+export interface RevisionAws {
+  missing: Array<'sow' | 'bid_template'>;
+  bidTemplate: { documentId: string; version: number; filename: string; importedAt: string; quoteRequestId: string | null } | null;
+  targets: BidTargets | null;
+  quote: AwsQuote | null;
+  blockers: string[];
+}
+
 export type QuoteRequestStatus = 'pendente' | 'em_cotacao' | 'respondida';
 
 export interface QuoteRequestRow {
@@ -254,6 +301,8 @@ export interface Revision {
   result: BudgetResult | null;
   costVisible: boolean;
   sow: RevisionSow | null;
+  /** Só no modelo aws_sow. */
+  aws: RevisionAws | null;
   workflow: RevisionWorkflowInfo;
   revisions: Array<{ id: string; number: number; status: RevisionStatus }>;
   updatedAt: string;
@@ -285,10 +334,20 @@ export const transitionRevision = (id: string, action: Exclude<WorkflowAction, '
   api<Revision>(`/revisions/${id}/${TRANSITION_PATH[action]}`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) });
 
 export const listQuoteRequests = () => api<QuoteRequestRow[]>('/quote-requests');
-export const startQuote = (id: string) => api<{ revisionId: string; sowImported: boolean; sowError: string | null }>(`/quote-requests/${id}/start`, { method: 'POST', body: '{}' });
+export const startQuote = (id: string) =>
+  api<{ revisionId: string; sowImported: boolean; sowError: string | null; bidTemplateImported: boolean; bidTemplateError: string | null }>(`/quote-requests/${id}/start`, {
+    method: 'POST',
+    body: '{}',
+  });
 /** Sem corpo: baixa a SOW do pedido de cotação mais recente do projeto; `text`: lê o texto colado. */
 export const importSow = (revisionId: string, body: { quoteRequestId?: string; text?: string }) =>
   api<RevisionSow>(`/revisions/${revisionId}/sow/import`, { method: 'POST', body: JSON.stringify(body) });
 export const updateSowCables = (revisionId: string, cables: Array<{ type: string; lengthM: number; quantity: number; fibers?: number }>) =>
   api<RevisionSow>(`/revisions/${revisionId}/sow/cables`, { method: 'PUT', body: JSON.stringify({ cables }) });
 export const getSowText = (revisionId: string) => api<{ text: string }>(`/revisions/${revisionId}/sow/text`);
+export const importBidTemplate = (revisionId: string, quoteRequestId?: string) =>
+  api<Revision>(`/revisions/${revisionId}/bid-template/import`, { method: 'POST', body: JSON.stringify(quoteRequestId ? { quoteRequestId } : {}) });
+/** Horas T por tipo de cabo; `null` volta ao proporcional. */
+export const updateHoursT = (revisionId: string, hours: Record<string, number | null>) => api<Revision>(`/revisions/${revisionId}/aws/hours`, { method: 'PUT', body: JSON.stringify({ hours }) });
+export const updateKpiJustifications = (revisionId: string, justifications: Record<string, string | null>) =>
+  api<Revision>(`/revisions/${revisionId}/aws/justifications`, { method: 'PUT', body: JSON.stringify({ justifications }) });

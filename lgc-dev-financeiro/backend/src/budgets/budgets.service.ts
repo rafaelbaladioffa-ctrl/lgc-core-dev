@@ -7,12 +7,18 @@ import { computeBudget, type BudgetInputs, type BudgetResult, type EngineParams 
 import type { BudgetInputsDto, CreateBudgetDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
 import { allowedActions, coreDivergence, EVENT_LABEL, submitBlockers, WORKFLOW, type WorkflowAction } from './revision-workflow.js';
 import { presentSow } from './sow/sow-view.js';
+import { summarizeTypes, type SowCableLine, type SowHeader } from './sow/sow-parser.js';
+import { computeAwsQuote, type KpiKey } from './bid/aws-quote.js';
+import type { BidTargets } from './bid/bid-template-reader.js';
 
 export const COST_PERMISSION = 'budget:read_cost';
 const canSeeCost = (u: AuthenticatedUser) => u.permissions.includes(COST_PERMISSION);
 
 type SetWithRoles = ParameterSet & { roles: ParameterSetRole[] };
-type RevisionFull = BudgetRevision & { budget: ProjectBudget; parameterSet: SetWithRoles; sow?: Parameters<typeof presentSow>[0] };
+/** Bid Template da revisão sem o conteúdo do arquivo (que só é lido para preencher a Bid, na PJ7). */
+const BID_TEMPLATE_META = { documentId: true, version: true, filename: true, contentHash: true, targets: true, importedAt: true, importedBy: true, quoteRequestId: true } as const;
+type BidTemplateMeta = Prisma.RevisionBidTemplateGetPayload<{ select: typeof BID_TEMPLATE_META }>;
+type RevisionFull = BudgetRevision & { budget: ProjectBudget; parameterSet: SetWithRoles; sow?: Parameters<typeof presentSow>[0]; bidTemplate?: BidTemplateMeta | null };
 
 export const REVISION_STATUS_LABEL: Record<string, string> = {
   rascunho: 'Rascunho',
@@ -282,9 +288,56 @@ export class BudgetsService {
   }
 
   private async loadRevision(id: string, tx: Prisma.TransactionClient = this.prisma): Promise<RevisionFull> {
-    const rev = await tx.budgetRevision.findUnique({ where: { id }, include: { budget: true, parameterSet: { include: { roles: true } }, sow: true } });
+    const rev = await tx.budgetRevision.findUnique({
+      where: { id },
+      include: { budget: true, parameterSet: { include: { roles: true } }, sow: true, bidTemplate: { select: BID_TEMPLATE_META } },
+    });
     if (!rev) throw new NotFoundException('Revisão de orçamento não encontrada.');
     return rev;
+  }
+
+  /**
+   * Modelo `aws_sow` (§7.2–§7.4): horas-meta, horas T, indicadores e valores do bid, com o que ainda impede
+   * submeter. Nulo nos outros modelos.
+   */
+  awsInfo(rev: RevisionFull, project: ProjectInfo | null) {
+    if (rev.budget.model !== 'aws_sow') return null;
+    const missing: Array<'sow' | 'bid_template'> = [];
+    if (!rev.sow) missing.push('sow');
+    if (!rev.bidTemplate) missing.push('bid_template');
+    const result = rev.result as unknown as BudgetResult | null;
+    const bidTemplate = rev.bidTemplate
+      ? { documentId: rev.bidTemplate.documentId, version: rev.bidTemplate.version, filename: rev.bidTemplate.filename, importedAt: rev.bidTemplate.importedAt, quoteRequestId: rev.bidTemplate.quoteRequestId }
+      : null;
+    const targets = (rev.bidTemplate?.targets ?? null) as unknown as BidTargets | null;
+    let quote = null;
+    if (rev.sow && targets && result) {
+      const header = budgetHeader(rev.budget, project);
+      const sowHeader = rev.sow.header as unknown as SowHeader;
+      const inputs = rev.inputs as unknown as BudgetInputs;
+      quote = computeAwsQuote({
+        types: summarizeTypes(rev.sow.cables as unknown as SowCableLine[]),
+        targets,
+        result,
+        hoursPerDay: rev.parameterSet.hoursPerDay ? Number(rev.parameterSet.hoursPerDay) : null,
+        window: { start: sowHeader.startDate, end: sowHeader.endDate },
+        hoursOverrides: (rev.sow.fieldHoursOverrides ?? {}) as Record<string, number>,
+        justifications: (rev.sow.kpiJustifications ?? {}) as Partial<Record<KpiKey, string>>,
+        bid: {
+          proposalName: `${rev.budget.projectCode} R${rev.number}`,
+          start: header.schedule.start.value,
+          end: header.schedule.end.value,
+          platformDays: inputs.platform?.days ?? 0,
+          platformDaily: inputs.platform?.dailyBilled ?? null,
+        },
+      });
+    }
+    const blockers = [
+      ...(missing.includes('sow') ? ['Importe a SOW do cliente.'] : []),
+      ...(missing.includes('bid_template') ? ['Importe o Bid Template do cliente.'] : []),
+      ...(quote?.blockers ?? []),
+    ];
+    return { missing, bidTemplate, targets, quote, blockers };
   }
 
   async getRevision(id: string, user: AuthenticatedUser) {
@@ -297,6 +350,7 @@ export class BudgetsService {
       this.prisma.budgetRevisionEvent.findMany({ where: { revisionId: id }, orderBy: { createdAt: 'asc' } }),
     ]);
     const set = rev.parameterSet;
+    const aws = this.awsInfo(rev, project);
     return {
       id: rev.id,
       number: rev.number,
@@ -312,9 +366,10 @@ export class BudgetsService {
       result: presentResult(rev.result as unknown as BudgetResult | null, cost),
       costVisible: cost,
       sow: presentSow(rev.sow ?? null),
+      aws,
       workflow: {
         allowedActions: allowedActions(rev.status, user),
-        submitBlockers: rev.status === 'rascunho' ? submitBlockers(rev.result as never) : [],
+        submitBlockers: rev.status === 'rascunho' ? [...submitBlockers(rev.result as never), ...(aws?.blockers ?? [])] : [],
         submittedAt: rev.submittedAt,
         approvedAt: rev.approvedAt,
         approvedByEmail: rev.approvedByEmail,
@@ -407,8 +462,24 @@ export class BudgetsService {
       if (baseSow) {
         const { revisionId: _r, importedAt: _i, updatedAt: _u, ...copy } = baseSow;
         await tx.budgetRevisionSow.create({
-          data: { ...copy, revisionId: rev.id, header: copy.header as Prisma.InputJsonValue, devices: copy.devices as Prisma.InputJsonValue, parsedCables: copy.parsedCables as Prisma.InputJsonValue, cables: copy.cables as Prisma.InputJsonValue, warnings: copy.warnings as Prisma.InputJsonValue, updatedBy: user.userId },
+          data: {
+            ...copy,
+            revisionId: rev.id,
+            header: copy.header as Prisma.InputJsonValue,
+            devices: copy.devices as Prisma.InputJsonValue,
+            parsedCables: copy.parsedCables as Prisma.InputJsonValue,
+            cables: copy.cables as Prisma.InputJsonValue,
+            warnings: copy.warnings as Prisma.InputJsonValue,
+            fieldHoursOverrides: copy.fieldHoursOverrides as Prisma.InputJsonValue,
+            kpiJustifications: copy.kpiJustifications as Prisma.InputJsonValue,
+            updatedBy: user.userId,
+          },
         });
+      }
+      const baseBid = base ? await tx.revisionBidTemplate.findUnique({ where: { revisionId: base.id } }) : null;
+      if (baseBid) {
+        const { revisionId: _b, importedAt: _t, ...copyBid } = baseBid;
+        await tx.revisionBidTemplate.create({ data: { ...copyBid, revisionId: rev.id, targets: copyBid.targets as Prisma.InputJsonValue } });
       }
       await this.audit.record(user.userId, 'budget_revision.created', 'budget_revision', rev.id, { budget: budget.title ?? budget.projectCode, revision: number, basedOn: base?.number ?? null, parameterSet: set.code }, tx);
       return rev.id;
@@ -460,7 +531,8 @@ export class BudgetsService {
       const data: Prisma.BudgetRevisionUpdateInput = { status: rule.to, updatedBy: user.userId };
       const extra: Record<string, unknown> = {};
       if (action === 'submit') {
-        const blockers = submitBlockers(rev.result as never);
+        const project = rev.budget.model === 'aws_sow' ? await this.project(rev.budget.axisProjectId).catch(() => null) : null;
+        const blockers = [...submitBlockers(rev.result as never), ...(this.awsInfo(rev, project)?.blockers ?? [])];
         if (blockers.length) throw new BadRequestException(`Não dá para submeter: ${blockers.join(' ')}`);
         data.submittedAt = now;
       }

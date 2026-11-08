@@ -12,7 +12,7 @@ const STATUS: Record<QuoteRequestStatus, { label: string; tone: 'warning' | 'neu
 
 /**
  * Fila de pedidos de cotação vindos do Axis Core ("Solicitar cotação" no projeto). "Iniciar cotação" abre o
- * orçamento aws_sow do projeto (cria na primeira vez) e importa a SOW em PDF do pedido.
+ * orçamento aws_sow do projeto (cria na primeira vez) e importa a SOW em PDF e o Bid Template do pedido.
  */
 export function QuoteRequestsPage({ canWrite }: { canWrite: boolean }) {
   const { data, error, loading, reload } = useLoad(listQuoteRequests, [], 'Não foi possível carregar os pedidos de cotação.');
@@ -24,7 +24,10 @@ export function QuoteRequestsPage({ canWrite }: { canWrite: boolean }) {
     setActionError(null);
     try {
       const out = await startQuote(id);
-      navigate(`/revisoes/${out.revisionId}${out.sowImported ? '' : `?sowError=${encodeURIComponent(out.sowError ?? '')}`}`);
+      const query = new URLSearchParams();
+      if (!out.sowImported) query.set('sowError', out.sowError ?? '');
+      if (!out.bidTemplateImported) query.set('bidTemplateError', out.bidTemplateError ?? '');
+      navigate(`/revisoes/${out.revisionId}${query.size ? `?${query.toString()}` : ''}`);
     } catch (e) {
       setActionError(messageOf(e, 'Não foi possível iniciar a cotação.'));
       setBusy(null);

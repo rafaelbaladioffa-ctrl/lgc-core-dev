@@ -353,6 +353,7 @@ model BudgetRevision {
   parameterSet ParameterSet  @relation(fields: [parameterSetId], references: [id])
   events       BudgetRevisionEvent[]
   sow          BudgetRevisionSow?
+  bidTemplate  RevisionBidTemplate?
 
   @@unique([budgetId, number])
   @@index([status])
@@ -403,8 +404,9 @@ model QuoteRequest {
   startedBy              String?   @map("started_by")
   createdAt              DateTime  @default(now()) @map("created_at")
 
-  budget   ProjectBudget?      @relation(fields: [budgetId], references: [id])
-  sowUsage BudgetRevisionSow[]
+  budget           ProjectBudget?        @relation(fields: [budgetId], references: [id])
+  sowUsage         BudgetRevisionSow[]
+  bidTemplateUsage RevisionBidTemplate[]
 
   @@index([axisProjectId])
   @@map("quote_requests")
@@ -427,6 +429,10 @@ model BudgetRevisionSow {
   parsedCables   Json     @map("parsed_cables")
   cables         Json
   warnings       Json
+  /// Horas T digitadas à mão por tipo de cabo (§7.2); tipo ausente = proporcional às horas-meta.
+  fieldHoursOverrides Json @default("{}") @map("field_hours_overrides")
+  /// Justificativas (em inglês) dos indicadores fora da meta do cliente (§7.3).
+  kpiJustifications   Json @default("{}") @map("kpi_justifications")
   importedAt     DateTime @default(now()) @map("imported_at")
   importedBy     String   @map("imported_by")
   updatedAt      DateTime @updatedAt @map("updated_at")
@@ -436,4 +442,25 @@ model BudgetRevisionSow {
   quoteRequest QuoteRequest?  @relation(fields: [quoteRequestId], references: [id])
 
   @@map("budget_revision_sow")
+}
+
+/// Bid Template do RFQ usado na revisão (PJ4 parte 2, §7.3–§7.4): o arquivo do cliente (preenchido na PJ7)
+/// e as metas lidas dele. Só muda com a revisão em rascunho.
+model RevisionBidTemplate {
+  revisionId     String   @id @map("revision_id")
+  quoteRequestId String?  @map("quote_request_id")
+  documentId     String   @map("document_id")
+  version        Int
+  filename       String
+  contentHash    String   @map("content_hash")
+  content        Bytes
+  /// Saída de readBidTargets: cluster, moeda, câmbio, metas, pesos, tolerâncias e avisos.
+  targets        Json
+  importedAt     DateTime @default(now()) @map("imported_at")
+  importedBy     String   @map("imported_by")
+
+  revision     BudgetRevision @relation(fields: [revisionId], references: [id])
+  quoteRequest QuoteRequest?  @relation(fields: [quoteRequestId], references: [id])
+
+  @@map("revision_bid_template")
 }

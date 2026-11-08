@@ -18,6 +18,7 @@ import { navigate } from '../lib/router';
 import { Badge, ErrorAlert, Field, messageOf, PageHeader, useLoad, useUnsavedWarning } from '../components/ui';
 import { RevisionWorkflow } from '../components/RevisionWorkflow';
 import { RevisionSowSection } from '../components/RevisionSow';
+import { RevisionAwsSection } from '../components/RevisionAws';
 
 // ---------------------------------------------------------------------------
 // Formulário ↔ entradas da API
@@ -150,10 +151,10 @@ export function toInputs(form: Form, roles: Revision['roles'], costVisible: bool
 // Página
 // ---------------------------------------------------------------------------
 
-/** Erro do download da SOW ao iniciar a cotação pela fila (vem na URL: #/revisoes/:id?sowError=…). */
-function sowErrorFromUrl(): string | null {
+/** Erros do download ao iniciar a cotação pela fila (vêm na URL: #/revisoes/:id?sowError=…&bidTemplateError=…). */
+function errorFromUrl(key: 'sowError' | 'bidTemplateError'): string | null {
   const query = window.location.hash.split('?')[1];
-  return query ? new URLSearchParams(query).get('sowError') : null;
+  return query ? new URLSearchParams(query).get(key) : null;
 }
 
 export function RevisionPage({ id, canWrite }: { id: string; canWrite: boolean }) {
@@ -309,7 +310,10 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
       )}
       <RevisionWorkflow rev={rev} dirty={dirty && editable} onChange={onChange} />
       {(rev.budget.model === 'aws_sow' || rev.sow) && (
-        <RevisionSowSection rev={rev} canWrite={canWrite} initialError={sowErrorFromUrl()} onChange={(sow) => onChange({ ...rev, sow })} />
+        <RevisionSowSection rev={rev} canWrite={canWrite} initialError={errorFromUrl('sowError')} onChange={(sow) => onChange({ ...rev, sow })} />
+      )}
+      {rev.aws && (
+        <RevisionAwsSection key={`aws-${rev.updatedAt}-${rev.sow?.updatedAt ?? ''}`} rev={rev} canWrite={canWrite} initialError={errorFromUrl('bidTemplateError')} onChange={onChange} />
       )}
       {editable && paramsOutdated && (
         <p className="alert alert-warning">
