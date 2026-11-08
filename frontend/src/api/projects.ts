@@ -35,9 +35,9 @@ export interface CreateProjectInput {
 /** O cliente não muda depois de criado: ele faz parte do código do projeto. */
 export type UpdateProjectInput = Partial<Omit<CreateProjectInput, 'clientId' | 'status'>>;
 
-export type ProjectDocumentKind = 'sow' | 'bid_template';
+export type ProjectDocumentKind = 'sow' | 'bid_template' | 'po';
 
-export const PROJECT_DOCUMENT_LABEL: Record<ProjectDocumentKind, string> = { sow: 'SOW', bid_template: 'Bid Template' };
+export const PROJECT_DOCUMENT_LABEL: Record<ProjectDocumentKind, string> = { sow: 'SOW', bid_template: 'Bid Template', po: 'PO do cliente' };
 
 export interface ProjectDocument {
   id: string;
@@ -117,6 +117,30 @@ export interface ProjectQuotes {
   quotes: ProjectQuote[];
 }
 
+/** Resposta de `PUT /projects/:id/status` com `aprovado`: o projeto mais a requisição de envio gerada (se houve materiais). */
+export type ApprovedProject = Project & {
+  materialRequest: { id: string; code: string; status: string } | null;
+  withoutMaterials: boolean;
+};
+
+export interface ProjectAcceptance {
+  acceptance: {
+    id: string;
+    projectQuoteId: string;
+    revisionNumber: number;
+    clientPoNumber: string | null;
+    acceptedByEmail: string;
+    acceptedAt: string;
+  } | null;
+  materialRequest: { id: string; code: string; status: string; estimatedValue: string | null; neededBy: string | null } | null;
+}
+
+export interface ApproveProjectInput {
+  /** Padrão: a cotação vigente (maior revisão). */
+  acceptedQuoteId?: string;
+  clientPoNumber?: string;
+}
+
 export const projectsApi = {
   list: () => api.get<Project[]>('/projects').then((r) => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then((r) => r.data),
@@ -124,6 +148,10 @@ export const projectsApi = {
   update: (id: string, input: UpdateProjectInput) => api.put<Project>(`/projects/${id}`, input).then((r) => r.data),
   updateStatus: (id: string, status: ProjectStatus) =>
     api.put<Project>(`/projects/${id}/status`, { status }).then((r) => r.data),
+  /** Aprovar exige site e cotação (o servidor confere); cria o aceite e a requisição de envio de material. */
+  approve: (id: string, input: ApproveProjectInput) =>
+    api.put<ApprovedProject>(`/projects/${id}/status`, { status: 'aprovado', ...input }).then((r) => r.data),
+  getAcceptance: (id: string) => api.get<ProjectAcceptance>(`/projects/${id}/acceptance`).then((r) => r.data),
   remove: (id: string) => api.delete(`/projects/${id}`),
   listDocuments: (id: string) => api.get<ProjectDocument[]>(`/projects/${id}/documents`).then((r) => r.data),
   addDocument: (id: string, input: { kind: ProjectDocumentKind; filename: string; contentBase64: string }) =>

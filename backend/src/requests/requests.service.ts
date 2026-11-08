@@ -7,7 +7,9 @@ import { OutboxService } from '../integration/outbox.service.js';
 import { DelegationsService } from '../delegations/delegations.service.js';
 import { ApprovalAuthorityRulesService } from '../approval-authority-rules/approval-authority-rules.service.js';
 import { HolidaysService } from '../holidays/holidays.service.js';
-import { findLatestPublishedVersion, isPurchase, isWhistleblower } from '../request-categories/category-kind.js';
+import { findLatestPublishedVersion, isPurchase, isShipment, isWhistleblower } from '../request-categories/category-kind.js';
+import { PROJECT_APPROVED_ORIGIN, cancelShipmentInLogistics, sendShipmentToLogistics } from './envio-material.js';
+import { nextRequestCode } from './request-number.js';
 import { CreateRequestDto } from './dto/create-request.dto.js';
 import { UpdateRequestDto } from './dto/update-request.dto.js';
 import { TriageRequestDto } from './dto/triage-request.dto.js';
@@ -115,6 +117,7 @@ export class RequestsService {
   async create(requesterId: string, dto: CreateRequestDto) {
     const category = await this.prisma.requestCategory.findUnique({ where: { id: dto.categoryId } });
     if (!category || !category.active) throw new BadRequestException('Categoria de requisição não encontrada ou inativa');
+    if (isShipment(category)) throw new BadRequestException('O envio de material para obra é criado automaticamente ao aprovar o projeto.');
     // `bpmStatus` filtrava a versão BPM-only fora da criação legada — removido junto do resto do
     // módulo BPM (98dfce5); toda versão aqui já é legada.
     const categoryVersion = await findLatestPublishedVersion(this.prisma, dto.categoryId);
@@ -1011,7 +1014,9 @@ export class RequestsService {
     this.assertNotRequester(request, approverId);
     const stepRows = this.activeStepRows(request.approvals);
     const { row: myRow, onBehalfOf } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
-    if (myRow.approvalSource === 'centro_custo') {
+    // Envio de material (PT-06): a linha `centro_custo` é a do responsável do CC do projeto, sem análise de estoque.
+    const shipment = await this.isShipmentRequest(request.categoryVersionId);
+    if (myRow.approvalSource === 'centro_custo' && !shipment) {
       const formData = (request.formData as Record<string, unknown> | null) ?? {};
       if (!formData.procurementAnalysis) throw new BadRequestException('A análise de estoque/cotação do Suprimentos precisa ser registrada antes da aprovação final.');
     }
@@ -1041,8 +1046,21 @@ export class RequestsService {
       if (stillPending) return tx.request.findUniqueOrThrow({ where: { id } });
 
       const categoryVersion = await tx.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
-      return this.finalizeApproval(tx, id, categoryVersion, approverId);
+      const approved = await this.finalizeApproval(tx, id, categoryVersion, approverId);
+      // Aprovado o envio de material, a Logística assume: `material_request.approved` + `em_atendimento` (PT-06).
+      return shipment ? sendShipmentToLogistics(tx, this.outbox, approved, approverId, now) : approved;
     });
+  }
+
+  /** Envio de material para obra (categoria `envio_material`): criado pelo sistema, nunca pela tela. */
+  private async isShipmentRequest(categoryVersionId: string): Promise<boolean> {
+    const version = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: categoryVersionId }, include: { category: true } });
+    return !!version.category && isShipment(version.category);
+  }
+
+  /** O solicitante do envio é o sistema: ações que dependem de uma pessoa do outro lado não se aplicam. */
+  private async assertNotShipmentRequest(categoryVersionId: string, message: string) {
+    if (await this.isShipmentRequest(categoryVersionId)) throw new BadRequestException(message);
   }
 
   /** Qualquer reprovação na etapa ativa reprova a requisição inteira, mesmo em nó paralelo —
@@ -1114,6 +1132,7 @@ export class RequestsService {
     const request = await this.getOrThrow(id);
     this.assertNotRequester(request, actorId);
     await this.assertPurchaseOperator(request, actorRoles);
+    await this.assertNotShipmentRequest(request.categoryVersionId, 'No envio de material para obra o solicitante é o sistema: comente na requisição em vez de pedir informação.');
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível pedir informação durante o atendimento');
 
     return this.prisma.$transaction(async (tx) => {
@@ -1164,6 +1183,7 @@ export class RequestsService {
     this.assertNotRequester(request, actorId);
     await this.assertPurchaseOperator(request, actorRoles);
     await this.assertNotPurchaseStage(request.categoryVersionId, 'Na compra, a conclusão é a confirmação de recebimento pelo solicitante.');
+    await this.assertNotShipmentRequest(request.categoryVersionId, 'No envio de material para obra, a conclusão vem da entrega confirmada pela Logística.');
     if (request.status !== 'em_atendimento') throw new BadRequestException('Só é possível concluir durante o atendimento');
 
     const subtaskLinks = await this.prisma.requestRelation.findMany({
@@ -1293,6 +1313,8 @@ export class RequestsService {
       const updated = await tx.request.update({ where: { id }, data: { status: 'cancelada' } });
       await this.audit(tx, { aggregateId: id, event: 'request.cancelled', actorId, after: { reason: dto.reason } });
       await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      // Envio de material já aprovado (a Logística tem a ordem): pede o cancelamento a ela (PT-06).
+      await cancelShipmentInLogistics(tx, this.outbox, updated, dto.reason);
       if (cancelsApprovedPurchase) {
         await this.outbox.record(tx, 'purchase.cancelled', {
           request_id: id,
@@ -1619,7 +1641,8 @@ export class RequestsService {
       ? await this.prisma.collaborator.findUnique({ where: { id: user.collaboratorId }, select: { sectorId: true } })
       : null;
 
-    const [mine, triagePool, approvals, executing] = await Promise.all([
+    const canAdminRequests = user.permissions.includes('request_category:update');
+    const [mine, triagePool, approvals, executing, withoutApprover] = await Promise.all([
       this.prisma.request.findMany({
         where: {
           executionMode: 'legacy',
@@ -1642,10 +1665,18 @@ export class RequestsService {
         include,
         orderBy: { createdAt: 'desc' },
       }),
+      // Alerta ao admin de Requisições (PA-09): envio de material automático sem responsável de CC para aprovar.
+      canAdminRequests
+        ? this.prisma.request.findMany({
+            where: { executionMode: 'legacy', origin: PROJECT_APPROVED_ORIGIN, status: 'aguardando_aprovacao', approvals: { none: { status: 'pendente' } } },
+            include,
+            orderBy: { createdAt: 'desc' },
+          })
+        : Promise.resolve([]),
     ]);
 
     type WithInclude = Prisma.RequestGetPayload<{ include: typeof include }>;
-    type ActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao';
+    type ActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao' | 'sem_aprovador';
     const toItem = (kind: ActivityKind, r: WithInclude) => {
       const clock = r.slaClocks.find((c) => c.metric === 'solucao' && c.stoppedAt === null);
       return {
@@ -1677,6 +1708,7 @@ export class RequestsService {
         return r ? [{ ...toItem('aprovacao' as const, r), approvalId: a.approvalId }] : [];
       }),
       ...executing.map((r) => toItem('execucao', r)),
+      ...withoutApprover.map((r) => toItem('sem_aprovador', r)),
     ];
   }
 
@@ -2199,11 +2231,8 @@ export class RequestsService {
     return resolved.sort((a, b) => a.stepOrder - b.stepOrder).map((s, i) => ({ ...s, stepOrder: i + 1 }));
   }
 
-  private async nextRequestCode(tx: TxClient): Promise<string> {
-    const year = new Date().getFullYear();
-    await tx.$executeRaw`INSERT INTO request_number_counters (year, last_value) VALUES (${year}, 0) ON CONFLICT (year) DO NOTHING`;
-    const rows = await tx.$queryRaw<Array<{ last_value: number }>>`UPDATE request_number_counters SET last_value = last_value + 1 WHERE year = ${year} RETURNING last_value`;
-    return `REQ-${year}-${String(rows[0].last_value).padStart(6, '0')}`;
+  private nextRequestCode(tx: TxClient): Promise<string> {
+    return nextRequestCode(tx);
   }
 
   private async audit(

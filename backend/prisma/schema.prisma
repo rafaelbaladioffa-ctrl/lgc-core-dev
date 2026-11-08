@@ -107,6 +107,7 @@ model User {
   collaborator   Collaborator? @relation(fields: [collaboratorId], references: [id])
   projectDocuments ProjectDocument[]
   projectQuoteRequests ProjectQuoteRequest[]
+  projectAcceptances ProjectAcceptance[]
   refreshTokens  RefreshToken[]
   userRoles      UserRole[]
   auditLogs      AuditLog[]
@@ -303,6 +304,8 @@ model Collaborator {
   cnhCategory      String? @map("cnh_category")
   cnhNumber        String? @map("cnh_number")
   cnhExpiresAt     DateTime? @map("cnh_expires_at")
+  /// Colaborador técnico do sistema ("Axis (automático)"): solicitante das requisições automáticas. Fora de listas e integrações.
+  isSystem         Boolean  @default(false) @map("is_system")
 
   user                  User?
   sectorsResponsibleFor Sector[] @relation("SectorResponsible")
@@ -411,6 +414,8 @@ model Project {
   documents                 ProjectDocument[]
   quoteRequests             ProjectQuoteRequest[]
   quotes                    ProjectQuote[]
+  /// Aceite da aprovação (PA-07): qual revisão da cotação o cliente aceitou e o PO. Nulo enquanto for proposta.
+  acceptance                ProjectAcceptance?
   /// Local da obra (PA-05). Nulo até o PT-06 exigi-lo para aprovar o projeto; sempre do mesmo cliente.
   siteId                    String?  @map("site_id")
   site                      Site?    @relation(fields: [siteId], references: [id])
@@ -455,6 +460,8 @@ enum ProjectDocumentKind {
   sow
   /// Bid Template do RFQ (planilha que o cliente manda junto com a SOW, já com os dados do projeto).
   bid_template
+  /// Pedido de compra (PO) do cliente, anexado ao aprovar o projeto (PA-07). Aceita os mesmos tipos de arquivo dos anexos.
+  po
 }
 
 /// Documento do projeto (ex.: SOW do cliente). Versionado: enviar de novo cria a versão seguinte;
@@ -532,10 +539,28 @@ model ProjectQuote {
   receivedAt         DateTime             @default(now()) @map("received_at")
   /// Materiais a enviar ao site, com o código da Logística. Nunca traz preço nem custo.
   materials          ProjectQuoteMaterial[]
+  acceptances        ProjectAcceptance[]
 
   @@unique([satelliteId, externalRevisionId])
   @@index([projectId])
   @@map("project_quotes")
+}
+
+/// Aceite do projeto (PT-06, PA-07): a revisão da cotação que o cliente aprovou e o PO. Um por projeto:
+/// o projeto só passa a `aprovado` uma vez. Nasce na mesma transação da mudança de status.
+model ProjectAcceptance {
+  id               String       @id @default(uuid())
+  projectId        String       @unique @map("project_id")
+  project          Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projectQuoteId   String       @map("project_quote_id")
+  projectQuote     ProjectQuote @relation(fields: [projectQuoteId], references: [id])
+  clientPoNumber   String?      @map("client_po_number")
+  acceptedByUserId String       @map("accepted_by_user_id")
+  acceptedBy       User         @relation(fields: [acceptedByUserId], references: [id])
+  acceptedAt       DateTime     @default(now()) @map("accepted_at")
+
+  @@index([projectQuoteId])
+  @@map("project_acceptances")
 }
 
 /// Material da cotação (PT-05 do plano projeto aprovado → obra): código da Logística, descrição, unidade
@@ -619,6 +644,8 @@ enum RequestCategoryKind {
   padrao
   compra_material
   denuncia
+  /// Envio de material para obra (PT-06): criada pelo sistema ao aprovar o projeto, nunca aberta pela tela.
+  envio_material
 }
 
 enum CategoryVersionStatus {
@@ -723,6 +750,10 @@ model Request {
   estimatedValue        Decimal?                @map("estimated_value") @db.Decimal(19, 4)
   currency              String                  @default("BRL")
   formData              Json?                   @map("form_data")
+  /// Quem originou a requisição quando não foi uma pessoa (ex.: `projeto_aprovado`). Nulo nas abertas pela tela.
+  origin                String?
+  /// Chave do que originou (ex.: id da cotação aceita). (`origin`, `source_ref`) único: não duplica a requisição automática.
+  sourceRef             String?                 @map("source_ref")
   anonymous             Boolean                 @default(false)
   lockVersion           Int                     @default(0) @map("lock_version")
   submittedAt           DateTime?               @map("submitted_at")
@@ -750,6 +781,7 @@ model Request {
   @@index([executionMode, requesterId, createdAt, id])
   @@index([executionMode, queueId, status, createdAt, id])
   @@index([executionMode, categoryVersionId, status])
+  @@unique([origin, sourceRef])
   @@map("requests")
 }
 

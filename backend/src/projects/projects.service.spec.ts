@@ -110,11 +110,11 @@ describe('ProjectsService', () => {
   });
 
   it('troca de status leva o projeto inteiro e o status anterior', async () => {
-    const { service, prisma, outbox } = fixture();
-    await service.updateStatus('p-1', { status: 'aprovado' });
+    const { service, prisma, outbox } = fixture(projectRow({ status: 'aprovado' }));
+    await service.updateStatus('p-1', { status: 'em_execucao' });
     expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.status_changed', expect.objectContaining({
-      status: 'aprovado',
-      previous_status: 'proposta',
+      status: 'em_execucao',
+      previous_status: 'aprovado',
       name: 'Cabeamento DC Campinas',
       cost_center_id: 'cc-1',
     }));
@@ -219,8 +219,8 @@ describe('ProjectsService — site do projeto (PA-05)', () => {
   });
 
   it('troca de status e exclusão também levam o site no payload', async () => {
-    const { service, prisma, outbox } = fixture(projectRow({ siteId: 'site-1', site: SITE, _count: { requests: 0 } }));
-    await service.updateStatus('p-1', { status: 'aprovado' });
+    const { service, prisma, outbox } = fixture(projectRow({ siteId: 'site-1', site: SITE, status: 'aprovado', _count: { requests: 0 } }));
+    await service.updateStatus('p-1', { status: 'em_execucao' });
     expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.status_changed', expect.objectContaining({ site_id: 'site-1', site_code: 'GRU53', site_name: 'Aeroporto GRU' }));
   });
 
@@ -228,6 +228,15 @@ describe('ProjectsService — site do projeto (PA-05)', () => {
     const { service, prisma, outbox } = fixture(projectRow({ siteId: 'site-1', site: SITE, _count: { requests: 0 } }));
     await service.remove('p-1');
     expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.deleted', expect.objectContaining({ site_id: 'site-1', site_code: 'GRU53', deleted: true }));
+  });
+});
+
+describe('aprovação do projeto não passa pelo updateStatus genérico', () => {
+  it('recusa aprovado (a aprovação exige site e cotação e tem serviço próprio) e os campos do aceite em outros status', async () => {
+    const { service, prisma } = fixture();
+    await expect(service.updateStatus('p-1', { status: 'aprovado' })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.updateStatus('p-1', { status: 'encerrado', clientPoNumber: 'PO-1' })).rejects.toThrow(/só valem na aprovação/);
+    expect(prisma.project.update).not.toHaveBeenCalled();
   });
 });
 

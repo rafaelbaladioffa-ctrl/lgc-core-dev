@@ -187,6 +187,8 @@ export class CollaboratorsService {
 
   async findAll(): Promise<CollaboratorSafeView[]> {
     const collaborators = await this.prisma.collaborator.findMany({
+      // O colaborador técnico "Axis (automático)" (solicitante das requisições automáticas) não é uma pessoa.
+      where: { isSystem: false },
       orderBy: { fullName: 'asc' },
       include: WITH_RELATIONS,
     });

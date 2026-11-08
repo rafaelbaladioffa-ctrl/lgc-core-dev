@@ -12,7 +12,7 @@ export interface RequestFormField {
   optionsSource?: RequestFieldOptionsSource;
 }
 
-export type RequestCategoryKind = 'padrao' | 'compra_material' | 'denuncia';
+export type RequestCategoryKind = 'padrao' | 'compra_material' | 'denuncia' | 'envio_material';
 export type CategoryVersionStatus = 'rascunho' | 'publicada';
 export type ManagementLevelStep = 'supervisor' | 'coordenador' | 'gerente' | 'diretor';
 export type CompletionRule = 'todos' | 'qualquer_um' | 'n_de_m';

@@ -7,8 +7,9 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PurchaseQuotations } from '../components/PurchaseQuotations';
 import { CostCenterBudgetBadge } from '../components/CostCenterBudgetBadge';
 import { PurchaseDeliveries } from '../components/PurchaseDeliveries';
+import { ShipmentDetails } from '../components/ShipmentDetails';
 import { useAuth } from '../context/AuthContext';
-import { approvalStepLabel, requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
+import { approvalStepLabel, requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus, type ShipmentData } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
 import { formatBRL } from '../utils/format';
 import { translateApiError } from '../utils/apiError';
@@ -138,6 +139,11 @@ export function RequestDetailPage() {
   // Compra não tem "Iniciar atendimento"/"Concluir"/"Encerrar": depois da aprovação o Suprimentos
   // registra o pedido e o solicitante confirma o recebimento, que encerra a requisição.
   const isPurchaseRequest = request.categoryVersion.category.kind === 'compra_material';
+  // Envio de material para obra (PT-06): criado pelo sistema; a conclusão vem da Logística, então não há "Concluir"/"Pedir informação".
+  const isShipmentRequest = request.categoryVersion.category.kind === 'envio_material';
+  const shipment = isShipmentRequest && request.formData && typeof request.formData === 'object'
+    ? ((request.formData as { shipment?: ShipmentData }).shipment ?? null)
+    : null;
   // Em compra, depois da triagem só o Suprimentos age como staff (o aprovador do CC não vê ação nenhuma).
   const staffActionsAllowed = canUpdate && !requesterLocked && (!isPurchaseRequest || Boolean(canProcure));
   const canTriage = canUpdate && !isRequesterOrBeneficiary && (!purchaseItems.length || canProcure);
@@ -297,6 +303,10 @@ export function RequestDetailPage() {
             </div>
           )}
         </div>
+
+        {shipment && (
+          <ShipmentDetails request={request} shipment={shipment} statusLabel={STATUS_LABEL[request.status]} canAdminRequests={hasPermission('request_category:update')} onChanged={refresh} />
+        )}
 
         {request.approvals.length > 0 && (
           <div>
@@ -469,12 +479,12 @@ export function RequestDetailPage() {
           )}
           {staffActionsAllowed && request.status === 'em_atendimento' && (
             <>
-              {!(isPurchaseRequest && hasSelection) && (
+              {!(isPurchaseRequest && hasSelection) && !isShipmentRequest && (
                 <Button variant="secondary" onClick={requestInfo}>
                   Pedir informação ao solicitante
                 </Button>
               )}
-              {!isPurchaseRequest && (
+              {!isPurchaseRequest && !isShipmentRequest && (
                 <Button variant="positive" onClick={complete}>
                   Concluir
                 </Button>

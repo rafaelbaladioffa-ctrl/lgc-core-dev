@@ -104,7 +104,7 @@ describe('legacy executor separation from BPM', () => {
     const result = await service.findAllCatalog('sector-1');
     expect(result[0]).toMatchObject({ currentVersion: { id: 'v1' } });
     expect(prisma.requestCategory.findMany).toHaveBeenCalledWith({
-      where: { active: true, sectorId: 'sector-1', versions: { some: { status: 'publicada' } } },
+      where: { active: true, sectorId: 'sector-1', kind: { not: 'envio_material' }, versions: { some: { status: 'publicada' } } },
       include: {
         versions: {
           where: { status: 'publicada' },

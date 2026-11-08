@@ -288,7 +288,8 @@ export function RequestCategoryFormPage() {
           <label className="axis-catalog-field">
             <span>Tipo {isEdit && '(não pode ser alterado)'}</span>
             <select value={data.kind} disabled={isEdit} onChange={(e) => changeKind(e.target.value as RequestCategoryKind)}>
-              {(Object.keys(KIND_LABELS) as RequestCategoryKind[]).map((k) => (
+              {/* `envio_material` é categoria do sistema (criada ao aprovar projeto): só aparece ao editar a própria. */}
+              {(Object.keys(KIND_LABELS) as RequestCategoryKind[]).filter((k) => k !== 'envio_material' || data.kind === 'envio_material').map((k) => (
                 <option key={k} value={k}>
                   {KIND_LABELS[k]}
                 </option>

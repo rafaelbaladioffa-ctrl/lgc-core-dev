@@ -57,6 +57,8 @@ export class UsersService {
     const users = await this.prisma.user.findMany({
       where: {
         status: filters.status,
+        // Fora o usuário técnico "Axis (automático)" (sem login), que não é uma conta de pessoa.
+        NOT: { collaborator: { isSystem: true } },
         userRoles: filters.roleId ? { some: { roleId: filters.roleId } } : undefined,
         OR: filters.search
           ? [

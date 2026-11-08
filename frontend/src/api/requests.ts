@@ -41,6 +41,7 @@ export interface AxisRequest {
   anonymous: boolean;
   status: RequestStatus;
   neededBy: string | null;
+  projectId?: string | null;
   estimatedValue: string | null;
   currency: string;
   slaDueFirstResponseAt: string | null;
@@ -107,6 +108,29 @@ export interface RequestDetail extends AxisRequest {
   attachments?: RequestAttachmentMeta[];
   /** Calculado no servidor (mesma regra do `approve`/`purchase-decision`, incluindo delegação ativa). */
   viewer?: { canDecideApproval: boolean; decidingAsDelegateOf?: { id: string; fullName: string } };
+}
+
+/** `formData.shipment` do envio de material para obra (backend/src/requests/envio-material.ts). */
+export interface ShipmentData {
+  projectQuoteId: string;
+  recipientCollaboratorId: string;
+  recipientName: string | null;
+  /** AAAA-MM-DD */
+  neededBy: string | null;
+  destination: {
+    siteId: string;
+    siteCode: string;
+    siteName: string;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    latitude: number | null;
+    longitude: number | null;
+  };
+  items: Array<{ materialCode: string; logisticsMaterialId: string | null; description: string; unit: string; quantity: string }>;
+  warnings: string[];
+  /** ISO; quando a Logística recebeu o pedido. Nulo antes da aprovação do responsável do CC. */
+  approvedAt: string | null;
 }
 
 export interface RequestAttachmentMeta {
@@ -246,7 +270,8 @@ export interface RequestsDashboard {
   loadByAssignee: Array<{ assigneeId: string; count: number }>;
 }
 
-export type MyActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao';
+/** `sem_aprovador`: alerta ao admin de Requisições — envio de material automático sem responsável de CC para aprovar. */
+export type MyActivityKind = 'minha_requisicao' | 'triagem' | 'aprovacao' | 'execucao' | 'sem_aprovador';
 export type MyActivityBucket = 'no_prazo' | 'em_alerta' | 'atrasado';
 
 /** Um item da tela "Minhas atividades" (§15.1, tela inicial do módulo) — uma requisição que
@@ -282,6 +307,8 @@ export const requestsApi = {
     api.post<AxisRequest>(`/requests/${id}/triage`, { action, reason, newCategoryId }).then((r) => r.data),
   returnForAdjustment: (id: string, reason: string) => api.post<AxisRequest>(`/requests/${id}/return-for-adjustment`, { reason }).then((r) => r.data),
   assign: (id: string, assigneeId: string) => api.post<AxisRequest>(`/requests/${id}/assign`, { assigneeId }).then((r) => r.data),
+  /** "Reavaliar aprovador" do envio de material sem responsável de CC (`request_category:update`). */
+  resolveShipmentApprover: (id: string) => api.post<AxisRequest>(`/requests/${id}/resolve-approver`).then((r) => r.data),
   approve: (id: string, comment?: string) => api.post<AxisRequest>(`/requests/${id}/approve`, { comment }).then((r) => r.data),
   reject: (id: string, comment: string) => api.post<AxisRequest>(`/requests/${id}/reject`, { comment }).then((r) => r.data),
   start: (id: string) => api.post<AxisRequest>(`/requests/${id}/start`).then((r) => r.data),

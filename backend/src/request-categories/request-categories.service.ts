@@ -107,7 +107,8 @@ export class RequestCategoriesService {
    * maior versão publicada como `currentVersion`. Rascunho nunca aparece aqui. */
   async findAllCatalog(sectorId?: string) {
     const categories = await this.prisma.requestCategory.findMany({
-      where: { active: true, sectorId, versions: { some: { status: 'publicada' } } },
+      // `envio_material` é criada pelo sistema ao aprovar o projeto: nunca aparece para abertura pela tela.
+      where: { active: true, sectorId, kind: { not: 'envio_material' }, versions: { some: { status: 'publicada' } } },
       include: {
         versions: {
           where: { status: 'publicada' },

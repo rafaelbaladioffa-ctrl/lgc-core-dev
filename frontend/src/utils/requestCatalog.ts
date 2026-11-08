@@ -150,6 +150,7 @@ export const KIND_LABELS: Record<RequestCategoryKind, string> = {
   padrao: 'Padrão',
   compra_material: 'Compra de material',
   denuncia: 'Denúncia',
+  envio_material: 'Envio de material para obra (sistema)',
 };
 
 export const OPTIONS_SOURCE_LABELS: Record<NonNullable<RequestFormField['optionsSource']>, string> = {

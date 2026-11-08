@@ -46,7 +46,9 @@ Mesmo envelope e assinatura usados com a Logística (`{event_id, event_type, occ
 | `site.created/updated` | sim (desde 2026-11-08; inativar vai como `updated` com `active: false`) | **ainda não assina**; o evento só vai para quem assinar |
 | `project.document_added` | sim | recebido e ignorado: o Financeiro baixa o documento pelo pedido de cotação |
 | `project.quote_requested` | sim (desde 2026-11-08) | sim (fila de pedidos de cotação, PJ4; §4) |
-| `project.approved` | PT-06 (plano ponta a ponta §4.2) | **sim (PT-07)**: revisão aceita → `ganha` + comprometido no CC (§2.1) |
+| `project.approved` | sim (desde 2026-11-08, aprovação do projeto no Core) | **sim (PT-07)**: revisão aceita → `ganha` + comprometido no CC (§2.1) |
+
+**`project.approved`** (aprovação do projeto no Core, [dominio/cadastros.md §10.3](dominio/cadastros.md#103-aprovação-do-projeto)): o estado completo do projeto abaixo (com `status: "aprovado"`) mais `site` (`site_id`, `code`, `name`, `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`, `longitude`), `accepted_quote` (`project_quote_id`, `external_revision_id` = o id da revisão no Financeiro, `revision_number`, `work_days` número, `planned_start_date`, `planned_end_date`, `team[]` com `role_key`, `role_name`, `field_role`, `people`, `days`, `hours`, e `sow_document_id`), `client_po_number`, `material_request_id` (ou `null` quando a cotação aceita não tem materiais), `approved_by_user_id` e `approved_at` (ISO 8601). É emitido na mesma transação do aceite, logo depois de `project.status_changed` (que traz `previous_status: proposta`). O Financeiro acha a revisão por `external_revision_id` para marcá-la `ganha` (PT-07).
 
 Todo `project.*` leva o estado completo do projeto: `project_id`, `code`, `name`, `status`,
 `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`,
@@ -170,7 +172,7 @@ Content-Type: application/json
      sem perdas: o motor do Financeiro aplica perdas como percentual do **custo**, não da quantidade; o
      Financeiro soma linhas do mesmo código antes de enviar. Cabos fornecidos pela AWS (instalação apenas)
      não entram. O Core guarda o código, a descrição, a unidade e a quantidade em `project_quote_materials`
-     (`logistics_material_id` fica nulo até a consulta à Logística do PT-06).
+     (`logistics_material_id` é resolvido pelo Core na aprovação do projeto, consultando a Logística).
    - **Idempotência:** mesma `external_revision_id` com a mesma Bid **e os mesmos materiais** devolve a
      cotação já gravada (`201` com o mesmo `id`); com outra Bid ou outros materiais → `409` (revisão aprovada
      não muda; mande nova revisão). **Sem Bid** não há hash para conferir: o Core compara o corpo inteiro

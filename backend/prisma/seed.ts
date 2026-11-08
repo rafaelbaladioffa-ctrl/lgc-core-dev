@@ -1,6 +1,7 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { createCipheriv, createHash, randomBytes } from 'crypto';
+import { ensureEnvioMaterial } from './seed-envio-material.js';
 
 const prisma = new PrismaClient();
 
@@ -316,6 +317,9 @@ async function main() {
     if (!queue) queue = await prisma.queue.create({ data: { sectorId: sector.id, name: `Fila - ${sector.name}` } });
     await prisma.request.updateMany({ where: { sectorId: sector.id, queueId: null }, data: { queueId: queue.id } });
   }
+
+  // Usuário de sistema "Axis (automático)" e categoria de envio de material (PT-06); idempotente.
+  await ensureEnvioMaterial(prisma);
 
   if (!process.env.SEED_ADMIN_PASSWORD) {
     console.log('—————————————————————————————————————————');

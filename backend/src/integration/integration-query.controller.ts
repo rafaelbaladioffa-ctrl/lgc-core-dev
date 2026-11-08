@@ -44,7 +44,7 @@ export class IntegrationQueryController {
     @Query('per_page') perPage?: string,
   ) {
     const { skip, take, page: p, perPage: pp } = paginate(page, perPage);
-    const where = { sectorId, status };
+    const where = { sectorId, status, isSystem: false };
     const [data, total] = await Promise.all([
       this.prisma.collaborator.findMany({ where, skip, take, select: this.collaboratorSafeSelect() }),
       this.prisma.collaborator.count({ where }),

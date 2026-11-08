@@ -33,6 +33,7 @@ const KIND_LABEL: Record<MyActivityKind, string> = {
   triagem: 'Triagem',
   aprovacao: 'Aprovação',
   execucao: 'Execução',
+  sem_aprovador: 'Sem aprovador',
 };
 
 const BUCKET_LABEL: Record<MyActivityBucket, string> = {
