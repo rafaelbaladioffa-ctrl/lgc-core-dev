@@ -76,6 +76,14 @@ rascunho ──submeter──▶ em_aprovacao ──aprovar envio──▶ envia
 - `ganha` congela a revisão como **linha de base** do realizado. Só uma revisão por orçamento pode
   estar `ganha`.
 - Revisões nunca são apagadas; rascunho abandonado pode ser `descartado`.
+- **Quem faz cada passo:** submeter e descartar exigem `budget:write`; devolver, aprovar envio, ganha e
+  perdida exigem `budget:approve`. Devolver e perder pedem motivo. A API devolve em cada revisão as
+  ações que o usuário pode fazer agora (`workflow.allowedActions`) e o que impede submeter
+  (`submitBlockers`: dias de trabalho, equipe de campo e valor da proposta).
+- **Nova revisão** só sem rascunho, sem revisão em aprovação e antes de haver uma `ganha`.
+- **Histórico:** cada passo grava `budget_revision_events` (ação, de → para, motivo, quem e quando;
+  append-only) e auditoria com antes/depois. Aprovar o envio guarda quem aprovou e quando (vai para o
+  Core na PJ7) e registra `selfApproved` quando quem aprova é quem submeteu (P-03).
 
 ### 3.2 Relação com o status do Core
 
@@ -550,7 +558,7 @@ de custo; outros modelos de cliente além do AWS.
 |---|---|---|
 | PJ1 | Parâmetros versionados, funções e custo hora (§6.1), catálogos de material e destinos, permissões e perfis; testes do cálculo com valores fictícios | **feito** (2026-11-07): ver nota abaixo |
 | PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
-| PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | pendente |
+| PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | **feito** (2026-11-08): ver nota abaixo |
 | PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | pendente |
 | PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
@@ -596,6 +604,22 @@ de custo; outros modelos de cliente além do AWS.
   datas previstas próprias do orçamento). A lista de projetos mostra nome e prazo previsto do Core
   ("Sem nome no Axis Core" para projeto antigo); a página do projeto mostra centro de custo e prazo e
   tem "Editar cabeçalho"; a revisão mostra o título efetivo e o prazo. Regras em §5.
+
+**Notas da PJ3.**
+- Migração `20261108150000_pj3_fluxo_revisao`: colunas `submitted_at`, `approved_at`, `approved_by`,
+  `approved_by_email` e `decided_at` em `budget_revisions`; tabela `budget_revision_events`
+  (append-only por gatilho); índices parciais de no máximo uma revisão `em_aprovacao`, uma `enviada` e
+  uma `ganha` por orçamento; gatilho que só aceita as transições do §3.1.
+- Rotas `POST /revisions/:id/submit`, `/return`, `/approve-send`, `/won`, `/lost` (`reason` no corpo
+  para devolver e perder). Aprovar o envio marca a `enviada` anterior como `substituida` na mesma
+  transação.
+- Avisos do §3.2 na lista de projetos e na página do projeto ("Feche o realizado" entra com a PJ5).
+- Telas: painel "Aprovação" na revisão (ações permitidas, motivo na tela, bloqueios para submeter,
+  histórico) e quem aprovou o envio na lista de revisões.
+- Conferido: testes do fluxo com Prisma simulado e as cinco migrações aplicadas do zero num Postgres
+  em memória (PGlite), com os gatilhos e índices recusando transições inválidas, duas enviadas e
+  alteração do histórico. Não verificado ainda: uso na tela com login real.
+- A devolução da cotação ao Core ao aprovar o envio fica para a PJ7.
 
 ## 17. Decisões pendentes
 

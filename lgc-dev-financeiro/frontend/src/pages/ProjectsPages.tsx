@@ -94,6 +94,11 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
                       <div className="cell-sub">
                         <ProjectName project={p} />
                       </div>
+                      {p.warnings.map((w) => (
+                        <div key={w} className="cell-sub">
+                          <Badge tone="warning">{w}</Badge>
+                        </div>
+                      ))}
                     </td>
                     <td>{p.client?.name ?? '—'}</td>
                     <td>{p.status ? (PROJECT_STATUS[p.status] ?? p.status) : '—'}</td>
@@ -135,7 +140,8 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
   if (error) return <ErrorAlert message={error} onRetry={reload} />;
   if (loading || !data) return <p className="muted">Carregando…</p>;
   const budget = data.budgets[0];
-  const hasDraft = budget?.revisions.some((r) => r.status === 'rascunho');
+  // Nova revisão só sem rascunho, sem revisão em aprovação e antes de ganhar (a ganha é a linha de base).
+  const hasDraft = budget?.revisions.some((r) => r.status === 'rascunho' || r.status === 'em_aprovacao' || r.status === 'ganha');
 
   return (
     <>
@@ -167,6 +173,11 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
         </p>
       </PageHeader>
       {actionError && <ErrorAlert message={actionError} />}
+      {data.warnings.map((w) => (
+        <p key={w} className="alert alert-warning" role="status">
+          {w}
+        </p>
+      ))}
       {!budget && <p className="card muted">Este projeto ainda não tem orçamento.{canWrite ? ' Clique em "Criar orçamento" para montar a primeira revisão com os parâmetros vigentes.' : ''}</p>}
       {budget && (
         <section className="card table-card">
@@ -191,6 +202,7 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
                   </td>
                   <td>
                     <Badge tone={REVISION_STATUS[r.status].tone}>{REVISION_STATUS[r.status].label}</Badge>
+                    {r.approvedByEmail && <div className="cell-sub">envio aprovado por {r.approvedByEmail}</div>}
                   </td>
                   <td>{r.parameterSetCode}</td>
                   <td className="num">{formatBRL(r.revenue)}</td>

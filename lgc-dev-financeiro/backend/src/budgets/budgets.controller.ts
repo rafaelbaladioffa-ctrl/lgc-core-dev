@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, 
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
-import { CreateBudgetDto, SimulateRevisionDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
+import { CreateBudgetDto, RevisionTransitionDto, SimulateRevisionDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
 
@@ -95,5 +95,41 @@ export class RevisionsController {
   @RequirePermissions('budget:write')
   discard(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
     return this.budgets.discard(id, user);
+  }
+
+  // Fluxo da revisão (projetos-especificacao §3.1). Nada vai ao cliente sem "aprovar envio".
+  @Post(':id/submit')
+  @HttpCode(200)
+  @RequirePermissions('budget:write')
+  submit(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.budgets.transition(id, 'submit', user);
+  }
+
+  @Post(':id/return')
+  @HttpCode(200)
+  @RequirePermissions('budget:approve')
+  returnForChanges(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RevisionTransitionDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.budgets.transition(id, 'return', user, dto.reason);
+  }
+
+  @Post(':id/approve-send')
+  @HttpCode(200)
+  @RequirePermissions('budget:approve')
+  approveSend(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.budgets.transition(id, 'approve_send', user);
+  }
+
+  @Post(':id/won')
+  @HttpCode(200)
+  @RequirePermissions('budget:approve')
+  won(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RevisionTransitionDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.budgets.transition(id, 'won', user, dto.reason);
+  }
+
+  @Post(':id/lost')
+  @HttpCode(200)
+  @RequirePermissions('budget:approve')
+  lost(@Param('id', ParseUUIDPipe) id: string, @Body() dto: RevisionTransitionDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.budgets.transition(id, 'lost', user, dto.reason);
   }
 }

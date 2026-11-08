@@ -42,6 +42,8 @@ export interface BudgetHeader {
 }
 
 export interface ProjectRow extends CoreProject {
+  /** Divergências com o status do projeto no Core (§3.2). */
+  warnings: string[];
   budget:
     | (BudgetHeader & {
         id: string;
@@ -51,11 +53,23 @@ export interface ProjectRow extends CoreProject {
 }
 
 export interface ProjectDetail extends CoreProject {
+  warnings: string[];
   budgets: Array<BudgetHeader & {
     id: string;
     model: string;
     createdAt: string;
-    revisions: Array<{ id: string; number: number; status: RevisionStatus; parameterSetCode: string; revenue: string | null; profit?: string | null; profitOnCost?: string | null; updatedAt: string }>;
+    revisions: Array<{
+      id: string;
+      number: number;
+      status: RevisionStatus;
+      parameterSetCode: string;
+      revenue: string | null;
+      profit?: string | null;
+      profitOnCost?: string | null;
+      updatedAt: string;
+      approvedAt: string | null;
+      approvedByEmail: string | null;
+    }>;
   }>;
 }
 
@@ -149,6 +163,19 @@ export interface BudgetResult {
   estimatedCost?: boolean;
 }
 
+export type WorkflowAction = 'submit' | 'return' | 'approve_send' | 'won' | 'lost' | 'discard';
+
+export interface RevisionWorkflowInfo {
+  /** O que este usuário pode fazer agora (calculado no servidor pela situação e pelas permissões). */
+  allowedActions: WorkflowAction[];
+  submitBlockers: string[];
+  submittedAt: string | null;
+  approvedAt: string | null;
+  approvedByEmail: string | null;
+  decidedAt: string | null;
+  events: Array<{ id: string; action: string; label: string; fromStatus: RevisionStatus; toStatus: RevisionStatus; reason: string | null; actorEmail: string | null; createdAt: string }>;
+}
+
 export interface Revision {
   id: string;
   number: number;
@@ -163,6 +190,7 @@ export interface Revision {
   inputs: BudgetInputs;
   result: BudgetResult | null;
   costVisible: boolean;
+  workflow: RevisionWorkflowInfo;
   revisions: Array<{ id: string; number: number; status: RevisionStatus }>;
   updatedAt: string;
 }
@@ -179,3 +207,15 @@ export const saveRevision = (id: string, body: { inputs?: BudgetInputs; notes?: 
 export const simulateRevision = (id: string, inputs: BudgetInputs) => api<BudgetResult>(`/revisions/${id}/simulate`, { method: 'POST', body: JSON.stringify({ inputs }) });
 export const useCurrentParameters = (id: string) => api<Revision>(`/revisions/${id}/use-current-parameters`, { method: 'POST', body: '{}' });
 export const discardRevision = (id: string) => api<Revision>(`/revisions/${id}/discard`, { method: 'POST', body: '{}' });
+
+const TRANSITION_PATH: Record<Exclude<WorkflowAction, 'discard'>, string> = {
+  submit: 'submit',
+  return: 'return',
+  approve_send: 'approve-send',
+  won: 'won',
+  lost: 'lost',
+};
+
+/** Passo do fluxo da revisão (§3.1); `reason` é obrigatório ao devolver e ao perder. */
+export const transitionRevision = (id: string, action: Exclude<WorkflowAction, 'discard'>, reason?: string) =>
+  api<Revision>(`/revisions/${id}/${TRANSITION_PATH[action]}`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) });

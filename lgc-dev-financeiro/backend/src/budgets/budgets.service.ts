@@ -1,10 +1,11 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, type BudgetRevision, type ParameterSet, type ParameterSetRole, type ProjectBudget } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { computeBudget, type BudgetInputs, type BudgetResult, type EngineParams } from './budget-engine.js';
 import type { BudgetInputsDto, CreateBudgetDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
+import { allowedActions, coreDivergence, EVENT_LABEL, submitBlockers, WORKFLOW, type WorkflowAction } from './revision-workflow.js';
 
 export const COST_PERMISSION = 'budget:read_cost';
 const canSeeCost = (u: AuthenticatedUser) => u.permissions.includes(COST_PERMISSION);
@@ -128,7 +129,9 @@ export class BudgetsService {
     const [projects, clients, budgets] = await Promise.all([
       this.prisma.axisMasterCache.findMany({ where: { kind: 'PROJECT' }, orderBy: { code: 'desc' } }),
       this.prisma.axisMasterCache.findMany({ where: { kind: 'CLIENT' }, select: { axisId: true, name: true, code: true } }),
-      this.prisma.projectBudget.findMany({ include: { revisions: { where: { status: { not: 'descartada' } }, orderBy: { number: 'desc' }, take: 1 } } }),
+      this.prisma.projectBudget.findMany({
+        include: { revisions: { where: { status: { not: 'descartada' } }, orderBy: { number: 'desc' }, select: { id: true, number: true, status: true, revenue: true, profit: true, profitOnCost: true } } },
+      }),
     ]);
     const clientById = new Map(clients.map((c) => [c.axisId, c]));
     const budgetByProject = new Map(budgets.map((b) => [b.axisProjectId, b]));
@@ -143,6 +146,7 @@ export class BudgetsService {
         const rev = budget?.revisions[0];
         return {
           ...project,
+          warnings: coreDivergence(project.status, budget?.revisions.map((r) => r.status) ?? []),
           budget: budget
             ? {
                 id: budget.id,
@@ -174,6 +178,7 @@ export class BudgetsService {
     const cost = canSeeCost(user);
     return {
       ...project,
+      warnings: coreDivergence(project.status, budgets.flatMap((b) => b.revisions.map((r) => r.status))),
       budgets: budgets.map((b) => ({
         id: b.id,
         ...budgetHeader(b, project),
@@ -188,6 +193,8 @@ export class BudgetsService {
           ...(cost ? { profit: r.profit, profitOnCost: r.profitOnCost } : {}),
           updatedAt: r.updatedAt,
           createdBy: r.createdBy,
+          approvedAt: r.approvedAt,
+          approvedByEmail: r.approvedByEmail,
         })),
       })),
     };
@@ -281,10 +288,11 @@ export class BudgetsService {
   async getRevision(id: string, user: AuthenticatedUser) {
     const rev = await this.loadRevision(id);
     const cost = canSeeCost(user);
-    const [project, siblings, current] = await Promise.all([
+    const [project, siblings, current, events] = await Promise.all([
       this.project(rev.budget.axisProjectId).catch(() => null),
       this.prisma.budgetRevision.findMany({ where: { budgetId: rev.budgetId }, orderBy: { number: 'desc' }, select: { id: true, number: true, status: true } }),
       this.prisma.parameterSet.findFirst({ where: { status: 'vigente' }, select: { id: true, code: true } }),
+      this.prisma.budgetRevisionEvent.findMany({ where: { revisionId: id }, orderBy: { createdAt: 'asc' } }),
     ]);
     const set = rev.parameterSet;
     return {
@@ -301,6 +309,24 @@ export class BudgetsService {
       inputs: presentInputs(rev.inputs as unknown as BudgetInputs, cost),
       result: presentResult(rev.result as unknown as BudgetResult | null, cost),
       costVisible: cost,
+      workflow: {
+        allowedActions: allowedActions(rev.status, user),
+        submitBlockers: rev.status === 'rascunho' ? submitBlockers(rev.result as never) : [],
+        submittedAt: rev.submittedAt,
+        approvedAt: rev.approvedAt,
+        approvedByEmail: rev.approvedByEmail,
+        decidedAt: rev.decidedAt,
+        events: events.map((e) => ({
+          id: e.id,
+          action: e.action,
+          label: EVENT_LABEL[e.action] ?? e.action,
+          fromStatus: e.fromStatus,
+          toStatus: e.toStatus,
+          reason: e.reason,
+          actorEmail: e.actorEmail,
+          createdAt: e.createdAt,
+        })),
+      },
       revisions: siblings,
       updatedAt: rev.updatedAt,
       updatedBy: rev.updatedBy,
@@ -360,6 +386,10 @@ export class BudgetsService {
       if (!budget) throw new NotFoundException('Orçamento não encontrado.');
       const draft = budget.revisions.find((r) => r.status === 'rascunho');
       if (draft) throw new ConflictException(`A revisão R${draft.number} ainda está em rascunho. Continue nela ou descarte-a.`);
+      const pending = budget.revisions.find((r) => r.status === 'em_aprovacao');
+      if (pending) throw new ConflictException(`A revisão R${pending.number} está em aprovação. Aguarde a decisão ou peça a devolução.`);
+      const won = budget.revisions.find((r) => r.status === 'ganha');
+      if (won) throw new ConflictException(`A revisão R${won.number} foi ganha e é a linha de base do projeto; o orçamento não aceita novas revisões.`);
       const base = budget.revisions.find((r) => r.status !== 'descartada') ?? budget.revisions[0];
       const set = await this.currentParameterSet(tx);
       const inputs = base ? (base.inputs as unknown as BudgetInputs) : emptyInputs(set);
@@ -395,11 +425,69 @@ export class BudgetsService {
   }
 
   async discard(id: string, user: AuthenticatedUser) {
+    return this.transition(id, 'discard', user);
+  }
+
+  /**
+   * Fluxo da revisão (§3.1): submeter, devolver, aprovar envio, ganha, perdida e descartar. Cada passo grava
+   * o histórico e a auditoria na mesma transação. Aprovar o envio marca a revisão enviada anterior como
+   * substituída. Quem orçou pode aprovar a própria revisão (P-03); a auditoria registra `selfApproved`.
+   */
+  async transition(id: string, action: WorkflowAction, user: AuthenticatedUser, reason?: string | null) {
+    const rule = WORKFLOW[action];
+    if (!user.permissions.includes(rule.permission)) throw new ForbiddenException('Você não tem permissão para esta ação.');
+    const why = reason?.trim() || null;
+    if (rule.reasonRequired && (!why || why.length < 3)) throw new BadRequestException('Informe o motivo.');
     await this.prisma.$transaction(async (tx) => {
       const rev = await this.loadRevision(id, tx);
-      if (rev.status !== 'rascunho') throw new ConflictException('Só uma revisão em rascunho pode ser descartada.');
-      await tx.budgetRevision.update({ where: { id }, data: { status: 'descartada', updatedBy: user.userId } });
-      await this.audit.record(user.userId, 'budget_revision.discarded', 'budget_revision', id, { revision: rev.number }, tx);
+      if (rev.status !== rule.from) {
+        throw new ConflictException(
+          `A revisão R${rev.number} está "${REVISION_STATUS_LABEL[rev.status]}"; "${rule.label}" só vale para "${REVISION_STATUS_LABEL[rule.from]}".`,
+        );
+      }
+      const now = new Date();
+      const data: Prisma.BudgetRevisionUpdateInput = { status: rule.to, updatedBy: user.userId };
+      const extra: Record<string, unknown> = {};
+      if (action === 'submit') {
+        const blockers = submitBlockers(rev.result as never);
+        if (blockers.length) throw new BadRequestException(`Não dá para submeter: ${blockers.join(' ')}`);
+        data.submittedAt = now;
+      }
+      if (action === 'return') data.submittedAt = null;
+      if (action === 'approve_send') {
+        const previous = await tx.budgetRevision.findFirst({ where: { budgetId: rev.budgetId, status: 'enviada' }, select: { id: true, number: true } });
+        if (previous) {
+          await tx.budgetRevision.update({ where: { id: previous.id }, data: { status: 'substituida', updatedBy: user.userId } });
+          await tx.budgetRevisionEvent.create({
+            data: {
+              revisionId: previous.id,
+              action: 'superseded',
+              fromStatus: 'enviada',
+              toStatus: 'substituida',
+              reason: `Substituída pela R${rev.number}.`,
+              actorAxisId: user.userId,
+              actorEmail: user.email,
+            },
+          });
+          extra.superseded = previous.number;
+        }
+        Object.assign(data, { approvedAt: now, approvedBy: user.userId, approvedByEmail: user.email });
+        const submitter = await tx.budgetRevisionEvent.findFirst({ where: { revisionId: id, action: 'submitted' }, orderBy: { createdAt: 'desc' }, select: { actorAxisId: true } });
+        extra.selfApproved = submitter?.actorAxisId === user.userId;
+      }
+      if (action === 'won' || action === 'lost') data.decidedAt = now;
+      await tx.budgetRevision.update({ where: { id }, data });
+      await tx.budgetRevisionEvent.create({
+        data: { revisionId: id, action: rule.event, fromStatus: rule.from, toStatus: rule.to, reason: why, actorAxisId: user.userId, actorEmail: user.email },
+      });
+      await this.audit.record(
+        user.userId,
+        `budget_revision.${rule.event}`,
+        'budget_revision',
+        id,
+        { project: rev.budget.projectCode, revision: rev.number, before: rule.from, after: rule.to, reason: why, ...extra } as Prisma.InputJsonValue,
+        tx,
+      );
     });
     return this.getRevision(id, user);
   }

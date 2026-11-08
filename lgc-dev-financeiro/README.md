@@ -10,9 +10,11 @@ Satélite do Axis Core, mantido como subpasta deste repositório, como a Logíst
 > **Estado em 2026-11-07:** entrega F0 (esqueleto). Health, `/me`, SSO com o access token do Core,
 > RBAC local, auditoria append-only, receptor de webhook do Core com cache de mestres, outbox e
 > frontend com login e tela inicial. Módulo Projetos: **PJ1 entregue** (parâmetros de orçamento
-> versionados com custo hora da equipe, catálogo de materiais e destinos, perfis do módulo) e **PJ2
-> entregue** (orçamento do projeto com revisões, resultado, preço mínimo e preço da meta). Próximo: PJ3
-> (fluxo da proposta); contas a pagar (F1–F6) vem depois de Projetos.
+> versionados com custo hora da equipe, catálogo de materiais e destinos, perfis do módulo), **PJ2
+> entregue** (orçamento do projeto com revisões, resultado, preço mínimo e preço da meta) e **PJ3
+> entregue** (submeter, devolver, aprovar envio, ganha/perdida e avisos de divergência com o Core).
+> Próximo: PJ4 (SOW em PDF do Core) e PJ7 (Bid preenchida e devolução ao Core); contas a pagar
+> (F1–F6) vem depois de Projetos.
 >
 > **Primeiro uso do PJ1:** conceda `CONTROLADORIA` a quem mantém os custos, crie o rascunho em
 > Parâmetros (já vem com as referências legais de encargos e impostos), preencha ISS, veículo, meta e

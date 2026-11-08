@@ -16,6 +16,7 @@ import { decimalToInput, formatNumber, formatPercent, fractionToPercentInput, pa
 import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
 import { Badge, ErrorAlert, Field, messageOf, PageHeader, useLoad, useUnsavedWarning } from '../components/ui';
+import { RevisionWorkflow } from '../components/RevisionWorkflow';
 
 // ---------------------------------------------------------------------------
 // Formulário ↔ entradas da API
@@ -276,7 +277,7 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
                   Descartar
                 </button>
               )}
-              {!editable && !rev.revisions.some((r) => r.status === 'rascunho') && (
+              {!editable && !rev.revisions.some((r) => r.status === 'rascunho' || r.status === 'em_aprovacao' || r.status === 'ganha') && (
                 <button className="btn btn-primary" type="button" disabled={busy} onClick={createNext}>
                   Nova revisão
                 </button>
@@ -299,6 +300,7 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
           {message.text}
         </p>
       )}
+      <RevisionWorkflow rev={rev} dirty={dirty && editable} onChange={onChange} />
       {editable && paramsOutdated && (
         <p className="alert alert-warning">
           Esta revisão usa {rev.parameterSet.code}; o vigente é {rev.currentParameterSet!.code}.{' '}

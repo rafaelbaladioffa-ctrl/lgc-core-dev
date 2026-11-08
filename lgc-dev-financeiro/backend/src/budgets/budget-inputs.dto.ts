@@ -166,3 +166,11 @@ export class SimulateRevisionDto {
   @Type(() => BudgetInputsDto)
   inputs!: BudgetInputsDto;
 }
+
+/** Motivo ao devolver ou perder (obrigatório nessas ações; opcional nas outras). */
+export class RevisionTransitionDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  reason?: string | null;
+}

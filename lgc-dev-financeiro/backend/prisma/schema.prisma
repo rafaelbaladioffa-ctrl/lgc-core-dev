@@ -336,6 +336,12 @@ model BudgetRevision {
   profit         Decimal?             @db.Decimal(14, 2)
   profitOnCost   Decimal?             @map("profit_on_cost") @db.Decimal(9, 4)
   computedAt     DateTime?            @map("computed_at")
+  /// Fluxo da revisão (PJ3): quando foi submetida, quem aprovou o envio e quando o cliente decidiu.
+  submittedAt     DateTime?           @map("submitted_at")
+  approvedAt      DateTime?           @map("approved_at")
+  approvedBy      String?             @map("approved_by")
+  approvedByEmail String?             @map("approved_by_email")
+  decidedAt       DateTime?           @map("decided_at")
   notes          String?
   createdBy      String               @map("created_by")
   createdAt      DateTime             @default(now()) @map("created_at")
@@ -344,8 +350,28 @@ model BudgetRevision {
 
   budget       ProjectBudget @relation(fields: [budgetId], references: [id])
   parameterSet ParameterSet  @relation(fields: [parameterSetId], references: [id])
+  events       BudgetRevisionEvent[]
 
   @@unique([budgetId, number])
   @@index([status])
   @@map("budget_revisions")
+}
+
+/// Histórico do fluxo da revisão (append-only: o banco recusa UPDATE e DELETE).
+model BudgetRevisionEvent {
+  id          String                @id @default(uuid())
+  revisionId  String                @map("revision_id")
+  /// submitted, returned, send_approved, won, lost, superseded, discarded
+  action      String
+  fromStatus  BudgetRevisionStatus  @map("from_status")
+  toStatus    BudgetRevisionStatus  @map("to_status")
+  reason      String?
+  actorAxisId String                @map("actor_axis_id")
+  actorEmail  String?               @map("actor_email")
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  revision BudgetRevision @relation(fields: [revisionId], references: [id])
+
+  @@index([revisionId, createdAt])
+  @@map("budget_revision_events")
 }
