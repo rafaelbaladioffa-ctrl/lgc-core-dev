@@ -10,8 +10,9 @@ técnicas (CC do tipo `equipe_tecnica`, ex.: `DC-001-JAI`). Contratos com o Core
 - **CC**: vem do cache de mestres (`axis_master_cache`, `kind = COST_CENTER`), com `kind`, `short_code`,
   `parent_cost_center_id` e `responsible_collaborator_id` no `data`. Nunca é editado aqui.
 - **Lançamento** (`cc_entries`): fato financeiro de um CC numa competência (data). `kind` = `receita` ou
-  `custo`; `stage` = `comprometido` (compra aprovada ainda não recebida, adiantamento em aberto) ou
-  `realizado`; `category`; `source` (`compra`, `reembolso`, `adiantamento`, `logistica`, `folha`, `manual`).
+  `custo`; `stage` = `comprometido` (compra aprovada ainda não recebida, adiantamento em aberto, ou o orçado
+  da revisão ganha do projeto) ou `realizado`; `category`; `source` (`compra`, `reembolso`, `adiantamento`,
+  `logistica`, `folha`, `manual`, `projeto`).
   Lançamento não se apaga nem se altera: correção é **estorno** (linha com valor negativo e
   `reverses_id`). A baixa de um comprometido usa a **mesma competência** do comprometido, para o mês
   original zerar em vez de ficar negativo.
@@ -31,11 +32,23 @@ técnicas (CC do tipo `equipe_tecnica`, ex.: `DC-001-JAI`). Contratos com o Core
 | `finance_request.approved` `reembolso` | webhook | `realizado`/`despesas_campo` |
 | `finance_request.approved` `adiantamento` | webhook | adiantamento em aberto + `comprometido`/`despesas_campo`; a prestação de contas (tela) baixa o comprometido e lança o gasto comprovado como `realizado` |
 | Folha da competência | botão "Gerar folha" | `realizado`/`folha` por CC: custo mensal da função × dias alocados ÷ dias do mês (§4) |
-| Consumo da Logística | botão "Importar da Logística" | `realizado`/`material` por CC e projeto (valor das saídas da competência) |
+| Consumo da Logística | rotina diária (03:30, São Paulo) e botão "Importar da Logística" | `realizado`/`material` por CC e projeto (valor das saídas da competência). A rotina importa o **mês anterior e o corrente**; é idempotente por competência e por (CC, projeto) e o botão faz a mesma importação (§2.1) |
+| Revisão ganha do projeto | `project.approved` do Core ou "Cliente aceitou" (Projetos) | `comprometido`, origem `projeto`, com o projeto: receita (`faturamento`, valor contratado) e custos orçados por categoria (`folha`, `material`, `frota`, `servicos`, `despesas_campo`, `outros`); `source_ref = ganho:<revisão>:<linha>`. Uma vez por revisão (§5.1) |
 | Manual | tela do CC | qualquer categoria; `faturamento` é a receita (nota emitida) |
 
 Reimportar ou regerar uma competência compara com o vigente da mesma referência (`source_ref`): igual
 fica; diferente é estornado e lançado de novo.
+
+### 2.1 Importação diária do consumo da Logística (PT-07)
+
+O agendador do Financeiro (`@nestjs/schedule`, o mesmo do outbox, já nas dependências) roda todo dia às 03:30
+de São Paulo, só com `SCHEDULER_ENABLED=true` e em **uma** instância. Importa a competência do mês anterior
+(movimento que chega depois do fechamento) e a do corrente. Cada competência usa a mesma importação do botão:
+`replaced`/`created`/`unchanged` por (CC, projeto), com trava de transação por competência (`pg_advisory_xact_lock`),
+então o botão e a rotina nunca correm juntos nem duplicam. Valor igual não lança nada; valor que mudou durante
+o mês gera estorno + novo lançamento (por isso o livro cresce em pares enquanto o mês muda). Falha de uma
+competência (Logística fora do ar, sem `LOGISTICA_API_KEY`) é registrada no log e não derruba a outra nem o
+agendador; o ator gravado é `sistema:logistica`.
 
 ## 3. Rateio do overhead
 
@@ -64,6 +77,23 @@ em aberto. Faixas: `ok` < 80%, `alerta` 80–99%, `estourado` ≥ 100% (sem orç
 Quando a faixa muda, o Financeiro avisa o Core pelo outbox (`cost_center.budget_status` →
 `PUT /integration/cost-centers/:id/budget-status`), e compra para CC estourado ganha a aprovação do
 responsável do CC pai.
+
+### 5.1 Comprometido do projeto (PT-07) e o orçamento do CC
+
+Ao ganhar uma revisão ([projetos-especificacao §8](projetos-especificacao.md#8-realizado)), o Financeiro lança no
+CC do projeto, com o projeto, o comprometido da receita contratada e dos custos orçados (origem `projeto`). **Regra
+escolhida: sem estorno.** O realizado do projeto chega em categorias do CC que não casam uma a uma com as linhas
+do orçamento (compra de material cai em `compras`, reembolso em `despesas_campo`, consumo da Logística em
+`material`); estornar o comprometido conforme o realizado chega obrigaria a inventar esse casamento e a reprocessar
+lançamentos. Por isso:
+
+- os lançamentos de origem `projeto` **não entram** no consumo do orçamento do CC (`yearConsumption`), no
+  "comprometido" dos totais do CC nem no mês a mês: o orçamento do CC continua = realizado + compras e adiantamentos
+  em aberto, e não muda quando um projeto é ganho. Aparecem na lista de lançamentos do CC (etapa "comprometido",
+  origem "Revisão ganha");
+- o **comprometido líquido** é calculado no resultado do projeto, por grupo de custo: máx(0, comprometido −
+  realizado). Realizado acima do comprometido não vira negativo; o saldo (`comprometido − realizado − em aberto`) mostra
+  o estouro.
 
 ## 6. Equipe técnica (CC `equipe_tecnica`)
 
@@ -129,7 +159,7 @@ Valores em reais como string com 2 casas; percentuais como fração string com 4
 | `GET /job-title-maps` | write | `{ maps, unmapped, roles }` |
 | `PUT /job-title-maps/:jobTitleId` | write | `{ jobTitleName, roleKey }` |
 | `POST /cost-centers/payroll/:month` | write | `{ month, created, replaced, unchanged, unmapped: [{ collaboratorId, name, jobTitleName }] }` |
-| `POST /cost-centers/logistics-import/:month` | write | `{ month, created, replaced, unchanged }` |
+| `POST /cost-centers/logistics-import/:month` | write | `{ month, created, replaced, unchanged, withoutCostCenter }` (a rotina diária chama a mesma importação, §2.1) |
 | `GET /advances?status=aberto\|prestado` | read ou read_own | `Advance[]` |
 | `POST /advances/:id/settle` | write | `{ spentAmount, notes? }` → `Advance` |
 | `GET /purchases?costCenterId&status` | read ou read_own | `Purchase[]` |
@@ -161,7 +191,7 @@ type CcDetail = CcSummary & {
 };
 type Entry = {
   id: string; costCenterId: string; competence: string; kind: 'receita' | 'custo'; category: string;
-  stage: 'comprometido' | 'realizado'; source: 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual';
+  stage: 'comprometido' | 'realizado'; source: 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual' | 'projeto';
   amount: Money; description: string; projectId: string | null; projectCode: string | null;
   sourceRef: string | null; reversesId: string | null; reversed: boolean; reason: string | null; createdBy: string; createdByName: string | null; createdAt: string;
 };
@@ -206,5 +236,6 @@ type Purchase = { id: string; requestId: string; code: string; costCenterId: str
 
 - Contas a pagar: quando existir, o título pago substitui o realizado da compra (hoje o realizado é o
   recebimento).
-- Integração automática da Logística (hoje a importação é por botão, por competência).
+- Horas reais do Field por projeto e o par de lançamentos de mão de obra (PT-10): até lá o realizado de
+  mão de obra do projeto é zero e a folha inteira cai só no CC do colaborador.
 - Frota com cadastro de veículos; certificações NR como custo.

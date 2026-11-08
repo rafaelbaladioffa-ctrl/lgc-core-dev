@@ -10,6 +10,10 @@ import { presentSow } from './sow/sow-view.js';
 import { summarizeTypes, type SowCableLine, type SowHeader } from './sow/sow-parser.js';
 import { computeAwsQuote, type KpiKey } from './bid/aws-quote.js';
 import type { BidTargets } from './bid/bid-template-reader.js';
+import { parseDate, todaySaoPaulo } from '../cost-centers/cc-engine.js';
+import { raiseBudgetAlert } from './budget-alerts.js';
+import { cachedCostCenter } from './revision-won.js';
+import { commitmentAlert, postWonCommitments } from './won-commitments.js';
 
 export const COST_PERMISSION = 'budget:read_cost';
 const canSeeCost = (u: AuthenticatedUser) => u.permissions.includes(COST_PERMISSION);
@@ -133,14 +137,17 @@ export class BudgetsService {
   // -------------------------------------------------------------------------
 
   async listProjects(user: AuthenticatedUser) {
-    const [projects, clients, budgets, requests] = await Promise.all([
+    const [projects, clients, budgets, requests, openAlerts] = await Promise.all([
       this.prisma.axisMasterCache.findMany({ where: { kind: 'PROJECT' }, orderBy: { code: 'desc' } }),
       this.prisma.axisMasterCache.findMany({ where: { kind: 'CLIENT' }, select: { axisId: true, name: true, code: true } }),
       this.prisma.projectBudget.findMany({
         include: { revisions: { where: { status: { not: 'descartada' } }, orderBy: { number: 'desc' }, select: { id: true, number: true, status: true, revenue: true, profit: true, profitOnCost: true } } },
       }),
       this.prisma.quoteRequest.findMany({ orderBy: { requestedAt: 'desc' }, select: { id: true, axisProjectId: true, requestedAt: true, budgetId: true } }),
+      this.prisma.budgetAlert.findMany({ where: { resolvedAt: null }, select: { message: true, budget: { select: { axisProjectId: true } } }, orderBy: { createdAt: 'asc' } }),
     ]);
+    const alertsByProject = new Map<string, string[]>();
+    for (const a of openAlerts) alertsByProject.set(a.budget.axisProjectId, [...(alertsByProject.get(a.budget.axisProjectId) ?? []), a.message]);
     const clientById = new Map(clients.map((c) => [c.axisId, c]));
     // Projeto com cotação AWS e orçamento genérico mostra a cotação AWS (é a que segue para o Core).
     const budgetByProject = new Map<string, (typeof budgets)[number]>();
@@ -159,7 +166,7 @@ export class BudgetsService {
         const request = requestByProject.get(p.axisId);
         return {
           ...project,
-          warnings: coreDivergence(project.status, budget?.revisions.map((r) => r.status) ?? []),
+          warnings: [...coreDivergence(project.status, budget?.revisions.map((r) => r.status) ?? []), ...(alertsByProject.get(p.axisId) ?? [])],
           quoteRequest: request ? { id: request.id, requestedAt: request.requestedAt, started: !!request.budgetId } : null,
           budget: budget
             ? {
@@ -185,12 +192,13 @@ export class BudgetsService {
 
   async getProject(axisProjectId: string, user: AuthenticatedUser) {
     const project = await this.project(axisProjectId);
-    const [found, requests] = await Promise.all([
+    const [found, requests, alerts] = await Promise.all([
       this.prisma.projectBudget.findMany({
         where: { axisProjectId },
         include: { revisions: { orderBy: { number: 'desc' }, include: { parameterSet: { select: { code: true } } } } },
       }),
       this.prisma.quoteRequest.findMany({ where: { axisProjectId }, orderBy: { requestedAt: 'desc' } }),
+      this.prisma.budgetAlert.findMany({ where: { resolvedAt: null, budget: { axisProjectId } }, orderBy: { createdAt: 'asc' } }),
     ]);
     // A cotação AWS (pedida pelo Core) vem antes do orçamento genérico.
     const budgets = [...found].sort((a, b) => Number(b.model === 'aws_sow') - Number(a.model === 'aws_sow') || a.createdAt.getTime() - b.createdAt.getTime());
@@ -208,6 +216,8 @@ export class BudgetsService {
         started: !!r.budgetId,
       })),
       warnings: coreDivergence(project.status, budgets.flatMap((b) => b.revisions.map((r) => r.status))),
+      /** Alertas abertos nos orçamentos (ex.: o Core aprovou uma revisão enquanto outra já estava ganha); dispensáveis com `budget:approve`. */
+      alerts: alerts.map((a) => ({ id: a.id, budgetId: a.budgetId, revisionId: a.revisionId, kind: a.kind, message: a.message, createdAt: a.createdAt })),
       budgets: budgets.map((b) => ({
         id: b.id,
         ...budgetHeader(b, project),
@@ -542,6 +552,18 @@ export class BudgetsService {
     return this.getRevision(id, user);
   }
 
+  /** Dispensa um alerta do orçamento (quem aprova revisões confere e fecha). */
+  async dismissAlert(budgetId: string, alertId: string, user: AuthenticatedUser) {
+    if (!user.permissions.includes('budget:approve')) throw new ForbiddenException('Você não tem permissão para esta ação.');
+    await this.prisma.$transaction(async (tx) => {
+      const alert = await tx.budgetAlert.findFirst({ where: { id: alertId, budgetId } });
+      if (!alert) throw new NotFoundException('Alerta não encontrado.');
+      if (alert.resolvedAt) return;
+      await tx.budgetAlert.update({ where: { id: alertId }, data: { resolvedAt: new Date(), resolvedBy: user.userId } });
+      await this.audit.record(user.userId, 'budget_alert.dismissed', 'project_budget', budgetId, { alert: alert.kind, message: alert.message }, tx);
+    });
+  }
+
   async discard(id: string, user: AuthenticatedUser) {
     return this.transition(id, 'discard', user);
   }
@@ -607,6 +629,23 @@ export class BudgetsService {
       if (action === 'won' || action === 'lost') data.decidedAt = now;
       await tx.budgetRevision.update({ where: { id }, data });
       if (action === 'approve_send' && onApproveSend) Object.assign(extra, await onApproveSend(tx, now));
+      if (action === 'won') {
+        // Mesmo lançamento do `project.approved` do Core (revision-won.ts): um caminho só, sem duplicar.
+        const { status } = await postWonCommitments(tx, {
+          revisionId: id,
+          revisionNumber: rev.number,
+          projectCode: rev.budget.projectCode,
+          axisProjectId: rev.budget.axisProjectId,
+          costCenterAxisId: await cachedCostCenter(tx, rev.budget.axisProjectId),
+          competence: parseDate(todaySaoPaulo(now)),
+          revenue: rev.revenue,
+          result: rev.result,
+          actor: user.userId,
+        });
+        const alert = commitmentAlert(status, rev.number);
+        if (alert) await raiseBudgetAlert(tx, { budgetId: rev.budgetId, revisionId: id, ...alert });
+        Object.assign(extra, { via: 'manual', commitments: status });
+      }
       await tx.budgetRevisionEvent.create({
         data: { revisionId: id, action: rule.event, fromStatus: rule.from, toStatus: rule.to, reason: why, actorAxisId: user.userId, actorEmail: user.email },
       });

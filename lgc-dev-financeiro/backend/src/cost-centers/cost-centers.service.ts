@@ -29,10 +29,13 @@ import {
   type Period,
 } from './cc-engine.js';
 import { CcContext, type CcNode } from './cc-context.js';
-import { refreshBudgetStatus, yearConsumption } from './cc-budget-status.js';
+import { NOT_PROJECT_COMMITMENT, refreshBudgetStatus, yearConsumption } from './cc-budget-status.js';
 import { advanceRef, releaseCommitments } from './cc-events.js';
 import { LogisticsClient } from './logistics.client.js';
 import { COST_CATEGORIES, type BudgetDto, type CreateEntryDto, type JobTitleMapDto, type OverheadRuleDto, type SettleAdvanceDto } from './cost-centers.dto.js';
+
+/** Ator dos lançamentos da importação diária. */
+export const SCHEDULER_ACTOR = 'sistema:logistica';
 
 const FUNNEL = ['aprovada', 'pedido', 'recebida_parcial', 'recebida', 'cancelada'] as const;
 
@@ -61,7 +64,7 @@ export class CostCentersService {
   async periodTotals(period: Period): Promise<PeriodTotals> {
     const rows = await this.prisma.ccEntry.groupBy({
       by: ['costCenterAxisId', 'kind', 'stage', 'category'],
-      where: { competence: { gte: period.start, lt: period.end } },
+      where: { competence: { gte: period.start, lt: period.end }, ...NOT_PROJECT_COMMITMENT },
       _sum: { amount: true },
     });
     const own = new Map<string, Figures>();
@@ -120,7 +123,7 @@ export class CostCentersService {
     const end = new Date(Date.UTC(year + 1, 0, 1));
     const [budgets, consumption] = await Promise.all([
       this.prisma.ccBudget.groupBy({ by: ['costCenterAxisId'], where: { year, costCenterAxisId: { in: ids } }, _sum: { amount: true } }),
-      this.prisma.ccEntry.groupBy({ by: ['costCenterAxisId', 'stage'], where: { kind: 'custo', costCenterAxisId: { in: ids }, competence: { gte: start, lt: end } }, _sum: { amount: true } }),
+      this.prisma.ccEntry.groupBy({ by: ['costCenterAxisId', 'stage'], where: { kind: 'custo', costCenterAxisId: { in: ids }, competence: { gte: start, lt: end }, ...NOT_PROJECT_COMMITMENT }, _sum: { amount: true } }),
     ]);
     const out = new Map<string, { year: number; amount: string; consumed: string; percent: string | null; status: ReturnType<typeof budgetStatus>['status'] }>();
     for (const id of ids) {
@@ -215,7 +218,7 @@ export class CostCentersService {
 
     const monthlyRows = await this.prisma.$queryRaw<Array<{ month: string; kind: string; stage: string; total: Prisma.Decimal }>>`
       SELECT to_char(competence, 'YYYY-MM') AS month, kind::text AS kind, stage::text AS stage, SUM(amount) AS total
-      FROM cc_entries WHERE cost_center_axis_id = ${id} AND competence >= ${period.start} AND competence < ${period.end}
+      FROM cc_entries WHERE cost_center_axis_id = ${id} AND competence >= ${period.start} AND competence < ${period.end} AND source::text <> 'projeto'
       GROUP BY 1, 2, 3`;
     const monthly = period.months.map((m) => {
       const pick = (kind: string, stage: string) => new D(monthlyRows.find((r) => r.month === m && r.kind === kind && r.stage === stage)?.total ?? 0);
@@ -521,7 +524,19 @@ export class CostCentersService {
   }
 
   /** Consumo de material da Logística na competência (spec §2). Linhas sem CC são contadas e ignoradas. */
-  async importLogistics(user: AuthenticatedUser, monthText: string) {
+  importLogistics(user: AuthenticatedUser, monthText: string) {
+    return this.runLogisticsImport(monthText, user.userId);
+  }
+
+  /**
+   * Importação diária do consumo da Logística (agendador). Mesma importação do botão, com o ator `sistema:logistica`:
+   * é idempotente por competência e por (CC, projeto) — igual fica, diferente é estornado e lançado de novo.
+   */
+  importLogisticsScheduled(monthText: string) {
+    return this.runLogisticsImport(monthText, SCHEDULER_ACTOR);
+  }
+
+  private async runLogisticsImport(monthText: string, actor: string) {
     const month = parseMonth(monthText);
     const rows = await this.logistics.consumption(monthText);
     const lines = new Map<string, { ref: string; costCenterAxisId: string; projectAxisId: string | null; amount: Dec; description: string }>();
@@ -536,9 +551,14 @@ export class CostCentersService {
       const amount = new D(r.value || 0).toDecimalPlaces(2).plus(prev?.amount ?? 0);
       lines.set(ref, { ref, costCenterAxisId: r.cost_center_id, projectAxisId: r.project_id, amount, description: `Consumo de material da Logística ${monthText}` });
     }
-    const stats = await this.prisma.$transaction((tx) => this.replaceMonth(tx, `logistica:${monthText}:`, [...lines.values()], { competence: month.start, category: 'material', source: 'logistica', actor: user.userId }), {
-      timeout: 60_000,
-    });
+    const stats = await this.prisma.$transaction(
+      async (tx) => {
+        // Botão e agendador não correm juntos na mesma competência: o segundo espera o primeiro e então compara com o vigente.
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`financeiro-logistics-import:${monthText}`}))`;
+        return this.replaceMonth(tx, `logistica:${monthText}:`, [...lines.values()], { competence: month.start, category: 'material', source: 'logistica', actor });
+      },
+      { timeout: 60_000 },
+    );
     return { month: monthText, ...stats, withoutCostCenter };
   }
 

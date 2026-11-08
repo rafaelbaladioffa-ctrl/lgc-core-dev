@@ -16,6 +16,7 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 | Alocação do colaborador no CC (`collaborator.cost_center_changed`) | Core → Financeiro | Core emite desde 2026-11-08 ([integracao-centros-de-custo.md §2](integracao-centros-de-custo.md#2-core-alocação-do-colaborador-no-cc-com-vigência)) |
 | Situação do orçamento do CC (`PUT /integration/cost-centers/:id/budget-status`) | Financeiro → Core | Core recebe desde 2026-11-08 ([integracao-centros-de-custo.md §4](integracao-centros-de-custo.md#4-financeiro--core-situação-do-orçamento-do-cc)) |
 | Eventos de pagamento | Financeiro → Core | Outbox pronto; **o Core não tem receptor** |
+| Projeto aprovado (`project.approved`) | Core → Financeiro | Financeiro consome (PT-07): a revisão aceita vira `ganha` e o comprometido vai ao CC do projeto (§2). O Core passa a emitir com o PT-06 |
 | Pedido de cotação do projeto (`project.quote_requested`) | Core → Financeiro | Core emite e o Financeiro consome desde 2026-11-08 (fila de pedidos de cotação, PJ4) (§4) |
 | Devolução da cotação (`POST /integration/projects/:id/quotes`) | Financeiro → Core | Core recebe e o Financeiro envia desde 2026-11-08 (PJ7: ao aprovar o envio, pelo outbox com retry) (§4) |
 | API de consulta por API key | Financeiro → Core | Disponível no Core; o Financeiro ainda não usa |
@@ -45,6 +46,7 @@ Mesmo envelope e assinatura usados com a Logística (`{event_id, event_type, occ
 | `site.created/updated` | sim (desde 2026-11-08; inativar vai como `updated` com `active: false`) | **ainda não assina**; o evento só vai para quem assinar |
 | `project.document_added` | sim | recebido e ignorado: o Financeiro baixa o documento pelo pedido de cotação |
 | `project.quote_requested` | sim (desde 2026-11-08) | sim (fila de pedidos de cotação, PJ4; §4) |
+| `project.approved` | PT-06 (plano ponta a ponta §4.2) | **sim (PT-07)**: revisão aceita → `ganha` + comprometido no CC (§2.1) |
 
 Todo `project.*` leva o estado completo do projeto: `project_id`, `code`, `name`, `status`,
 `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`,
@@ -64,6 +66,31 @@ O Financeiro usa nome e prazo previsto no cabeçalho do orçamento e o centro de
 | `purchase.approved`, `purchase.order_registered`, `purchase.delivery_received`, `purchase.cancelled` | sim (desde 2026-11-08) | sim (centros de custo) |
 | `finance_request.approved` | sim (desde 2026-11-08; `FIN-REEMBOLSO` e `FIN-ADIANTAMENTO`) | sim (centros de custo) |
 | `request.*` | sim | guardado como `IGNORED` |
+
+### 2.1 `project.approved`: revisão ganha e comprometido
+
+Payload (estado completo do projeto, como todo `project.*`, mais): `accepted_quote` (`project_quote_id`,
+`external_revision_id`, `revision_number`, `work_days`, `planned_start_date`, `planned_end_date`, `team[]`,
+`sow_document_id`), `site`, `client_po_number`, `material_request_id`, `approved_by_user_id`, `approved_at`. O
+Financeiro usa só `project_id`, `cost_center_id` (e o resto do estado do projeto, para o cache),
+`accepted_quote.external_revision_id` (o **id da revisão** enviada na cotação, §4), `approved_at` e
+`client_po_number`.
+
+No receptor `POST /webhooks/axis` (mesma assinatura e idempotência por `event_id` dos demais):
+
+1. a revisão com esse id, se estiver `enviada`, passa a `ganha` com a mesma regra, histórico e auditoria da ação
+   manual "Cliente aceitou" (ator `sistema:core`, `via: core`);
+2. na mesma transação, lança no CC do projeto o **comprometido** (`stage = comprometido`, origem `projeto`, com
+   `project_id`): receita (`faturamento`, valor contratado) e custos orçados por categoria. Ver
+   [projetos-especificacao §8](../lgc-dev-financeiro/docs/projetos-especificacao.md#8-realizado) e
+   [centros-de-custo §5.1](../lgc-dev-financeiro/docs/centros-de-custo-especificacao.md#51-comprometido-do-projeto-pt-07-e-o-orçamento-do-cc);
+3. é idempotente por revisão: evento repetido, ou evento depois da marcação manual, não duplica nada.
+
+Quando não dá para aplicar: outra revisão já `ganha` no mesmo orçamento (não sobrescreve) e revisão que não está
+`enviada` viram **alerta aberto no orçamento** (visível na página do projeto) e o evento conta como processado;
+**revisão inexistente** (ou `accepted_quote.external_revision_id` ausente, ou de outro projeto) deixa o evento
+`FAILED` no inbox com o motivo em `last_error` e o receptor responde `200 { status: "failed", error }`, sem
+reentrega em laço. O Financeiro não altera o status do projeto no Core.
 
 ## 3. Eventos Financeiro → Core
 

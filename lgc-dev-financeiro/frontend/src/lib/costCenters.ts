@@ -46,7 +46,7 @@ export type CcDetail = CcSummary & {
 
 export type EntryKind = 'receita' | 'custo';
 export type EntryStage = 'comprometido' | 'realizado';
-export type EntrySource = 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual';
+export type EntrySource = 'compra' | 'reembolso' | 'adiantamento' | 'logistica' | 'folha' | 'manual' | 'projeto';
 
 export type Entry = {
   id: string;
@@ -248,7 +248,7 @@ export const CATEGORY_LABEL: Record<string, string> = {
 export const KIND_LABEL: Record<CcKind, string> = { divisao: 'Divisão', administrativo: 'Administrativo', operacional: 'Operacional', equipe_tecnica: 'Equipe técnica' };
 export const ENTRY_KIND_LABEL: Record<EntryKind, string> = { receita: 'Receita', custo: 'Custo' };
 export const STAGE_LABEL: Record<EntryStage, string> = { comprometido: 'Comprometido', realizado: 'Realizado' };
-export const SOURCE_LABEL: Record<EntrySource, string> = { compra: 'Compra', reembolso: 'Reembolso', adiantamento: 'Adiantamento', logistica: 'Logística', folha: 'Folha', manual: 'Manual' };
+export const SOURCE_LABEL: Record<EntrySource, string> = { compra: 'Compra', reembolso: 'Reembolso', adiantamento: 'Adiantamento', logistica: 'Logística', folha: 'Folha', manual: 'Manual', projeto: 'Revisão ganha' };
 
 export const ACTIVITIES: TeamActivity[] = ['projeto', 'deslocamento', 'treinamento', 'manutencao', 'ocioso'];
 export const ACTIVITY_LABEL: Record<TeamActivity, string> = { projeto: 'Projeto', deslocamento: 'Deslocamento', treinamento: 'Treinamento', manutencao: 'Manutenção', ocioso: 'Ocioso' };

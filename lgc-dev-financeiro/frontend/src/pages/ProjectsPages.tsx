@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { createBudget, getProject, listProjects, newRevision, PROJECT_STATUS, REVISION_STATUS, startQuote, syncProjects, updateBudget, type BudgetHeader, type CoreProject, type DateSource } from '../lib/budgets';
+import { createBudget, dismissBudgetAlert, getProject, getProjectResult, listProjects, newRevision, PROJECT_STATUS, REVISION_STATUS, startQuote, syncProjects, updateBudget, type BudgetHeader, type CoreProject, type DateSource } from '../lib/budgets';
 import { formatPercent } from '../lib/decimal';
 import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -134,7 +134,7 @@ const MODEL_LABEL: Record<string, string> = { aws_sow: 'Cotação AWS (SOW e Bid
  * aws_sow com a SOW, o Bid Template, cabos e equipe sugeridos); o orçamento genérico fica como opção secundária.
  * Todos os orçamentos do projeto aparecem, a cotação AWS primeiro.
  */
-export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite: boolean; canSeeCost: boolean }) {
+export function ProjectPage({ id, canWrite, canSeeCost, canApprove }: { id: string; canWrite: boolean; canSeeCost: boolean; canApprove: boolean }) {
   const { data, error, loading, reload } = useLoad(() => getProject(id), [id], 'Não foi possível carregar o projeto.');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -151,8 +151,22 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
     }
   }
 
+  async function dismiss(budgetId: string, alertId: string) {
+    setBusy(true);
+    setActionError(null);
+    try {
+      await dismissBudgetAlert(budgetId, alertId);
+      reload();
+    } catch (e) {
+      setActionError(messageOf(e, 'Não foi possível dispensar o alerta.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   if (error) return <ErrorAlert message={error} onRetry={reload} />;
   if (loading || !data) return <p className="muted">Carregando…</p>;
+  const hasWon = data.budgets.some((b) => b.revisions.some((r) => r.status === 'ganha'));
   const latestRequest = data.quoteRequests[0] ?? null;
   const awsBudget = data.budgets.find((b) => b.model === 'aws_sow');
   const genericBudget = data.budgets.find((b) => b.model === 'generico');
@@ -193,6 +207,16 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
       {data.warnings.map((w) => (
         <p key={w} className="alert alert-warning" role="status">
           {w}
+        </p>
+      ))}
+      {data.alerts.map((a) => (
+        <p key={a.id} className="alert alert-warning" role="status">
+          {a.message}{' '}
+          {canApprove && (
+            <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => dismiss(a.budgetId, a.id)}>
+              Dispensar
+            </button>
+          )}
         </p>
       ))}
       {latestRequest && (
@@ -258,7 +282,108 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
           </table>
         </section>
       ))}
+      {hasWon && <ProjectResultSection projectId={data.axisProjectId} canSeeCost={canSeeCost} />}
     </>
+  );
+}
+
+/**
+ * Resultado do projeto (PA-16): cotado (revisão ganha) × comprometido × realizado por grupo de custo, lido só dos
+ * lançamentos do centro de custo do projeto. O comprometido não é estornado quando o realizado chega: a coluna
+ * "Comprometido líquido" já desconta o realizado, e "Saldo" desconta também o que está em aberto.
+ */
+export function ProjectResultSection({ projectId, canSeeCost }: { projectId: string; canSeeCost: boolean }) {
+  const { data, error, loading, reload } = useLoad(() => getProjectResult(projectId), [projectId], 'Não foi possível carregar o resultado do projeto.');
+  if (error) return <ErrorAlert message={error} onRetry={reload} />;
+  if (loading || !data) return <p className="muted">Carregando o resultado do projeto…</p>;
+  const { revenue, costs, result } = data;
+  return (
+    <section className="card table-card table-scroll">
+      <div className="card-pad">
+        <h2>Resultado do projeto</h2>
+        <p className="muted">
+          {data.revision ? `Cotado = revisão R${data.revision.number} (ganha)` : 'Sem revisão ganha'}
+          {data.revision?.committedOn ? ` · comprometido em ${formatDate(data.revision.committedOn)}` : ''}
+          {data.costCenter ? ` · centro de custo ${[data.costCenter.code, data.costCenter.name].filter(Boolean).join(' — ')}` : ''}
+        </p>
+        {data.commitmentsPending && (
+          <p className="alert alert-warning" role="status">
+            A revisão está ganha, mas o comprometido ainda não foi lançado no centro de custo (veja os alertas acima).
+          </p>
+        )}
+      </div>
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Receita</th>
+            <th className="num">Cotado</th>
+            <th className="num">Comprometido</th>
+            <th className="num">Realizado (faturado)</th>
+            <th className="num">A faturar</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Faturamento</td>
+            <td className="num">{formatBRL(revenue.quoted)}</td>
+            <td className="num">{formatBRL(revenue.committed)}</td>
+            <td className="num">{formatBRL(revenue.realized)}</td>
+            <td className="num">{formatBRL(revenue.pending)}</td>
+          </tr>
+        </tbody>
+      </table>
+      {canSeeCost && costs && (
+        <table className="table">
+          <thead>
+            <tr>
+              <th>Custos diretos</th>
+              <th className="num">Cotado</th>
+              <th className="num">Comprometido</th>
+              <th className="num">Realizado</th>
+              <th className="num">Em aberto (compras e adiantamentos)</th>
+              <th className="num">Comprometido líquido</th>
+              <th className="num">Saldo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {costs.groups.map((g) => (
+              <tr key={g.key}>
+                <td>{g.label}</td>
+                <td className="num">{formatBRL(g.quoted)}</td>
+                <td className="num">{formatBRL(g.committed)}</td>
+                <td className="num">{formatBRL(g.realized)}</td>
+                <td className="num">{formatBRL(g.openCommitments)}</td>
+                <td className="num">{formatBRL(g.committedNet)}</td>
+                <td className="num">{formatBRL(g.balance)}</td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr className="total-row">
+              <td>Total</td>
+              <td className="num">{formatBRL(costs.total.quoted)}</td>
+              <td className="num">{formatBRL(costs.total.committed)}</td>
+              <td className="num">{formatBRL(costs.total.realized)}</td>
+              <td className="num">{formatBRL(costs.total.openCommitments)}</td>
+              <td className="num">{formatBRL(costs.total.committedNet)}</td>
+              <td className="num">{formatBRL(costs.total.balance)}</td>
+            </tr>
+            {result && (
+              <tr>
+                <td>Resultado direto (receita − custos)</td>
+                <td className="num">{formatBRL(result.quoted)}</td>
+                <td className="num">{formatBRL(result.committed)}</td>
+                <td className="num">{formatBRL(result.realized)}</td>
+                <td colSpan={3} />
+              </tr>
+            )}
+          </tfoot>
+        </table>
+      )}
+      <p className="muted card-pad">
+        Saldo negativo = acima do orçado. Mão de obra realizada por projeto depende das horas do Field e ainda não é lançada; impostos e custos indiretos não entram no centro de custo.
+      </p>
+    </section>
   );
 }
 

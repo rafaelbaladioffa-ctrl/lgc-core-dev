@@ -5,13 +5,20 @@ import { D, ZERO, budgetStatus, money, type Dec } from './cc-engine.js';
 /** Evento Financeiro → Core com a situação do orçamento (docs/integracao-centros-de-custo.md §4). */
 export const CC_BUDGET_STATUS_EVENT = 'cost_center.budget_status';
 
+/**
+ * Lançamentos do comprometido da revisão ganha (origem `projeto`, PT-07) ficam fora do consumo do orçamento do CC e
+ * do comprometido dos totais: são o orçado do projeto, não gasto aprovado. O orçamento do CC mede o realizado e as
+ * compras e adiantamentos em aberto, como antes (centros-de-custo-especificacao §5).
+ */
+export const NOT_PROJECT_COMMITMENT = { source: { not: 'projeto' } } satisfies Prisma.CcEntryWhereInput;
+
 /** Orçamento, realizado e comprometido em aberto de um CC no ano. */
 export async function yearConsumption(tx: Prisma.TransactionClient, costCenterAxisId: string, year: number) {
   const start = new Date(Date.UTC(year, 0, 1));
   const end = new Date(Date.UTC(year + 1, 0, 1));
   const [budget, rows] = await Promise.all([
     tx.ccBudget.aggregate({ where: { costCenterAxisId, year }, _sum: { amount: true } }),
-    tx.ccEntry.groupBy({ by: ['stage'], where: { costCenterAxisId, kind: 'custo', competence: { gte: start, lt: end } }, _sum: { amount: true } }),
+    tx.ccEntry.groupBy({ by: ['stage'], where: { costCenterAxisId, kind: 'custo', competence: { gte: start, lt: end }, ...NOT_PROJECT_COMMITMENT }, _sum: { amount: true } }),
   ]);
   const of = (stage: string): Dec => new D(rows.find((r) => r.stage === stage)?._sum.amount ?? ZERO);
   const realized = of('realizado');

@@ -21,6 +21,7 @@ import { BidService } from './bid/bid.service.js';
 import { validateBidProfile } from './bid/bid-profile.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
+import { ProjectResultService } from './project-result.service.js';
 
 /** Projetos do Core com orçamento (projetos-especificacao §11). */
 @Controller('projects')
@@ -28,6 +29,7 @@ export class ProjectsController {
   constructor(
     private readonly budgets: BudgetsService,
     private readonly sync: CoreSyncService,
+    private readonly result: ProjectResultService,
   ) {}
 
   @Get()
@@ -42,6 +44,16 @@ export class ProjectsController {
   @RequirePermissions('budget:read')
   syncFromCore(@CurrentUser() user: AuthenticatedUser, @Headers('authorization') authorization: string) {
     return this.sync.syncProjectsAndClients(user, authorization);
+  }
+
+  /**
+   * Cotado × comprometido × realizado por grupo de custo, lendo só os lançamentos do CC do projeto (PA-16).
+   * Sem `budget:read_cost` a resposta traz só a receita.
+   */
+  @Get(':axisProjectId/result')
+  @RequirePermissions('budget:read')
+  projectResult(@Param('axisProjectId') axisProjectId: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.result.get(axisProjectId, user);
   }
 
   @Get(':axisProjectId')
@@ -66,6 +78,14 @@ export class BudgetsController {
   @RequirePermissions('budget:write')
   update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateBudgetDto, @CurrentUser() user: AuthenticatedUser) {
     return this.budgets.updateBudget(id, dto, user);
+  }
+
+  /** Dispensa um alerta do orçamento (ex.: o Core aprovou uma revisão enquanto outra já estava ganha). */
+  @Post(':id/alerts/:alertId/dismiss')
+  @HttpCode(204)
+  @RequirePermissions('budget:approve')
+  async dismissAlert(@Param('id', ParseUUIDPipe) id: string, @Param('alertId', ParseUUIDPipe) alertId: string, @CurrentUser() user: AuthenticatedUser) {
+    await this.budgets.dismissAlert(id, alertId, user);
   }
 
   @Post(':id/revisions')

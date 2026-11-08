@@ -51,6 +51,7 @@ function fixture(status: string, { previousSent = null as { id: string; number: 
     status,
     budgetId: 'b1',
     result,
+    revenue: '9000.00',
     inputs: { workDays: 5, team: [], materials: [] },
     budget: { id: 'b1', projectCode: 'PROP-100.001-1126', axisProjectId: 'p1', title: null, plannedStartDate: null, plannedEndDate: null, model: 'generico' },
     parameterSet: { id: 's1', code: 'PAR-0001', status: 'vigente', roles: [] },
@@ -65,6 +66,10 @@ function fixture(status: string, { previousSent = null as { id: string; number: 
       create: vi.fn().mockResolvedValue({}),
       findFirst: vi.fn().mockResolvedValue({ actorAxisId: submitter }),
     },
+    // Comprometido da revisão ganha (PT-07): projeto com CC no cache, sem lançamento anterior.
+    axisMasterCache: { findUnique: vi.fn().mockResolvedValue({ data: { cost_center_id: 'cc1' } }) },
+    ccEntry: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
+    budgetAlert: { findFirst: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({}) },
   };
   const audit = { record: vi.fn().mockResolvedValue({}) } as unknown as AuditService & { record: ReturnType<typeof vi.fn> };
   const prisma = { ...tx, $transaction: vi.fn((fn: (t: unknown) => unknown) => fn(tx)) } as unknown as PrismaService;
@@ -120,6 +125,12 @@ describe('BudgetsService.transition', () => {
     const won = fixture('enviada');
     await won.service.transition('r2', 'won', GESTOR);
     expect(won.tx.budgetRevision.update).toHaveBeenCalledWith({ where: { id: 'r2' }, data: expect.objectContaining({ status: 'ganha', decidedAt: expect.any(Date) }) });
+    // Receita contratada comprometida no CC do projeto, na mesma transação (resultado do fixture não tem custos).
+    expect(won.tx.ccEntry.create).toHaveBeenCalledTimes(1);
+    expect(won.tx.ccEntry.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ costCenterAxisId: 'cc1', projectAxisId: 'p1', kind: 'receita', category: 'faturamento', stage: 'comprometido', source: 'projeto', sourceRef: 'ganho:r2:receita', createdBy: 'ges' }),
+    });
+    expect(won.audit.record).toHaveBeenCalledWith('ges', 'budget_revision.won', 'budget_revision', 'r2', expect.objectContaining({ via: 'manual', commitments: 'posted' }), won.tx);
 
     const lost = fixture('enviada');
     await expect(lost.service.transition('r2', 'lost', GESTOR)).rejects.toThrow('Informe o motivo.');

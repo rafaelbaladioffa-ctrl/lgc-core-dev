@@ -8,11 +8,12 @@ import { LogisticsMaterialsController } from './logistics-materials.controller.j
 import { LogisticsClient } from '../cost-centers/logistics.client.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
+import { ProjectResultService } from './project-result.service.js';
 
 /** Módulo Projetos: orçamento do projeto, revisões, cálculo (PJ2), fluxo (PJ3), SOW e fila do Core (PJ4). */
 @Module({
   imports: [IntegrationModule],
   controllers: [ProjectsController, BudgetsController, RevisionsController, QuoteRequestsController, BidProfileController, LogisticsMaterialsController],
-  providers: [BudgetsService, CoreSyncService, SowService, CoreDocumentsClient, BidService, LogisticsClient],
+  providers: [BudgetsService, CoreSyncService, SowService, CoreDocumentsClient, BidService, LogisticsClient, ProjectResultService],
 })
 export class BudgetsModule {}

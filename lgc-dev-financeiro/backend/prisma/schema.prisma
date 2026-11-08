@@ -316,6 +316,7 @@ model ProjectBudget {
 
   revisions     BudgetRevision[]
   quoteRequests QuoteRequest[]
+  alerts        BudgetAlert[]
 
   @@unique([axisProjectId, model])
   @@map("project_budgets")
@@ -359,6 +360,27 @@ model BudgetRevision {
   @@unique([budgetId, number])
   @@index([status])
   @@map("budget_revisions")
+}
+
+/// Alerta visível no orçamento (PT-07): situação que o Financeiro não resolve sozinho, como o Core aprovar uma
+/// revisão enquanto outra já está ganha. Fica aberto até alguém dispensar.
+model BudgetAlert {
+  id         String    @id @default(uuid())
+  budgetId   String    @map("budget_id")
+  revisionId String?   @map("revision_id")
+  /// ganha_conflito, revisao_fora_de_enviada, sem_centro_custo, comprometido_duplicado
+  kind       String
+  message    String
+  /// Evento do Core que gerou o alerta, quando houve.
+  eventId    String?   @map("event_id")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  resolvedAt DateTime? @map("resolved_at")
+  resolvedBy String?   @map("resolved_by")
+
+  budget ProjectBudget @relation(fields: [budgetId], references: [id])
+
+  @@index([budgetId, resolvedAt])
+  @@map("budget_alerts")
 }
 
 /// Histórico do fluxo da revisão (append-only: o banco recusa UPDATE e DELETE).
@@ -520,6 +542,8 @@ enum CcEntrySource {
   logistica
   folha
   manual
+  /// Comprometido na revisão ganha (receita contratada e custos orçados, PT-07). Não entra no orçamento do CC.
+  projeto
 }
 
 enum CcCategory {

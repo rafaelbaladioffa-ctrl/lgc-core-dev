@@ -54,8 +54,19 @@ export interface ProjectRow extends CoreProject {
     | null;
 }
 
+/** Alerta aberto no orçamento (ex.: o Core aprovou uma revisão enquanto outra já estava ganha). */
+export interface BudgetAlert {
+  id: string;
+  budgetId: string;
+  revisionId: string | null;
+  kind: string;
+  message: string;
+  createdAt: string;
+}
+
 export interface ProjectDetail extends CoreProject {
   warnings: string[];
+  alerts: BudgetAlert[];
   quoteRequests: Array<{ id: string; requestedAt: string; requestedByEmail: string | null; notes: string | null; sowVersion: number; bidTemplateVersion: number | null; started: boolean }>;
   budgets: Array<BudgetHeader & {
     id: string;
@@ -413,3 +424,35 @@ export interface LogisticsMaterial {
 }
 export const searchLogisticsMaterials = (search: string) => api<LogisticsMaterial[]>(`/logistics-materials?search=${encodeURIComponent(search)}`);
 export const findLogisticsMaterialByCode = (code: string) => api<LogisticsMaterial[]>(`/logistics-materials?code=${encodeURIComponent(code)}`);
+
+/** Linha do resultado do projeto por grupo de custo (PA-16). Valores em reais como texto. */
+export interface ProjectResultRow {
+  quoted: string | null;
+  committed: string;
+  realized: string;
+  /** Compras e adiantamentos aprovados e ainda não realizados. */
+  openCommitments: string;
+  /** max(0, comprometido − realizado). */
+  committedNet: string;
+  /** comprometido − realizado − em aberto; negativo = acima do orçado. */
+  balance: string;
+}
+
+/** Cotado × comprometido × realizado, lido só dos lançamentos do CC do projeto. Sem `budget:read_cost` vem só a receita. */
+export interface ProjectResult {
+  projectId: string;
+  code: string;
+  name: string | null;
+  costCenter: { code: string | null; name: string | null } | null;
+  costCenterId: string | null;
+  revision: { id: string; number: number; decidedAt: string | null; committedOn: string | null } | null;
+  /** Revisão ganha sem comprometido lançado (projeto sem CC quando o Core aprovou). */
+  commitmentsPending: boolean;
+  alerts: Array<{ id: string; budgetId: string; kind: string; message: string }>;
+  revenue: { quoted: string | null; committed: string; realized: string; pending: string };
+  costs?: { groups: Array<{ key: string; label: string } & ProjectResultRow>; total: ProjectResultRow };
+  result?: { quoted: string | null; committed: string; realized: string };
+}
+
+export const getProjectResult = (id: string) => api<ProjectResult>(`/projects/${encodeURIComponent(id)}/result`);
+export const dismissBudgetAlert = (budgetId: string, alertId: string) => api<void>(`/budgets/${budgetId}/alerts/${alertId}/dismiss`, { method: 'POST', body: '{}' });

@@ -75,6 +75,10 @@ rascunho ──submeter──▶ em_aprovacao ──aprovar envio──▶ envia
   `budget:approve`. Ver P-03.
 - `ganha` congela a revisão como **linha de base** do realizado. Só uma revisão por orçamento pode
   estar `ganha`.
+- **`ganha` tem efeito (PT-07, PA-13):** na mesma transação, a receita contratada e os custos orçados viram
+  lançamentos `comprometido` no centro de custo do projeto ([§8](#8-realizado)). Isso vale para as duas
+  entradas, que passam pelo mesmo código e não duplicam: a ação manual "Cliente aceitou" e o evento
+  `project.approved` do Core ([§13.2](#132-projeto-aprovado-no-core-ganha-sozinha)).
 - Revisões nunca são apagadas; rascunho abandonado pode ser `descartado`.
 - **Quem faz cada passo:** submeter e descartar exigem `budget:write`; devolver, aprovar envio, ganha e
   perdida exigem `budget:approve`. Devolver e perder pedem motivo. A API devolve em cada revisão as
@@ -96,8 +100,15 @@ O Core é dono do status do projeto (`proposta → aprovado → em_execucao → 
 | Revisão `ganha` com projeto ainda `proposta` no Core | "Atualize o status do projeto no Core" |
 | Projeto `encerrado` no Core com realizado aberto | "Feche o realizado" |
 
-A devolução da cotação aprovada para envio ao Core está em §13.1. Emitir `budget.won` fica para quando
-o Core tiver receptor genérico de eventos de satélite.
+A devolução da cotação aprovada para envio ao Core está em §13.1. Quando o comercial aprova o projeto
+no Core, o Core avisa (`project.approved`) e a revisão aceita vira `ganha` sozinha (§13.2). Emitir
+`budget.won` para o Core fica para quando ele tiver receptor genérico de eventos de satélite.
+
+**Alertas no orçamento.** O que o Financeiro não decide sozinho vira alerta aberto na página do projeto
+(`budget_alerts`; `budget:approve` dispensa com `POST /budgets/:id/alerts/:alertId/dismiss`, com auditoria):
+revisão aprovada no Core enquanto outra já está `ganha` no mesmo orçamento (nada é sobrescrito), revisão que
+não estava `enviada`, projeto sem centro de custo no Financeiro (a revisão ganha, mas o comprometido não é
+lançado) e comprometido que não foi lançado porque outro orçamento do mesmo projeto já é a linha de base.
 
 ## 4. Parâmetros (versionados)
 
@@ -421,22 +432,56 @@ deslocamento).
 
 ## 8. Realizado
 
+**Um único livro (PA-16, PT-07).** Cotado, comprometido e realizado do projeto vêm dos lançamentos do centro de
+custo do projeto (`cc_entries`, com `project_axis_id`), a mesma tabela onde entram compras, reembolsos,
+adiantamentos, consumo da Logística e folha. **Não existe tabela de custos realizados própria do projeto**
+(`actual_cost_entries` saiu do desenho): duas fontes de custo divergem. Correção é estorno, como em todo
+lançamento do CC.
+
 Disponível quando o orçamento tem revisão `ganha`. Linha de base = essa revisão.
 
-- **Apontamento** (um por projeto, editável até fechar): técnicos, encarregados, dias trabalhados,
-  horas por dia, carros, dias de plataforma, horas extras (R$), valor faturado ao cliente
-  (padrão = receita da revisão ganha). Em branco = igual ao cotado.
-- **Custos lançados** (`actual_cost_entries`): data, grupo (material, deslocamento, plataforma,
-  hospedagem/alimentação, outros, mão de obra extra), descrição, valor, documento de referência.
-  Não se apagam: correção por lançamento inverso com motivo. Quando o contas a pagar existir, os
-  títulos rateados para o projeto entram aqui automaticamente.
-- **Cálculo do realizado**: mão de obra = horas apontadas × custo hora (P-04 define de qual conjunto
-  de parâmetros); deslocamento recalculado com carros × dias apontados; plataforma = dias apontados ×
-  diária real; material e demais grupos = **lançamentos**, ou o cotado enquanto não houver lançamento
-  no grupo (marcado "sem lançamento"). Contingência não entra no realizado.
-- **Cotado × realizado**: receita, impostos, cada grupo de custo, indiretos, lucro real, lucro sobre
-  o custo, margem e horas de campo, com a diferença.
-- **Fechar realizado**: congela o resultado; reabrir exige `budget:approve` e motivo.
+- **Comprometido** (ao ganhar, [§3.1](#31-revisão)): lançamentos `stage = comprometido`, `source = projeto`, no
+  CC do projeto (do cache do Core), com `source_ref = ganho:<revisão>:<linha>` e a competência da aceitação.
+  Receita (`faturamento`, o valor contratado da revisão) e os custos diretos do resultado da revisão:
+
+  | Linha | Categoria do CC | De onde vem no resultado da revisão |
+  |---|---|---|
+  | Receita contratada | `faturamento` | valor da proposta (`revenue`) |
+  | Mão de obra | `folha` | `directCosts.labor` |
+  | Material | `material` | itens + perdas (`materialDetail`) |
+  | Frete do material | `material` | `materialDetail.freight` |
+  | Deslocamento | `frota` | `directCosts.travel` |
+  | Plataforma | `servicos` | `directCosts.platform` |
+  | Hospedagem e alimentação | `despesas_campo` | `directCosts.lodgingMeals` |
+  | Outros custos | `outros` | `directCosts.other` |
+
+  Linha zerada não lança; contingência e indiretos não entram (não são gasto do projeto). A revisão `ganha` é
+  imutável, então o comprometido não se recalcula: reentrega do evento ou ação manual depois do evento não
+  duplicam (a presença de `ganho:<revisão>:*` é a chave de idempotência).
+- **Realizado:** o que já chega no CC com o projeto — compra recebida (`compras`), reembolso e prestação de
+  adiantamento (`despesas_campo`), consumo de material da Logística (`material`, importado todo dia, ver
+  [centros de custo §2](centros-de-custo-especificacao.md#2-origens-dos-lançamentos)), faturamento manual
+  (`faturamento`, PA-15: receita realizada segue lançamento manual até haver contas a receber). **Mão de obra
+  realizada por projeto** (horas do Field × custo hora médio da função, PA-14) entra com o PT-10; até lá o
+  realizado de mão de obra do projeto é zero.
+- **Comprometido × realizado (regra escolhida no PT-07):** **sem estorno**. O realizado chega em categorias do
+  CC que não casam uma a uma com as linhas do orçamento (compra de material cai em `compras`, não em
+  `material`; reembolso cai em `despesas_campo`); estornar o comprometido "conforme chega o realizado" obrigaria
+  a inventar esse casamento e a reprocessar lançamentos. Em vez disso o resultado calcula, por grupo,
+  **comprometido líquido = máx(0, comprometido − realizado)**. O orçamento anual do CC (`cc-budget-status`)
+  **ignora** os lançamentos de origem `projeto`: continua medindo realizado + compras e adiantamentos em aberto,
+  como antes ([centros de custo §5](centros-de-custo-especificacao.md#5-orçamento-e-situação)).
+- **Resultado do projeto** (`GET /projects/:axisProjectId/result`, `budget:read`; custo só com `budget:read_cost`):
+  receita (cotado, comprometido, realizado, a faturar) e custos por **grupo** — os quatro grupos do motor
+  (mão de obra; material; deslocamento, plataforma, hospedagem e alimentação; outros) — com cotado (grupos da
+  revisão ganha), comprometido, realizado, em aberto (compras e adiantamentos aprovados e ainda não realizados),
+  comprometido líquido e saldo (`comprometido − realizado − em aberto`; negativo = acima do orçado). Grupos ↔
+  categorias do CC: mão de obra = `folha`; material = `material` + `compras`; deslocamento e estadia = `frota` +
+  `servicos` + `despesas_campo`; outros = `outros`. Resultado direto = receita − custos diretos (impostos e
+  indiretos não são lançados no CC).
+- **Ainda fora (PJ5 original):** apontamento digitado (técnicos, dias, carros) e "fechar/reabrir realizado" ficam
+  para depois; o realizado do projeto é o que o CC já tem. Com o contas a pagar (PJ6), o título pago passa a
+  entrar no mesmo livro.
 
 ## 9. Permissões e perfis
 
@@ -476,8 +521,8 @@ P-03.
 | `budget_revision_team`, `budget_revision_items` | equipe e itens de material/custo da revisão, com valores copiados do catálogo |
 | `budget_revision_sow` | dados lidos da SOW, correções e justificativas dos indicadores |
 | `budget_revision_cables` | linhas de cabo (§7.2) |
-| `project_actuals` | apontamento (§8), status aberto/fechado |
-| `actual_cost_entries` | lançamentos realizados, append-only com estorno |
+| `budget_alerts` | alertas abertos do orçamento (§3.2): tipo, texto, revisão, evento do Core, quem dispensou (PT-07) |
+| `cc_entries` (módulo Centros de custo) | **único livro** do comprometido e do realizado do projeto (§8); `source = projeto` para o comprometido da revisão ganha. Não há `actual_cost_entries` |
 
 Revisão `ganha`/`enviada` e conjunto publicado são imutáveis (checado no serviço e por teste).
 Toda mutação em `audit_events`; publicar parâmetros, aprovar envio, ganhar/perder e fechar realizado
@@ -498,9 +543,9 @@ gravam evento de negócio com antes/depois.
 | `POST /revisions/:id/simulate` (calcula sem gravar) | budget:read |
 | `POST /revisions/:id/sow/import` | budget:write |
 | `POST /revisions/:id/submit`, `/return`, `/approve-send`, `/won`, `/lost`, `/discard` | budget:write / approve |
-| `GET/PUT /projects/:axisProjectId/actual`, `POST /actual/close`, `/reopen` | project_actual:write / budget:approve |
-| `GET/POST /projects/:axisProjectId/actual/costs`, `POST /actual/costs/:id/reverse` | project_actual:write |
-| `GET /projects/:axisProjectId/comparison` | budget:read_cost |
+| `GET /projects/:axisProjectId/result` (cotado × comprometido × realizado por grupo, lendo só `cc_entries`; sem `budget:read_cost` só a receita) | budget:read |
+| `POST /budgets/:id/alerts/:alertId/dismiss` (dispensa um alerta do orçamento) | budget:approve |
+| Lançar custo ou receita realizados do projeto | `POST /cost-centers/:id/entries` com `projectId` (centros de custo, `cost_center:write`) |
 
 Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.05"`).
 
@@ -508,13 +553,15 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
 
 1. **Projetos**: projetos do Core com status, orçamento, revisão atual, receita, lucro sobre o custo
    e situação (sem custo para quem não tem `read_cost`). Filtros por status, cliente, situação.
-2. **Projeto**: revisões (histórico, quem aprovou), resultado da revisão ganha, cotado × realizado,
-   avisos de divergência com o Core.
+2. **Projeto**: revisões (histórico, quem aprovou), alertas do orçamento (com "Dispensar"), avisos de
+   divergência com o Core e, com revisão ganha, **Resultado do projeto**: receita e custos por grupo,
+   cotado × comprometido × realizado (§8).
 3. **Revisão** (`FormPage` em seções, como a calculadora): cabeçalho, [SOW e cabos], equipe e dias,
    material, deslocamento, plataforma, hospedagem, outros custos; painel lateral com receita, lucro,
    lucro sobre o custo, preço mínimo e preço da meta atualizado por `simulate`; [indicadores e
    valores do bid].
-4. **Realizado**: apontamento, lançamentos e comparação.
+4. **Realizado**: não há tela própria; os lançamentos do projeto estão no CC (`#/centros-de-custo/:id`,
+   origem "Revisão ganha" para o comprometido) e a comparação fica no Resultado do projeto.
 5. **Parâmetros**: conjunto vigente, rascunho do próximo, comparação entre versões, custo hora por
    função; catálogos de material e destinos; perfis de cliente.
 
@@ -575,6 +622,27 @@ estiver fora do ar, a tela mostra o erro ao lado do campo e a edição do orçam
 - Cabos da SOW no `aws_sow` são fornecidos pela AWS (instalação apenas) e não entram em `materials[]`; só o
   material fornecido pela LGC (seção "Material fornecido pela LGC" da revisão).
 
+
+### 13.2 Projeto aprovado no Core: ganha sozinha
+
+O Core emite `project.approved` quando o comercial aprova o projeto (plano ponta a ponta §4.2; assinam
+Financeiro e Field). O estado completo do projeto vem junto, mais `accepted_quote` (`project_quote_id`,
+`external_revision_id` = **id da revisão aqui**, `revision_number`…), `client_po_number` e `approved_at`. O
+Financeiro, no receptor `POST /webhooks/axis`:
+
+1. atualiza o projeto no cache (inclusive o centro de custo);
+2. acha a revisão por `accepted_quote.external_revision_id`; se estiver `enviada`, passa a `ganha` com a mesma
+   transição, histórico e auditoria da ação manual, registrando que veio do Core (ator `sistema:core`, motivo
+   "Aprovado no Core (project.approved)", PO, `event_id` e `via: core` na auditoria);
+3. lança o comprometido no CC do projeto ([§8](#8-realizado)) na mesma transação.
+
+Idempotência: por `event_id` (inbox) e por revisão (já `ganha` só confirma o comprometido; outro evento da mesma
+revisão não relança). Casos sem sobrescrever nada, com alerta no orçamento (§3.2): outra revisão já `ganha` no
+mesmo orçamento; revisão que não está `enviada` (ex.: `substituida`). **Revisão que não existe aqui** (ou
+`accepted_quote.external_revision_id` ausente, ou revisão de outro projeto): a transação é desfeita, o evento
+fica `FAILED` com o motivo em `last_error` e o receptor responde **200** com `{ "status": "failed", "error": … }`
+(sem laço de reentrega); se o Core reenviar o mesmo `event_id`, o evento é reprocessado.
+
 ## 14. Fora do escopo desta frente
 
 Equipe com dias diferentes por função; OCR de SOW escaneada; custo por colaborador individual (usa-se a média por função); faturamento e contas a receber;
@@ -601,7 +669,7 @@ de custo; outros modelos de cliente além do AWS.
 | PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
 | PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | **feito** (2026-11-08): ver nota abaixo |
 | PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | **feito** (2026-11-08), em duas partes: ver notas abaixo. O perfil de cliente com o mapeamento tipo de cabo/função → linha do Bid Template fica para a PJ7, onde é usado |
-| PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
+| PJ5 | Realizado: cotado × comprometido × realizado, lendo os lançamentos do CC (PA-16; sem tabela paralela) | **feito em parte** (2026-11-08, PT-07): comprometido ao ganhar, resultado do projeto por grupo e importação diária do consumo da Logística. Fora: apontamento digitado, fechar/reabrir realizado e mão de obra realizada por projeto (PT-10): ver §8 |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
 | PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | **feito** (2026-11-08): ver nota abaixo |
 
