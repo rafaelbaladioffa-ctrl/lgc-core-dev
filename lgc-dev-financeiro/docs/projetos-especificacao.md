@@ -279,6 +279,26 @@ ficam num **perfil de cliente** versionado junto com os parâmetros, nunca no c�
 - A SOW vem do Core: é o PDF anexado ao projeto (P-13), versão indicada no `project.quote_requested`.
   O Financeiro baixa o arquivo pela API de integração e extrai o texto no servidor. Colar o texto
   continua possível como alternativa (PDF escaneado ou ilegível).
+- **Extração (conferida em 2026-11-08 com duas SOWs reais, fora do Git).** O PDF tem texto (não
+  precisa OCR). Extrair com `pdfjs-dist` agrupando os trechos por linha (coordenada y) e descartar o
+  rodapé de confidencialidade repetido em toda página; listas continuam entre páginas.
+- **Cabeçalho:** rótulos estáveis (`FBN:`, `Project Site(s):`, `Project Name:`, `SPS Project ID:`,
+  `SOW UID:`, `Project Type:`), cronograma numerado de 1 a 5 (visita técnica, prazo de envio com hora,
+  emissão do PO, início e conclusão do cabeamento) e e-mails dos contatos. Plataforma: frase sobre
+  MEWP (ex.: "is not required") ou ausência dela (= não mencionada).
+- **Racks e live:** dois formatos — linhas `<host> -- <local> -- Live|Not live, In scope` agrupadas
+  por `== Grupo ==`, ou tabela `Devices <host> <local> Live|Not Live`. Conta racks/dispositivos e
+  marca "exige janela" quando houver `Live`.
+- **Cabos:** dois formatos, e o parser aceita os dois:
+  1. Tabela de resumo `Cable Types: Type Length Quantity` (ex.: `8F MPO-MPO 20m 12`). Quando existe,
+     é a fonte das quantidades.
+  2. Só linhas de conexão: `--- <n>x <tipo> (<m>m) from <A> to <B> [(Path A|B)]`, agrupadas por
+     `== Rack ==` e `- Management|Console|Uplink`, ou `<n>x <tipo> <A> <> <B> - <m>m [Route A|B]`. O
+     parser soma por tipo e comprimento.
+
+  Tipos: fibra `<n>F <conector>-<conector>` (LC-LC, MPO-LC, MPO-MPO; `MPO-4LC` e `4LC-MPO` são o
+  mesmo cabo e a normalização junta os dois) e cobre `Cat6 <cor>`. Endereços com erro de digitação
+  (ex.: ponto duplicado) não afetam a contagem e não são validados.
 - O servidor extrai: FBN, SOW UID, site, nome do projeto, início e conclusão da execução, prazo de
   envio (UTC, exibido também em Brasília), visita técnica, contatos, racks *live* (exige janela),
   plataforma elevatória (pedida / não precisa / não mencionada) e as linhas de cabo
@@ -313,13 +333,26 @@ Cabos fornecidos pelo cliente entram **só como instalação** (nunca em materia
 
 | Indicador | Cotação | Precisa "Yes" + justificativa quando |
 |---|---|---|
-| Eficiência | Σ horas_meta / horas_de_campo | abaixo da eficiência mínima |
+| Eficiência | horas-meta do modelo / horas de mão de obra da Bid | abaixo da eficiência mínima |
 | Custo por porta | RECEITA / portas | mais de 10% acima da meta |
 | Mão de obra por porta | MO_cobrada / portas | sempre (meta do cliente inconsistente; configurável) |
 | Horas por porta | horas_de_campo / portas | acima da meta + tolerância |
 | Horas por metro | horas_de_campo / metros_considerados | acima da meta + tolerância |
 
 Cada "Yes" pede um texto de justificativa (em inglês) guardado na revisão.
+
+**O que o Bid Template do RFQ mostrou (versão 3.26, 2026-11-08).** As metas e os pesos já vêm dentro
+do modelo, por cluster, e o modelo calcula os indicadores da aba *Bid KPIs* a partir das linhas
+preenchidas. Diferenças em relação à planilha da LGC:
+
+- Horas-meta = peso_m × metros × meta_h_metro + peso_p × portas × meta_h_porta **+ peso_d ×
+  dispositivos × meta_h_dispositivo** (o termo de dispositivos é novo). Portas = Σ qtd × fibras / 2,
+  só das linhas de fibra; metros somam fibra e cobre em metro.
+- As "horas" dos indicadores são **todas** as horas de mão de obra da Bid (inclui gerente), não só as
+  de campo.
+- Por isso o perfil de cliente deixa de guardar metas e pesos copiados à mão: o Financeiro **lê do
+  Bid Template anexado** as metas do cluster do projeto e mostra a prévia com os mesmos números que a
+  AWS verá. O perfil guarda só o que o modelo não traz (eficiência mínima aceita pela LGC, textos).
 
 ### 7.4 Valores para o Bid Template
 
@@ -328,15 +361,41 @@ função, deslocamento por carro/dia e nº de diárias, plataforma (diária/dias
 do bid, comprimento médio, quantidade e horas T. Textos de apoio em inglês (ex.: descrição do
 deslocamento).
 
-**Bid preenchida (P-14).** O sistema preenche o **próprio Bid Template do cliente** (`.xlsx`):
+**Bid preenchida (P-14).** O sistema preenche o **Bid Template do próprio RFQ**:
 
-- O modelo vazio é enviado pela tela de Parâmetros e fica no banco, versionado junto do perfil de
-  cliente; nunca no repositório (é arquivo do cliente).
-- O perfil de cliente guarda o mapeamento valor → aba e célula (e a linha inicial das tabelas de
-  cabo). Mudou o modelo da AWS, publica-se novo perfil; revisões antigas continuam com o que usaram.
-- A Bid é gerada no servidor ao **aprovar o envio** e guardada na revisão (imutável depois disso);
-  a tela também permite baixar uma prévia do rascunho.
-- Fórmulas e formatação do modelo são preservadas; o sistema só escreve valores nas células mapeadas.
+- **O modelo é por RFQ, não um só.** A AWS manda, junto com a SOW, um `.xlsm` já com os dados do
+  projeto (FBN, SOW UID, cluster, datas, contato AWS) e a tabela de preços do cluster e da moeda. Ele
+  fica anexado ao projeto no Core (`bid_template`) e vem indicado no `project.quote_requested`. O
+  Financeiro baixa essa versão; nada do modelo fica no repositório.
+- **Como escrever (prova feita em 2026-11-08):** editar o XML das abas dentro do ZIP, só nas células
+  de entrada (valor constante; nunca célula com fórmula), mantendo o estilo da célula, e marcar
+  `fullCalcOnLoad` no `workbook.xml`. Assim o projeto VBA (`vbaProject.bin`), as tabelas, os nomes, as
+  validações e os comentários ficam intactos. Bibliotecas que reescrevem a pasta inteira (ex.:
+  ExcelJS) descartam as macros e não servem. Aberto no Excel, o modelo recalculou: valor hora × horas
+  chegou ao total e o contador de erros de validação caiu.
+- **Onde escrever, sem endereço fixo** (a versão do modelo muda e as linhas andam):
+  - Cabeçalho do fornecedor (aba *Summary*): pelos **intervalos nomeados** do modelo — nome do
+    fornecedor, contato e e-mail da proposta, nome da proposta (código do projeto + revisão), início
+    e conclusão propostos, data de envio, moeda, justificativa de fabricante, lead time e markups
+    (zero para mão de obra pura).
+  - Linhas (aba *Item Selection*): localizadas pelo **código da coluna C** (part number da AWS ou
+    código da linha). Colunas de entrada: B finalidade, G comprimento, J valor unitário (valor hora,
+    na mão de obra), M quantidade (horas, na mão de obra), N quantidade do estoque do fornecedor, T
+    horas de campo da linha, U comentário.
+  - Mão de obra: uma linha por função mapeada (técnico, supervisor, gerente…, cada uma com taxa
+    normal, extra e feriado), com valor hora em J e horas em M.
+  - Cabos: **uma linha por tipo, com o comprimento médio** (como a planilha da LGC), quantidade e
+    horas T. O modelo pede "duplicar linha" (macro) para vários comprimentos; o sistema não insere
+    linhas, e quando dois tipos da SOW caem no mesmo código a revisão avisa para agrupar.
+  - Condições gerais: veículos, transporte, hospedagem, diárias e locação de equipamento
+    (plataforma), pelos códigos de cada linha.
+- **Regra de conferência do próprio modelo:** a soma das horas T das linhas tem de ser igual às horas
+  das funções de campo (instalador, emendador, técnico, oficial, supervisor). É a mesma regra da §7.2;
+  a revisão não submete se divergir.
+- O perfil de cliente guarda o mapeamento **tipo de cabo da SOW → código da linha** e **função da
+  equipe → código de mão de obra**, mais os valores fixos do cabeçalho (nome do fornecedor, contato).
+- A Bid é gerada no servidor ao **aprovar o envio** e guardada na revisão (imutável depois disso); a
+  tela também permite baixar uma prévia do rascunho.
 
 ## 8. Realizado
 
@@ -459,8 +518,8 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
 Contrato completo em [integracao-core-financeiro.md §4](../../docs/integracao-core-financeiro.md#4-cotação-do-projeto).
 
 1. `project.quote_requested` (P-11: alguém clica "Solicitar cotação" no Core) cria o orçamento
-   `aws_sow` do projeto, se não houver, e o coloca na fila do orçamentista com o recado (`notes`) e a
-   SOW indicada. Se já houver orçamento e a SOW mudou, a próxima revisão nasce com aviso "SOW nova (vN)".
+   `aws_sow` do projeto, se não houver, e o coloca na fila do orçamentista com o recado (`notes`), a
+   SOW e o Bid Template indicados. Se já houver orçamento e a SOW mudou, a próxima revisão nasce com aviso "SOW nova (vN)".
 2. Ao **aprovar o envio** (P-12), o Financeiro gera a Bid (§7.4) e grava na outbox
    `POST /integration/projects/:axisProjectId/quotes` com `external_revision_id`, `revision_number`,
    `sow_document_id`, `work_days`, datas da execução, `team` (por função: pessoas, dias, horas; P-15),
@@ -554,6 +613,6 @@ de custo; outros modelos de cliente além do AWS.
 | P-10 | Valores a revisar na carga inicial: salário igual para técnico e encarregado, ISS no teto, rateio/contingência/prazo em 0, R$/km estimado, gerente sem valor | Revisar com a contabilidade antes de publicar o primeiro conjunto |
 | P-11 | O projeto vai ao Financeiro sozinho ou alguém pede a cotação? | **Resolvida (2026-11-08)**: alguém clica "Solicitar cotação" no Core (`project.quote_requested`) |
 | P-12 | Quando o Financeiro devolve a cotação ao Core? | **Resolvida (2026-11-08)**: ao aprovar o envio; cada nova revisão aprovada chega como nova versão |
-| P-13 | Formato da SOW anexada no Core | **Resolvida (2026-11-08)**: PDF; o Financeiro extrai o texto. Validar o extrator com SOWs reais fora do Git |
-| P-14 | O que é a "planilha Bid preenchida"? | **Resolvida (2026-11-08)**: o próprio Bid Template do cliente preenchido. Falta uma cópia vazia do modelo (fora do Git) para mapear as células |
+| P-13 | Formato da SOW anexada no Core | **Resolvida (2026-11-08)**: PDF com texto; extração conferida com duas SOWs reais (dois formatos de cabos, §7.1) |
+| P-14 | O que é a "planilha Bid preenchida"? | **Resolvida (2026-11-08)**: o Bid Template do próprio RFQ (um por projeto, anexado no Core como `bid_template`), preenchido por edição direta das células de entrada, preservando macros (§7.4) |
 | P-15 | "Colaboradores orçados" é quantidade ou pessoas nomeadas? | **Resolvida (2026-11-08)**: quantidade por função × dias (horas para o gerente) |
