@@ -66,7 +66,8 @@ export const ROLES: Array<{ code: string; name: string; description: string; per
 
 /** Mapeamento inicial das roles do Axis (seed do core) → perfis de Logística; editável depois no banco. */
 export const DEFAULT_AXIS_ROLE_MAP: Record<string, string[]> = {
-  admin: ['ADMIN_TECNICO', 'ADMIN_CATALOGO'],
+  // AUDITOR dá ao admin do Axis leitura de toda a operação (inclusive todas as ordens de atendimento), sem alterar nada.
+  admin: ['ADMIN_TECNICO', 'ADMIN_CATALOGO', 'AUDITOR'],
   gestor: ['GESTOR_ALMOXARIFADO'],
   tecnico: ['ALMOXARIFE'],
   colaborador: ['SOLICITANTE'],
