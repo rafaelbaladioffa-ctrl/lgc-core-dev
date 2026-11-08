@@ -24,6 +24,8 @@ export interface LogisticsMaterial {
 }
 
 const TIMEOUT_MS = 15_000;
+export const MIN_SEARCH_LENGTH = 2;
+export const MAX_SEARCH_LIMIT = 50;
 
 @Injectable()
 export class LogisticsClient {
@@ -46,6 +48,19 @@ export class LogisticsClient {
   }
 
   /**
+   * Busca por texto no catálogo ativo da Logística (`GET /integration/materials?search=&limit=`, PT-04): casa
+   * "contém", sem diferenciar maiúsculas, em código ou descrição; o código igual ao termo vem primeiro. Termo com
+   * menos de 2 caracteres não chama a Logística. Mesmo formato de resposta e mesmo filtro de `materialsByCodes`.
+   */
+  async searchMaterials(term: string, limit = 20, fetchFn: typeof fetch = fetch): Promise<LogisticsMaterial[]> {
+    const text = term.trim();
+    if (text.length < MIN_SEARCH_LENGTH) return [];
+    const size = Math.min(Math.max(Math.trunc(limit) || 20, 1), MAX_SEARCH_LIMIT);
+    const body = await this.get<{ items?: unknown }>(`/integration/materials?search=${encodeURIComponent(text)}&limit=${size}`, fetchFn);
+    return toMaterials(body);
+  }
+
+  /**
    * Materiais pelos códigos (`GET /integration/materials?codes=A,B`, PT-04: até 200 códigos; resposta
    * `{ items, notFound }`). Só volta material ativo, com id, código, descrição e unidade: o custo médio que a
    * Logística também devolve fica de fora de propósito. A rota não busca por texto; o orçamentista informa o código.
@@ -53,11 +68,7 @@ export class LogisticsClient {
   async materialsByCodes(codes: string[], fetchFn: typeof fetch = fetch): Promise<LogisticsMaterial[]> {
     if (codes.length === 0) return [];
     const body = await this.get<{ items?: unknown }>(`/integration/materials?codes=${encodeURIComponent(codes.join(','))}`, fetchFn);
-    if (!Array.isArray(body.items)) throw new BadGatewayException('Resposta inesperada da Logística.');
-    return (body.items as Array<Record<string, unknown>>)
-      .filter((row) => row.active !== false)
-      .map(toLogisticsMaterial)
-      .filter((m): m is LogisticsMaterial => m !== null);
+    return toMaterials(body);
   }
 
   consumption(month: string, fetchFn: typeof fetch = fetch) {
@@ -76,4 +87,13 @@ export function toLogisticsMaterial(row: Record<string, unknown>): LogisticsMate
   const code = text(row.code);
   if (!id || !code) return null;
   return { id, code, description: text(row.shortDescription) ?? text(row.description) ?? code, unit: text(row.unit) };
+}
+
+/** `{ items }` da Logística → materiais ativos, só com id, código, descrição e unidade (nunca o custo). */
+function toMaterials(body: { items?: unknown }): LogisticsMaterial[] {
+  if (!Array.isArray(body.items)) throw new BadGatewayException('Resposta inesperada da Logística.');
+  return (body.items as Array<Record<string, unknown>>)
+    .filter((row) => row.active !== false)
+    .map(toLogisticsMaterial)
+    .filter((m): m is LogisticsMaterial => m !== null);
 }

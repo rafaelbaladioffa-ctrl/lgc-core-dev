@@ -555,10 +555,13 @@ Contrato completo em [integracao-core-financeiro.md §4](../../docs/integracao-c
 
 **Materiais da devolução (PT-05 do plano ponta a ponta, PA-08).** Cada material da revisão tem
 `logisticsMaterialCode` (e `logisticsMaterialId`, preenchido na escolha), guardados nas `inputs` da revisão
-(JSON, sem migração). O orçamentista informa o código e a tela confere no catálogo da Logística
-(`GET /logistics-materials?code=`, que o servidor repassa a `GET /integration/materials?codes=` da Logística
-com `LOGISTICA_API_KEY`; só material ativo é aceito). A rota do PT-04 busca só por código exato, sem texto:
-busca por nome exigiria um parâmetro `search` nela (decisão da coordenação dos PTs). Regras:
+(JSON, sem migração). O orçamentista escolhe o item numa **busca por nome ou código** no catálogo da Logística
+(`GET /logistics-materials?search=`, que o servidor repassa a `GET /integration/materials?search=&limit=` da
+Logística com `LOGISTICA_API_KEY`: mínimo 2 caracteres, "contém" sem diferenciar maiúsculas em código ou
+descrição, só material ativo, o código igual ao termo vem primeiro; a tela espera ~300 ms depois da digitação).
+O caminho por código exato continua (`GET /logistics-materials?code=`, que usa `?codes=`; Enter no campo).
+Só vão à tela id, código, descrição e unidade: o custo médio da Logística não é exposto. Se a Logística
+estiver fora do ar, a tela mostra o erro ao lado do campo e a edição do orçamento segue normalmente. Regras:
 - **Aprovar o envio recusa** a revisão se algum material com quantidade > 0 não tem código (a mensagem
   lista os itens). Vale para `aws_sow` e `generico`. Material avulso do catálogo próprio também precisa do
   código da Logística.

@@ -33,6 +33,49 @@ describe('LogisticsClient — materiais', () => {
     expect(fetchFn).not.toHaveBeenCalled();
   });
 
+  it('busca por texto: termo curto não chama a Logística; termo válido usa search e limit, lê items e esconde o custo', async () => {
+    const client = new LogisticsClient(config(env));
+    const nunca = ok({ items: [], notFound: [] });
+    expect(await client.searchMaterials(' a ', 20, nunca)).toEqual([]);
+    expect(nunca).not.toHaveBeenCalled();
+
+    const fetchFn = ok({
+      items: [
+        { id: 'u1', code: 'RED-CAB-0123', shortDescription: 'Cabo óptico 12F', unit: 'm', averageCost: '9.9000', lastCost: '9.5000', available: '10', active: true },
+        { id: 'u2', code: 'RED-CON-0007', shortDescription: 'Conector LC', unit: 'un', averageCost: '4.0000', lastCost: '4.0000', available: '3', active: true },
+      ],
+      notFound: [],
+    });
+    const out = await client.searchMaterials('cabo óptico', 20, fetchFn);
+    expect(out).toEqual([
+      { id: 'u1', code: 'RED-CAB-0123', description: 'Cabo óptico 12F', unit: 'm' },
+      { id: 'u2', code: 'RED-CON-0007', description: 'Conector LC', unit: 'un' },
+    ]);
+    expect(JSON.stringify(out)).not.toMatch(/averageCost|lastCost|9\.9/);
+    const [url, init] = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe('http://log.test/api/v1/integration/materials?search=cabo%20%C3%B3ptico&limit=20');
+    expect(init.headers).toMatchObject({ 'X-Api-Key': 'k' });
+  });
+
+  it('busca por texto: limite fica entre 1 e 50; resposta vazia é lista vazia', async () => {
+    const client = new LogisticsClient(config(env));
+    const fetchFn = ok({ items: [], notFound: [] });
+    expect(await client.searchMaterials('cabo', 500, fetchFn)).toEqual([]);
+    await client.searchMaterials('cabo', 0, fetchFn);
+    const urls = (fetchFn as unknown as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c as unknown as [string])[0]);
+    expect(urls[0]).toMatch(/limit=50$/);
+    expect(urls[1]).toMatch(/limit=20$/);
+  });
+
+  it('busca por texto: Logística fora do ar (503) e sem configuração viram erro em português', async () => {
+    const down = (async () => new Response('', { status: 503 })) as unknown as typeof fetch;
+    await expect(new LogisticsClient(config(env)).searchMaterials('cabo', 20, down)).rejects.toThrow('A Logística recusou a consulta (HTTP 503)');
+    await expect(new LogisticsClient(config(env)).searchMaterials('cabo', 20, down)).rejects.toBeInstanceOf(BadGatewayException);
+    const unreachable = (async () => { throw new Error('rede'); }) as unknown as typeof fetch;
+    await expect(new LogisticsClient(config(env)).searchMaterials('cabo', 20, unreachable)).rejects.toThrow('não respondeu');
+    await expect(new LogisticsClient(config({})).searchMaterials('cabo')).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
   it('resposta que não é { items } vira erro de gateway', async () => {
     await expect(new LogisticsClient(config(env)).materialsByCodes(['A-1'], ok([{ id: 'u', code: 'A-1' }]))).rejects.toBeInstanceOf(BadGatewayException);
   });
