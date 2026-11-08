@@ -16,6 +16,7 @@ import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
 import { BudgetParamsModule } from './budget-params/budget-params.module.js';
 import { BudgetsModule } from './budgets/budgets.module.js';
+import { CostCentersModule } from './cost-centers/cost-centers.module.js';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { BudgetsModule } from './budgets/budgets.module.js';
     IntegrationModule,
     BudgetParamsModule,
     BudgetsModule,
+    CostCentersModule,
   ],
   controllers: [HealthController],
   providers: [

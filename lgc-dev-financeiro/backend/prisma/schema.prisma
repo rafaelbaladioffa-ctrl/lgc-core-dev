@@ -497,3 +497,236 @@ model RevisionBidOutput {
 
   @@map("revision_bid_output")
 }
+
+// ---------------------------------------------------------------------------
+// Centros de custo — controladoria (docs/centros-de-custo-especificacao.md).
+// O CC vem do cache de mestres do Core (axis_master_cache, kind COST_CENTER); aqui ficam os fatos financeiros.
+// ---------------------------------------------------------------------------
+
+enum CcEntryKind {
+  receita
+  custo
+}
+
+enum CcEntryStage {
+  comprometido
+  realizado
+}
+
+enum CcEntrySource {
+  compra
+  reembolso
+  adiantamento
+  logistica
+  folha
+  manual
+}
+
+enum CcCategory {
+  faturamento
+  folha
+  material
+  compras
+  servicos
+  despesas_campo
+  frota
+  outros
+}
+
+/// Lançamento de um CC. Append-only: correção por estorno (valor negativo com `reverses_id`).
+model CcEntry {
+  id               String        @id @default(uuid())
+  costCenterAxisId String        @map("cost_center_axis_id")
+  projectAxisId    String?       @map("project_axis_id")
+  competence       DateTime      @db.Date
+  kind             CcEntryKind
+  category         CcCategory
+  stage            CcEntryStage
+  source           CcEntrySource
+  amount           Decimal       @db.Decimal(14, 2)
+  description      String
+  /// Referência da origem (ex.: purchase:<request>:<grupo>, folha:2026-03:<cc>), para idempotência e substituição.
+  sourceRef        String?       @map("source_ref")
+  reversesId       String?       @unique @map("reverses_id")
+  reason           String?
+  createdBy        String        @map("created_by")
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  reverses   CcEntry? @relation("CcEntryReversal", fields: [reversesId], references: [id])
+  reversedBy CcEntry? @relation("CcEntryReversal")
+
+  @@index([costCenterAxisId, competence])
+  @@index([projectAxisId, competence])
+  @@index([sourceRef])
+  @@map("cc_entries")
+}
+
+enum CcPurchaseStatus {
+  aprovada
+  pedido
+  recebida_parcial
+  recebida
+  cancelada
+}
+
+/// Compra do Core acompanhada pelo funil (aprovada → pedido → recebida), um registro por requisição.
+model CcPurchase {
+  id               String           @id @default(uuid())
+  requestAxisId    String           @unique @map("request_axis_id")
+  code             String
+  costCenterAxisId String           @map("cost_center_axis_id")
+  projectAxisId    String?          @map("project_axis_id")
+  total            Decimal          @db.Decimal(14, 2)
+  status           CcPurchaseStatus
+  /// Grupos de entrega: [{ group_id, supplier, total, stock, received }].
+  groups           Json             @default("[]")
+  approvedAt       DateTime?        @map("approved_at")
+  orderedAt        DateTime?        @map("ordered_at")
+  receivedAt       DateTime?        @map("received_at")
+  cancelledAt      DateTime?        @map("cancelled_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@index([costCenterAxisId, status])
+  @@map("cc_purchases")
+}
+
+enum CcAdvanceStatus {
+  aberto
+  prestado
+}
+
+/// Adiantamento aprovado no Core; fica em aberto até a prestação de contas.
+model CcAdvance {
+  id                 String          @id @default(uuid())
+  requestAxisId      String          @unique @map("request_axis_id")
+  requestCode        String          @map("request_code")
+  collaboratorAxisId String          @map("collaborator_axis_id")
+  costCenterAxisId   String          @map("cost_center_axis_id")
+  projectAxisId      String?         @map("project_axis_id")
+  amount             Decimal         @db.Decimal(14, 2)
+  approvedAt         DateTime        @map("approved_at")
+  status             CcAdvanceStatus @default(aberto)
+  spentAmount        Decimal?        @map("spent_amount") @db.Decimal(14, 2)
+  notes              String?
+  settledAt          DateTime?       @map("settled_at")
+  settledBy          String?         @map("settled_by")
+
+  @@index([costCenterAxisId, status])
+  @@index([collaboratorAxisId, status])
+  @@map("cc_advances")
+}
+
+/// Orçamento anual do CC por mês e categoria de custo.
+model CcBudget {
+  id               String     @id @default(uuid())
+  costCenterAxisId String     @map("cost_center_axis_id")
+  year             Int
+  month            Int
+  category         CcCategory
+  amount           Decimal    @db.Decimal(14, 2)
+  updatedBy        String     @map("updated_by")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  @@unique([costCenterAxisId, year, month, category])
+  @@map("cc_budgets")
+}
+
+/// Configuração do CC no Financeiro e última situação do orçamento avisada ao Core.
+model CcSetting {
+  costCenterAxisId  String   @id @map("cost_center_axis_id")
+  fieldDailyLimit   Decimal? @map("field_daily_limit") @db.Decimal(14, 2)
+  lastBudgetStatus  String?  @map("last_budget_status")
+  lastBudgetYear    Int?     @map("last_budget_year")
+  lastBudgetPercent Decimal? @map("last_budget_percent") @db.Decimal(9, 2)
+  updatedBy         String?  @map("updated_by")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  @@map("cc_settings")
+}
+
+/// Vigência da alocação do colaborador no CC (evento collaborator.cost_center_changed). `valid_to` exclusivo.
+model CcAllocation {
+  id                 String    @id @default(uuid())
+  collaboratorAxisId String    @map("collaborator_axis_id")
+  costCenterAxisId   String    @map("cost_center_axis_id")
+  validFrom          DateTime  @map("valid_from") @db.Date
+  validTo            DateTime? @map("valid_to") @db.Date
+  sourceEventId      String?   @map("source_event_id")
+
+  @@index([collaboratorAxisId, validFrom])
+  @@index([costCenterAxisId, validFrom])
+  @@map("cc_allocations")
+}
+
+/// Cargo do Core → função do orçamento (parameter_set_roles.role_key), para o custo da folha por CC.
+model JobTitleRoleMap {
+  axisJobTitleId String   @id @map("axis_job_title_id")
+  jobTitleName   String   @map("job_title_name")
+  roleKey        String   @map("role_key")
+  updatedBy      String   @map("updated_by")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("job_title_role_maps")
+}
+
+enum CcOverheadDriver {
+  headcount
+  receita
+  custo_direto
+  percentual
+}
+
+/// Regra de rateio do custo de um CC (origem) para outros (destinos), calculada na consulta.
+model CcOverheadRule {
+  sourceCostCenterAxisId String           @id @map("source_cost_center_axis_id")
+  driver                 CcOverheadDriver
+  active                 Boolean          @default(true)
+  notes                  String?
+  updatedBy              String           @map("updated_by")
+  updatedAt              DateTime         @updatedAt @map("updated_at")
+
+  targets CcOverheadTarget[]
+
+  @@map("cc_overhead_rules")
+}
+
+model CcOverheadTarget {
+  ruleSourceId     String   @map("rule_source_id")
+  costCenterAxisId String   @map("cost_center_axis_id")
+  /// Fração (0.25 = 25%), só no direcionador `percentual`.
+  percent          Decimal? @db.Decimal(9, 6)
+
+  rule CcOverheadRule @relation(fields: [ruleSourceId], references: [sourceCostCenterAxisId], onDelete: Cascade)
+
+  @@id([ruleSourceId, costCenterAxisId])
+  @@map("cc_overhead_targets")
+}
+
+enum CcTeamActivity {
+  projeto
+  deslocamento
+  treinamento
+  manutencao
+  ocioso
+}
+
+/// Diário da equipe técnica: o que a equipe fez no dia, horas, km e produção.
+model CcTeamLog {
+  id               String         @id @default(uuid())
+  costCenterAxisId String         @map("cost_center_axis_id")
+  date             DateTime       @db.Date
+  activity         CcTeamActivity
+  projectAxisId    String?        @map("project_axis_id")
+  people           Int
+  hoursPerPerson   Decimal        @map("hours_per_person") @db.Decimal(5, 2)
+  km               Decimal?       @db.Decimal(10, 1)
+  producedQuantity Decimal?       @map("produced_quantity") @db.Decimal(14, 3)
+  producedUnit     String?        @map("produced_unit")
+  notes            String?
+  createdBy        String         @map("created_by")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  @@index([costCenterAxisId, date])
+  @@index([projectAxisId, date])
+  @@map("cc_team_logs")
+}

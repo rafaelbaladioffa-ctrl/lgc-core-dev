@@ -4,6 +4,7 @@ Satélite do Axis Core, mantido como subpasta deste repositório, como a Logíst
 
 - **Stack:** NestJS 12 + Prisma 5 + PostgreSQL 16 com banco **próprio** (`axis_financeiro`); frontend React 19 + Vite 8.
 - **Primeiro módulo — Projetos** (orçamento, lucro previsto e realizado): [docs/projetos-especificacao.md](docs/projetos-especificacao.md).
+- **Centros de custo** (resultado, orçamento, compras, rateio e equipes técnicas): [docs/centros-de-custo-especificacao.md](docs/centros-de-custo-especificacao.md).
 - **Contas a pagar** (frente seguinte) e base do satélite: [docs/especificacao.md](docs/especificacao.md).
 - **Contratos com o Core:** [../docs/integracao-core-financeiro.md](../docs/integracao-core-financeiro.md).
 
@@ -75,6 +76,12 @@ no build e inclua o domínio do Financeiro em `CORS_ALLOWED_ORIGINS` do Core.
 Perfis do módulo Projetos: `ORCAMENTISTA`, `GESTOR_COMERCIAL`, `GESTOR_PROJETO`, `CONTROLADORIA`
 ([especificação §9](docs/projetos-especificacao.md#9-permissões-e-perfis)). Rode `npx prisma db seed`
 depois de aplicar a migração `pj1_parametros` para criá-los.
+
+Centros de custo: rotas em [centros-de-custo-especificacao.md §8](docs/centros-de-custo-especificacao.md#8-api-prefixo-apiv1);
+permissões `cost_center:read`, `cost_center:read_own`, `cost_center:write` e `team_log:write`, perfil novo
+`RESPONSAVEL_CC` (mapeado do papel `gestor` do Core) e `CONTROLADORIA` ampliado. Depois da migração
+`centros_de_custo`, rode `npx prisma db seed` de novo. A importação do consumo e a custódia usam
+`LOGISTICA_API_URL` e `LOGISTICA_API_KEY` (a mesma chave de `INTEGRATION_API_KEY` na Logística).
 
 ## Integração com o Core
 

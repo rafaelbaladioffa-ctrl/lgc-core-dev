@@ -1,0 +1,296 @@
+/* Centros de custo, equipes técnicas e controladoria (tokens de axis-tokens.css). */
+
+.period-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.period-picker label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+}
+
+.period-picker input,
+.inline-form input[type='month'] {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+}
+
+.period-picker input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+.period-picker .field-error {
+  flex-basis: 100%;
+}
+
+/* Alternância próprio/consolidado e similares. */
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.segmented button {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 0;
+  background: var(--surface);
+  color: var(--foreground);
+  font: inherit;
+  cursor: pointer;
+}
+
+.segmented button + button {
+  border-left: 1px solid var(--border);
+}
+
+.segmented button[aria-pressed='true'] {
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-weight: 600;
+}
+
+.segmented button:focus-visible,
+.tree-toggle:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.cc-alerts ul,
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+
+.alert .plain-list {
+  gap: var(--space-1);
+}
+
+/* Árvore de centros de custo. */
+.tree-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-1);
+}
+
+.tree-cell[data-depth='1'] { padding-left: var(--space-5); }
+.tree-cell[data-depth='2'] { padding-left: calc(var(--space-5) * 2); }
+.tree-cell[data-depth='3'] { padding-left: calc(var(--space-5) * 3); }
+.tree-cell[data-depth='4'] { padding-left: calc(var(--space-5) * 4); }
+.tree-cell[data-depth='5'] { padding-left: calc(var(--space-5) * 5); }
+.tree-cell[data-depth='6'] { padding-left: calc(var(--space-5) * 6); }
+
+.tree-toggle,
+.tree-toggle-spacer {
+  flex: none;
+  width: var(--space-5);
+  height: var(--space-5);
+}
+
+.tree-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--foreground-muted);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+}
+
+/* Consumo do orçamento. */
+.budget-consumption {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 160px;
+}
+
+.budget-bar {
+  height: var(--space-2);
+  background: var(--axis-graphite-100);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
+}
+
+.budget-bar-fill {
+  height: 100%;
+  background: var(--success);
+}
+
+.budget-bar-alerta {
+  background: var(--warning);
+}
+
+.budget-bar-estourado {
+  background: var(--danger);
+}
+
+.budget-consumption-text {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+}
+
+.negative {
+  color: var(--danger);
+}
+
+/* Detalhe do centro. */
+.cc-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 0 var(--space-4);
+}
+
+.cc-columns > .card {
+  min-width: 0;
+}
+
+.cc-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.cc-section-head h2 {
+  margin: 0;
+}
+
+.cc-subsection {
+  margin-top: var(--space-4);
+}
+
+.cc-subsection h3 {
+  font-size: var(--text-sm);
+  margin: 0 0 var(--space-2);
+}
+
+.cc-form {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-secondary);
+  padding: var(--space-4) var(--space-4) 0;
+  margin-bottom: var(--space-4);
+}
+
+.cc-form .form-actions,
+.inline-form .form-actions {
+  margin-bottom: var(--space-4);
+}
+
+.inline-form {
+  max-width: 640px;
+}
+
+.dre .dre-strong td {
+  font-weight: 700;
+  border-top: 2px solid var(--border);
+}
+
+.dre .dre-sub td {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+}
+
+.table .total-row td,
+.table .total-row th,
+.table .total-cell {
+  font-weight: 700;
+  background: var(--surface-secondary);
+}
+
+.table .entry-reversed td {
+  color: var(--foreground-muted);
+}
+
+.table-select {
+  width: 100%;
+  min-width: 180px;
+  height: var(--control-height);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font: inherit;
+}
+
+/* Grade do orçamento (categoria × 12 meses). */
+.budget-grid th[scope='row'] {
+  white-space: nowrap;
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: var(--text-sm);
+}
+
+.budget-grid input:not([type='checkbox']) {
+  min-width: 90px;
+  text-align: right;
+}
+
+/* Indicadores da equipe. */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: var(--space-3) var(--space-4);
+}
+
+.kpi-label,
+.kpi-hint {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+}
+
+.kpi-value {
+  font-size: var(--text-lg);
+}
+
+.kpi-warning {
+  border-color: var(--warning);
+}
+
+.kpi-danger {
+  border-color: var(--danger);
+}
+
+@media (max-width: 720px) {
+  .tree-cell[data-depth] {
+    padding-left: 0;
+  }
+
+  .cc-columns {
+    grid-template-columns: 1fr;
+  }
+}

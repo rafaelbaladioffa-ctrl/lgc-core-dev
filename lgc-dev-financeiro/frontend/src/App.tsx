@@ -8,6 +8,10 @@ import { DestinationFormPage, DestinationsPage, MaterialFormPage, MaterialsPage 
 import { ProjectPage, ProjectsPage } from './pages/ProjectsPages';
 import { RevisionPage } from './pages/RevisionPage';
 import { QuoteRequestsPage } from './pages/QuoteRequestsPage';
+import { CostCenterBudgetPage, CostCenterPage, CostCentersPage } from './pages/CostCentersPages';
+import { TeamPage, TeamsPage } from './pages/TeamsPages';
+import { ControllershipPage } from './pages/ControllershipPage';
+import { periodFromPath } from './lib/costCenters';
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
@@ -78,18 +82,23 @@ const NEXT_STEPS = [
   { title: 'Realizado', detail: 'Apontamento da obra e custos lançados; cotado × realizado.' },
 ];
 
-const NAV = [
+/** Item de menu visível com qualquer uma das permissões. */
+const NAV: Array<{ path: string; label: string; permission: string | string[] }> = [
   { path: '/projetos', label: 'Projetos', permission: 'budget:read' },
   { path: '/cotacoes', label: 'Pedidos de cotação', permission: 'budget:read' },
   { path: '/parametros', label: 'Parâmetros', permission: 'budget_params:read' },
   { path: '/materiais', label: 'Materiais', permission: 'budget_params:read' },
   { path: '/destinos', label: 'Destinos', permission: 'budget_params:read' },
+  { path: '/centros-de-custo', label: 'Centros de custo', permission: ['cost_center:read', 'cost_center:read_own'] },
+  { path: '/equipes', label: 'Equipes', permission: ['cost_center:read', 'cost_center:read_own'] },
+  { path: '/controladoria', label: 'Controladoria', permission: 'cost_center:write' },
 ];
 
 function Home({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
   const path = useHashPath();
+  const route = path.split('?')[0];
 
   const load = useCallback(() => {
     setError(null);
@@ -109,8 +118,8 @@ function Home({ session, onLogout }: { session: Session; onLogout: () => void })
           Axis Financeiro
         </a>
         <nav className="topnav" aria-label="Principal">
-          {NAV.filter((n) => can(n.permission)).map((n) => (
-            <a key={n.path} href={`#${n.path}`} aria-current={path === n.path || path.startsWith(`${n.path}/`) ? 'page' : undefined}>
+          {NAV.filter((n) => (Array.isArray(n.permission) ? n.permission.some(can) : can(n.permission))).map((n) => (
+            <a key={n.path} href={`#${n.path}`} aria-current={route === n.path || route.startsWith(`${n.path}/`) ? 'page' : undefined}>
               {n.label}
             </a>
           ))}
@@ -169,6 +178,21 @@ function Routes({ path, me, can }: { path: string; me: Me; can: (p: string) => b
   if (matchRoute('/destinos', path)) return read ? <DestinationsPage canWrite={write} /> : <NoAccess />;
   if (matchRoute('/destinos/novo', path)) return write ? <DestinationFormPage id={null} /> : <NoAccess />;
   if ((m = matchRoute('/destinos/:id', path))) return write ? <DestinationFormPage key={m.id} id={m.id} /> : <NoAccess />;
+
+  // Centros de custo: leitura com read ou read_own (o servidor filtra o que cada um vê); escrita com write.
+  const ccRead = can('cost_center:read') || can('cost_center:read_own');
+  const ccWrite = can('cost_center:write');
+  const period = periodFromPath(path);
+  if (matchRoute('/centros-de-custo', path)) return ccRead ? <CostCentersPage period={period} /> : <NoAccess />;
+  if ((m = matchRoute('/centros-de-custo/:id', path))) return ccRead ? <CostCenterPage key={m.id} id={m.id} period={period} canWrite={ccWrite} /> : <NoAccess />;
+  if ((m = matchRoute('/centros-de-custo/:id/orcamento/:ano', path))) {
+    const year = Number(m.ano);
+    if (!ccRead) return <NoAccess />;
+    return /^\d{4}$/.test(m.ano) ? <CostCenterBudgetPage key={`${m.id}-${year}`} id={m.id} year={year} canWrite={ccWrite} /> : <Start me={me} />;
+  }
+  if (matchRoute('/equipes', path)) return ccRead ? <TeamsPage period={period} /> : <NoAccess />;
+  if ((m = matchRoute('/equipes/:id', path))) return ccRead ? <TeamPage key={m.id} id={m.id} period={period} canLog={can('team_log:write')} /> : <NoAccess />;
+  if (matchRoute('/controladoria', path)) return ccWrite ? <ControllershipPage /> : <NoAccess />;
   return <Start me={me} />;
 }
 

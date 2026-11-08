@@ -3,6 +3,10 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { OutboxService } from './outbox.service.js';
+import { handleCcEvent, isCcEvent } from '../cost-centers/cc-events.js';
+import { refreshBudgetStatus } from '../cost-centers/cc-budget-status.js';
+import { todaySaoPaulo } from '../cost-centers/cc-engine.js';
 
 export interface Envelope {
   event_id: string;
@@ -115,6 +119,7 @@ export class AxisWebhookService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly outbox: OutboxService = new OutboxService(),
   ) {}
 
   verifySignature(rawBody: Buffer | undefined, header: string | undefined) {
@@ -185,6 +190,7 @@ export class AxisWebhookService {
     // Documento novo: o Financeiro baixa quando precisa (pelo pedido de cotação); não é estado do projeto.
     if (env.event_type === 'project.document_added') return 'ignored';
     if (env.event_type === 'project.quote_requested') return this.handleQuoteRequested(tx, env);
+    if (isCcEvent(env.event_type)) return this.handleCostCenterEvent(tx, env);
     const master = toMasterRecord(env);
     if (!master) return 'ignored';
     return (await this.upsertMaster(tx, master, new Date(env.occurred_at))) ? 'processed' : 'out_of_order';
@@ -201,6 +207,22 @@ export class AxisWebhookService {
     if (master) await this.upsertMaster(tx, master, new Date(env.occurred_at));
     await tx.quoteRequest.upsert({ where: { axisQuoteRequestId: request.axisQuoteRequestId }, create: request, update: {} });
     return 'processed';
+  }
+
+  /**
+   * Compras, reembolsos, adiantamentos e alocação (centros-de-custo-especificacao §2): viram lançamentos e
+   * vigências; a alocação também atualiza o colaborador no cache. Depois, a faixa do orçamento do CC.
+   */
+  private async handleCostCenterEvent(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed' | 'ignored'> {
+    const outcome = await handleCcEvent(tx, env.event_type, env.event_id, env.occurred_at, env.payload);
+    if (env.event_type === 'collaborator.cost_center_changed') {
+      const master = toMasterRecord(env);
+      if (master) await this.upsertMaster(tx, master, new Date(env.occurred_at));
+      return outcome;
+    }
+    const cc = typeof env.payload['cost_center_id'] === 'string' ? (env.payload['cost_center_id'] as string) : null;
+    if (outcome === 'processed' && cc) await refreshBudgetStatus(tx, this.outbox, cc, Number(todaySaoPaulo().slice(0, 4)));
+    return outcome;
   }
 
   /** Aplica só se o evento for mais novo que o guardado; mescla campos parciais. Devolve false se descartado. */

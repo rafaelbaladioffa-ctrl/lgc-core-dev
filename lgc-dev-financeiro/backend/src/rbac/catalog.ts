@@ -27,6 +27,11 @@ export const PERMISSIONS: Record<string, string> = {
   'budget_params:read_payroll': 'Ver salários, benefícios e custo hora da equipe (leitura registrada)',
   'budget_params:write': 'Criar e publicar parâmetros de orçamento e manter catálogos',
   'project_actual:write': 'Lançar apontamentos e custos realizados de projeto',
+  // Centros de custo (controladoria)
+  'cost_center:read': 'Ver resultado, orçamento, compras e equipes de todos os centros de custo',
+  'cost_center:read_own': 'Ver só os centros de custo de que é responsável no Core (e os abaixo deles)',
+  'cost_center:write': 'Orçamento, lançamentos, rateio, folha, importação da Logística e adiantamentos dos centros de custo',
+  'team_log:write': 'Lançar e excluir o diário das equipes técnicas',
 };
 
 export interface RoleDefinition {
@@ -102,7 +107,13 @@ export const ROLES: RoleDefinition[] = [
     code: 'CONTROLADORIA',
     name: 'Controladoria',
     description: 'Mantém parâmetros de custo, salários e catálogos; vê custo e lucro',
-    permissions: ['budget:read', 'budget:read_cost', 'budget_params:read', 'budget_params:read_payroll', 'budget_params:write', 'project_actual:write'],
+    permissions: ['budget:read', 'budget:read_cost', 'budget_params:read', 'budget_params:read_payroll', 'budget_params:write', 'project_actual:write', 'cost_center:read', 'cost_center:write', 'team_log:write'],
+  },
+  {
+    code: 'RESPONSAVEL_CC',
+    name: 'Responsável de centro de custo',
+    description: 'Acompanha os próprios centros de custo e lança o diário da equipe',
+    permissions: ['cost_center:read_own', 'team_log:write'],
   },
 ];
 
@@ -112,4 +123,6 @@ export const ROLES: RoleDefinition[] = [
  */
 export const DEFAULT_AXIS_ROLE_MAP: Record<string, string[]> = {
   admin: ['ADMIN_TECNICO'],
+  // Gestores veem os centros de custo de que são responsáveis no Core (filtrado no servidor).
+  gestor: ['RESPONSAVEL_CC'],
 };

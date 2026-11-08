@@ -82,18 +82,20 @@ segredo `AXIS_WEBHOOK_SECRET`), janela anti-replay (`WEBHOOK_MAX_AGE_HOURS`), id
 
 | Evento | Uso no Financeiro | Core emite hoje? |
 |---|---|---|
-| `collaborator.created/updated/offboarded` | cache (favorecido de reembolso/adiantamento) | sim |
+| `collaborator.created/updated/offboarded` | cache (favorecido de reembolso/adiantamento; cargo para a folha por CC) | sim |
+| `collaborator.cost_center_changed` | vigência da alocação no CC ([centros de custo §4](centros-de-custo-especificacao.md#4-folha-por-cc)) | sim (desde 2026-11-08) |
 | `client.created/updated` | cache (contas a receber, futuro) | sim |
 | `project.created/status_changed` | cache (rateio por projeto) | sim |
-| `cost_center.created/updated` | cache (rateio por CC) | **não** |
+| `cost_center.created/updated` | cache (rateio por CC; `kind` e `short_code` desde 2026-11-08) | sim |
 | `user.disabled` | bloqueio imediato | **não** |
-| `purchase.order_registered` | cria título previsto (§5.1) | **não** — contrato novo |
-| `purchase.delivery_received` | libera o título para conferência fiscal | **não** — contrato novo |
-| `request.status_changed` (cancelamento de compra) | cancela título previsto sem pagamento | sim, mas sem dados de compra |
-| `finance_request.approved` (reembolso/adiantamento) | cria título para o colaborador (§5.2) | **não** — contrato novo |
+| `purchase.approved` | comprometido do CC por fornecedor ([centros de custo §2](centros-de-custo-especificacao.md#2-origens-dos-lançamentos)) | sim (desde 2026-11-08) |
+| `purchase.order_registered` | funil da compra; na F4, título previsto (§5.1) | sim (desde 2026-11-08) |
+| `purchase.delivery_received` | baixa do comprometido e realizado do CC; na F4, libera o título para conferência | sim (desde 2026-11-08) |
+| `purchase.cancelled` | baixa do comprometido; na F4, cancela título previsto sem pagamento | sim (desde 2026-11-08) |
+| `finance_request.approved` (reembolso/adiantamento) | despesa de campo do CC e adiantamento em aberto; na F5, título para o colaborador (§5.2) | sim (desde 2026-11-08) |
 
-Até o Core emitir os eventos de compra, o título é lançado manualmente com a referência da
-requisição (código `REQ-…`).
+Os títulos a pagar (F4/F5) ainda não existem; até lá, os eventos de compra e de reembolso alimentam só
+o módulo Centros de custo.
 
 ### 2.4 Eventos Financeiro → Core
 
@@ -106,6 +108,7 @@ Outbox `integration_messages` (direção `OUTBOUND`), entregue a `AXIS_EVENTS_UR
 | `payable.approved` | título aprovado | `payable_id`, `axis_request_id?`, `total`, `due_dates[]` |
 | `payable.paid` | última parcela baixada | `payable_id`, `axis_request_id?`, `paid_at`, `total_paid` |
 | `payable.cancelled` | título cancelado | `payable_id`, `axis_request_id?`, `reason` |
+| `cost_center.budget_status` | consumo do orçamento do CC muda de faixa ou o orçamento muda | entregue por `PUT /integration/cost-centers/:id/budget-status` com `AXIS_API_KEY` ([integracao-centros-de-custo.md §4](../../docs/integracao-centros-de-custo.md#4-financeiro--core-situação-do-orçamento-do-cc)) |
 
 O Core ainda não tem receptor (`POST /integration/inbound`); é pré-requisito compartilhado com a
 Logística ([integracao-core-logistica.md §5 item 3](../../docs/integracao-core-logistica.md#5-próximos-passos-ordem-sugerida)).

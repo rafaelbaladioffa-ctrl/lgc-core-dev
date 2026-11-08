@@ -1,6 +1,6 @@
 import type { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
-import { buildDelivery, OutboxDispatcherService } from './outbox-dispatcher.service.js';
+import { buildDelivery, OutboxDispatcherService, PermanentDeliveryError } from './outbox-dispatcher.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { corsOrigins } from '../common/cors.js';
 
@@ -25,6 +25,28 @@ describe('OutboxDispatcherService', () => {
     const dispatcher = new OutboxDispatcherService(prisma as unknown as PrismaService, { get: () => undefined } as unknown as ConfigService);
     await expect(dispatcher.dispatchOnce()).resolves.toEqual({ enabled: false, delivered: 0, retried: 0, deadLettered: 0 });
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
+describe('situação do orçamento do CC para o Core', () => {
+  const cfg = { get: (k: string) => ({ AXIS_API_URL: 'http://core/api/v1/', AXIS_API_KEY: 'chave' })[k] } as unknown as ConfigService;
+  const payload = { cost_center_id: 'cc-1', year: 2026, budget: '1000.00', committed: '0.00', realized: '850.00', percent: 85, status: 'alerta', computed_at: '2026-11-08T12:00:00Z' };
+
+  it('faz PUT no CC com a API key e sem o id no corpo', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    await new OutboxDispatcherService({} as PrismaService, cfg).deliverBudgetStatus(payload, fetchFn);
+    const [url, init] = fetchFn.mock.calls[0];
+    expect(url).toBe('http://core/api/v1/integration/cost-centers/cc-1/budget-status');
+    expect(init.method).toBe('PUT');
+    expect(init.headers.Authorization).toBe('Bearer chave');
+    expect(JSON.parse(init.body)).toEqual({ year: 2026, budget: '1000.00', committed: '0.00', realized: '850.00', percent: 85, status: 'alerta', computed_at: '2026-11-08T12:00:00Z' });
+  });
+
+  it('404 é definitivo; 503 tenta de novo', async () => {
+    const d = new OutboxDispatcherService({} as PrismaService, cfg);
+    await expect(d.deliverBudgetStatus(payload, vi.fn().mockResolvedValue(new Response('x', { status: 404 })))).rejects.toBeInstanceOf(PermanentDeliveryError);
+    const err = await d.deliverBudgetStatus(payload, vi.fn().mockResolvedValue(new Response('x', { status: 503 }))).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(PermanentDeliveryError);
   });
 });
 

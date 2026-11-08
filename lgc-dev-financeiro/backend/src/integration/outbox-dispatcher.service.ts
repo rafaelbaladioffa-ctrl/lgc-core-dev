@@ -5,6 +5,7 @@ import { createHmac } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { CORE_QUOTE_EVENT } from '../budgets/bid/core-quote.js';
+import { CC_BUDGET_STATUS_EVENT } from '../cost-centers/cc-budget-status.js';
 
 /** Espera entre tentativas: 1 min, 5 min, 30 min, 2 h; depois FAILED (dead-letter) para reenvio manual. */
 export const BACKOFF_SECONDS = [60, 300, 1800, 7200];
@@ -87,6 +88,24 @@ export class OutboxDispatcherService {
     throw new Error(`HTTP ${res.status} ${detail}`);
   }
 
+  /**
+   * `PUT /integration/cost-centers/:id/budget-status` do Core (docs/integracao-centros-de-custo.md §4).
+   * Mesma regra de erro definitivo da cotação.
+   */
+  async deliverBudgetStatus(payload: unknown, fetchFn: typeof fetch = fetch): Promise<void> {
+    const { cost_center_id: id, ...body } = payload as { cost_center_id: string } & Record<string, unknown>;
+    const res = await fetchFn(`${this.apiBase}/integration/cost-centers/${encodeURIComponent(id)}/budget-status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.get<string>('AXIS_API_KEY')}` },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (res.ok) return;
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    if ([400, 403, 404, 409].includes(res.status)) throw new PermanentDeliveryError(`HTTP ${res.status} ${detail}`);
+    throw new Error(`HTTP ${res.status} ${detail}`);
+  }
+
   async dispatchOnce(limit = 50, now = new Date()): Promise<DispatchSummary> {
     const url = this.config.get<string>('AXIS_EVENTS_URL');
     const apiKey = this.config.get<string>('AXIS_API_KEY');
@@ -106,11 +125,15 @@ export class OutboxDispatcherService {
         });
         for (const m of due) {
           const isQuote = m.eventType === CORE_QUOTE_EVENT;
+          const isBudget = m.eventType === CC_BUDGET_STATUS_EVENT;
+          const viaApiKey = isQuote || isBudget;
           // Sem destino configurado para este tipo: continua pendente, sem contar tentativa.
-          if ((isQuote && !apiKey) || (!isQuote && !url)) continue;
+          if ((viaApiKey && !apiKey) || (!viaApiKey && !url)) continue;
           try {
             if (isQuote) {
               await this.deliverQuote(tx, m.payload);
+            } else if (isBudget) {
+              await this.deliverBudgetStatus(m.payload);
             } else {
               const { body, headers } = buildDelivery(m, secret);
               const res = await fetch(url!, { method: 'POST', headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
