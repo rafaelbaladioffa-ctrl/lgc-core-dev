@@ -21,3 +21,5 @@
 .project-quote-team td.num, .project-quote-team th.num { text-align: right; }
 .project-quote-team tfoot td { font-weight: 600; background: var(--surface-secondary); border-bottom: 0; }
 .project-quote-history { margin: 0; padding-left: var(--space-4); color: var(--foreground-muted); font-size: var(--text-xs); }
+.project-quote-materials { margin-top: var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); }
+.project-quote-materials__title { margin: 0; font-size: var(--text-sm); font-weight: 600; }

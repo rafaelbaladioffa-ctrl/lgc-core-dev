@@ -490,10 +490,30 @@ model ProjectQuote {
   bidContentHash     String               @map("bid_content_hash")
   bidContent         Bytes                @map("bid_content")
   receivedAt         DateTime             @default(now()) @map("received_at")
+  /// Materiais a enviar ao site, com o código da Logística. Nunca traz preço nem custo.
+  materials          ProjectQuoteMaterial[]
 
   @@unique([satelliteId, externalRevisionId])
   @@index([projectId])
   @@map("project_quotes")
+}
+
+/// Material da cotação (PT-05 do plano projeto aprovado → obra): código da Logística, descrição, unidade
+/// e quantidade orçada. `logistics_material_id` é resolvido no servidor pelo código; fica nulo até a
+/// consulta à Logística existir (PT-06). Sem preço, custo ou frete: isso fica só no Financeiro.
+model ProjectQuoteMaterial {
+  id                  String       @id @default(uuid())
+  projectQuoteId      String       @map("project_quote_id")
+  projectQuote        ProjectQuote @relation(fields: [projectQuoteId], references: [id], onDelete: Cascade)
+  /// `Material.code` do catálogo da Logística.
+  materialCode        String       @map("material_code")
+  logisticsMaterialId String?      @map("logistics_material_id")
+  description         String
+  unit                String
+  quantity            Decimal      @db.Decimal(14, 3)
+
+  @@unique([projectQuoteId, materialCode])
+  @@map("project_quote_materials")
 }
 
 enum RequestConfidentiality {
