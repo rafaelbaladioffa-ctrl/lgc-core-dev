@@ -15,6 +15,13 @@ const KIND_UI: Record<ProjectDocumentKind, { accept: string; hint: string; empty
     attach: 'Anexar SOW',
     newVersion: 'Enviar nova versão da SOW',
   },
+  po: {
+    accept: DOCUMENT_ACCEPT,
+    hint: 'O pedido de compra (PO) do cliente: PDF, DOCX, XLSX, PNG ou JPG, até 25MB. Pode ser anexado ao aprovar o projeto ou depois.',
+    empty: 'Nenhum PO anexado.',
+    attach: 'Anexar PO',
+    newVersion: 'Enviar nova versão do PO',
+  },
   bid_template: {
     accept: SPREADSHEET_ACCEPT,
     hint: 'A planilha da proposta que veio no RFQ (.xlsx ou .xlsm), até 25MB. O Axis Financeiro devolve esta mesma planilha preenchida.',

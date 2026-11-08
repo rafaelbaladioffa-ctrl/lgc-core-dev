@@ -56,6 +56,11 @@ export function ProjectsPage() {
 
   const changeStatus = async (project: Project, status: ProjectStatus) => {
     setError(null);
+    // Aprovar exige site, revisão da cotação aceita e PO: o diálogo "Aprovar projeto" fica na edição do projeto (PT-06).
+    if (status === 'aprovado') {
+      navigate(`/projects/${project.id}/edit?approve=1`);
+      return;
+    }
     try {
       await projectsApi.updateStatus(project.id, status);
     } catch (err) {

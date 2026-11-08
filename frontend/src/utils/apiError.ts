@@ -10,6 +10,24 @@ const KNOWN_MESSAGES: Record<string, string> = {
   'O site não pertence ao cliente do projeto.': 'O site não pertence ao cliente do projeto.',
   'O site está inativo. Escolha outro site ou reative este.': 'O site está inativo. Escolha outro site ou reative este.',
   'Site não encontrado.': 'Site não encontrado.',
+  // Aprovação do projeto e envio de material para obra (PT-06): o texto do servidor é o texto da tela.
+  'Informe o site do projeto antes de aprovar.': 'Informe o site do projeto antes de aprovar.',
+  'O site do projeto está inativo. Reative o site ou escolha outro antes de aprovar.': 'O site do projeto está inativo. Reative o site ou escolha outro antes de aprovar.',
+  'O projeto não tem cotação recebida do Financeiro. Solicite a cotação antes de aprovar.': 'O projeto não tem cotação recebida do Financeiro. Solicite a cotação antes de aprovar.',
+  'A cotação informada não pertence ao projeto.': 'A cotação informada não pertence ao projeto.',
+  'Cotação aceita e PO só valem na aprovação do projeto.': 'Cotação aceita e PO só valem na aprovação do projeto.',
+  'A aprovação do projeto exige a cotação aceita e o site: use a aprovação do projeto.': 'A aprovação do projeto exige a cotação aceita e o site: use a aprovação do projeto.',
+  'O envio de material não está configurado (usuário de sistema ou categoria ausentes). Aplique as migrações do Core e rode o seed.':
+    'O envio de material não está configurado (usuário de sistema ou categoria ausentes). Aplique as migrações do Core e rode o seed.',
+  'O envio de material para obra é criado automaticamente ao aprovar o projeto.': 'O envio de material para obra é criado automaticamente ao aprovar o projeto.',
+  'No envio de material para obra, a conclusão vem da entrega confirmada pela Logística.': 'No envio de material para obra, a conclusão vem da entrega confirmada pela Logística.',
+  'No envio de material para obra o solicitante é o sistema: comente na requisição em vez de pedir informação.':
+    'No envio de material para obra o solicitante é o sistema: comente na requisição em vez de pedir informação.',
+  'O centro de custo do projeto (e o centro de custo pai) continua sem responsável. Cadastre o responsável e tente de novo.':
+    'O centro de custo do projeto (e o centro de custo pai) continua sem responsável. Cadastre o responsável e tente de novo.',
+  'A requisição já tem um aprovador pendente.': 'A requisição já tem um aprovador pendente.',
+  'A requisição não está aguardando aprovação.': 'A requisição não está aguardando aprovação.',
+  'Esta requisição não é um envio de material para obra.': 'Esta requisição não é um envio de material para obra.',
   'Cannot delete a sector that still has linked records (collaborators, cost centers, tickets, etc.)':
     'Não é possível excluir um setor que ainda possui registros vinculados (colaboradores, centros de custo, chamados, etc.).',
   'Cannot delete a cost center that still has linked projects': 'Não é possível excluir um centro de custo que ainda possui projetos vinculados.',

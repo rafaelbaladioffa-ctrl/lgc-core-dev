@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FormPage, FormSection } from '../components/layout/FormPage';
 import { projectsApi, type CreateProjectInput, type ProjectStatus } from '../api/projects';
@@ -10,6 +10,7 @@ import { translateApiError } from '../utils/apiError';
 import { useAuth } from '../context/AuthContext';
 import { ProjectDocuments } from '../components/ProjectDocuments';
 import { ProjectQuotes } from '../components/ProjectQuotes';
+import { ProjectApproval } from '../components/ProjectApproval';
 import { DOCUMENT_ACCEPT, readFileAsBase64 } from '../utils/fileUpload';
 
 const emptyForm: CreateProjectInput = {
@@ -40,10 +41,14 @@ export function ProjectFormPage() {
   const [form, setForm] = useState<CreateProjectInput>(emptyForm);
   const [code, setCode] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
+  // Site já gravado no projeto (a aprovação usa o do servidor, não o do formulário ainda não salvo).
+  const [savedSiteId, setSavedSiteId] = useState<string | null>(null);
   const location = useLocation();
   // Mensagem vinda da criação quando o projeto foi criado mas a SOW não subiu.
   const [error, setError] = useState<string | null>((location.state as { error?: string } | null)?.error ?? null);
   const [loading, setLoading] = useState(isEdit);
+  // Vindo do seletor de status da lista (`?approve=1`): abre direto o diálogo "Aprovar projeto".
+  const openApproval = new URLSearchParams(location.search).get('approve') === '1';
 
   useEffect(() => {
     Promise.all([clientsApi.list(), costCentersApi.list(), collaboratorsApi.list()])
@@ -72,13 +77,14 @@ export function ProjectFormPage() {
     };
   }, [canSelectSite, form.clientId]);
 
-  useEffect(() => {
-    if (!id) return;
-    projectsApi
+  const loadProject = useCallback(() => {
+    if (!id) return Promise.resolve();
+    return projectsApi
       .get(id)
       .then((p) => {
         setCode(p.code);
         setProjectStatus(p.status);
+        setSavedSiteId(p.siteId);
         setForm({
           name: p.name ?? '',
           clientId: p.clientId,
@@ -92,6 +98,10 @@ export function ProjectFormPage() {
       .catch((err) => setError(translateApiError(err, 'Erro ao carregar o projeto.')))
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    void loadProject();
+  }, [loadProject]);
 
   // Troca de cliente deixa a lista antiga na memória até a nova chegar: só vale a do cliente escolhido.
   const clientSites = sites.filter((s) => s.clientId === form.clientId);
@@ -255,6 +265,11 @@ export function ProjectFormPage() {
       {isEdit && id && (
         <FormSection title="Cotação do Financeiro">
           <ProjectQuotes projectId={id} projectStatus={projectStatus} />
+        </FormSection>
+      )}
+      {isEdit && id && (
+        <FormSection title="Aprovação do projeto">
+          <ProjectApproval projectId={id} status={projectStatus} siteId={savedSiteId} autoOpen={openApproval} onApproved={() => void loadProject()} />
         </FormSection>
       )}
     </FormPage>
