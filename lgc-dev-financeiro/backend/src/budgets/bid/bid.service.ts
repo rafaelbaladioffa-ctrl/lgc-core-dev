@@ -11,6 +11,7 @@ import { buildBidPlan, DEFAULT_ROLE_CODES, type BidHeaderProfile, type CableLine
 import { fillBid } from './bid-fill.js';
 import { XlsxEditor } from './xlsx-editor.js';
 import { buildCoreQuoteBody, CORE_QUOTE_EVENT, type CoreQuoteMessage } from './core-quote.js';
+import { preferredSuppliers, suggestCableLine, type SuggestedLine } from './suggest-lines.js';
 
 export interface BidProfile {
   header: BidHeaderProfile;
@@ -161,11 +162,23 @@ export class BidService {
     if (rev.budget.model !== 'aws_sow') throw new BadRequestException('Só o modelo aws_sow gera Bid.');
     const project = await this.budgets.projectInfoOrNull(rev.budget.axisProjectId);
     const aws = this.budgets.awsInfo(rev, project);
-    if (!aws?.quote) return { rev, project, aws, plan: null, blockers: aws?.blockers.length ? aws.blockers : ['A cotação AWS ainda não pode ser calculada.'], unmappedCables: [], unmappedRoles: [] };
+    if (!aws?.quote) {
+      return { rev, project, aws, plan: null, blockers: aws?.blockers.length ? aws.blockers : ['A cotação AWS ainda não pode ser calculada.'], unmappedCables: [], unmappedRoles: [], suggestedCables: {} };
+    }
     const result = rev.result as unknown as BudgetResult;
     const ids = result.materials.map((m) => m.materialId).filter((x): x is string => !!x);
+    const profile = await this.profile();
+    const allLines = await this.allTemplateLines(revisionId);
+    // Tipos sem mapeamento salvo usam a linha sugerida pela SOW; salvar no perfil confirma (ou troca) a escolha.
+    const suppliers = preferredSuppliers(Object.values(profile.cables).map((c) => c.code), allLines);
+    const suggestedCables: Record<string, SuggestedLine> = {};
+    for (const t of aws.quote.perType) {
+      if (profile.cables[t.type]?.code) continue;
+      const s = suggestCableLine(t.type, t.kind as 'fibra' | 'cobre' | 'outro', allLines, suppliers);
+      if (s) suggestedCables[t.type] = s;
+    }
     const materials = await this.prisma.budgetMaterial.findMany({ where: { id: { in: ids } }, select: { id: true, clientRef: true, manufacturer: true, partNumber: true, name: true, unit: true } });
-    const rowCodes = materials.length ? new Map((await this.allTemplateLines(revisionId)).map((l) => [l.row, l.code])) : new Map<number, string>();
+    const rowCodes = new Map(allLines.map((l) => [l.row, l.code]));
     const catalog = new Map(
       materials.map((m) => {
         const ref = resolveClientRef(m.clientRef, rowCodes);
@@ -180,10 +193,10 @@ export class BidService {
       result,
       inputs: rev.inputs as unknown as BudgetInputs,
       catalog,
-      profile: await this.profile(),
+      profile: { ...profile, cables: { ...suggestedCables, ...profile.cables } },
     });
     void user;
-    return { rev, project, aws, ...out };
+    return { rev, project, aws, ...out, suggestedCables };
   }
 
   /** Prévia da Bid (rascunho ou em aprovação), sem gravar. */

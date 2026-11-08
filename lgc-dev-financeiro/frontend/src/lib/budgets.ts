@@ -240,6 +240,8 @@ export interface AwsQuote {
   hoursTSum: number;
   hoursTMatches: boolean;
   suggestedDays: number | null;
+  /** 1 encarregado + técnicos × dias que cobrem as horas-meta da AWS na janela da SOW. */
+  suggestedTeam: { foremen: number; technicians: number; days: number } | null;
   workDays: number;
   windowBusinessDays: number | null;
   fitsWindow: boolean | null;
@@ -377,6 +379,8 @@ export interface BidTemplateLine {
 export interface BidPlanStatus {
   ready: boolean;
   blockers: string[];
+  /** Linha sugerida pela SOW para os tipos sem mapeamento salvo no perfil. */
+  suggestedCables: Record<string, BidCableLineProfile & { reason: string }>;
   unmappedCables: string[];
   unmappedRoles: string[];
   lines: Array<{ code: string; label: string; supplier: string | null }>;
@@ -390,3 +394,5 @@ export const getBidLines = (revisionId: string) => api<BidTemplateLine[]>(`/revi
 export const getBidPlan = (revisionId: string) => api<BidPlanStatus>(`/revisions/${revisionId}/bid/plan`);
 export const downloadBidPreview = (revisionId: string) => apiDownload(`/revisions/${revisionId}/bid/preview`, 'previa-bid.xlsm');
 export const downloadBidOutput = (revisionId: string) => apiDownload(`/revisions/${revisionId}/bid/output`, 'bid.xlsm');
+/** Recalcula a equipe pela SOW e pelo Bid Template: 1 encarregado + técnicos × dias (continua editável). */
+export const applySuggestedTeam = (revisionId: string) => api<Revision>(`/revisions/${revisionId}/aws/suggest-team`, { method: 'POST', body: '{}' });

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { importBidTemplate, updateHoursT, updateKpiJustifications, type KpiKey, type Revision } from '../lib/budgets';
+import { applySuggestedTeam, importBidTemplate, updateHoursT, updateKpiJustifications, type KpiKey, type Revision } from '../lib/budgets';
 import { formatPercent, formatNumber } from '../lib/decimal';
 import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { Badge, messageOf } from './ui';
@@ -118,6 +118,24 @@ export function RevisionAwsSection({ rev, canWrite, initialError, onChange }: { 
             </div>
           </dl>
           {quote.warnings.length > 0 && <p className="muted">{quote.warnings.join(' ')}</p>}
+
+          {quote.suggestedTeam && (
+            <div className="workflow-actions">
+              <span>
+                Equipe pelas horas-meta da AWS: <strong>{quote.suggestedTeam.foremen} encarregado + {quote.suggestedTeam.technicians} técnico(s) × {quote.suggestedTeam.days} dia(s)</strong>
+                {(() => {
+                  const people = (key: string) => rev.inputs.team.find((t) => t.roleKey === key)?.people ?? 0;
+                  const same = rev.inputs.workDays === quote.suggestedTeam.days && people('tecnico') === quote.suggestedTeam.technicians && people('encarregado') === quote.suggestedTeam.foremen;
+                  return same ? <> <Badge tone="success">aplicada</Badge></> : <> <Badge tone="warning">diferente da orçada</Badge></>;
+                })()}
+              </span>
+              {editable && (
+                <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => void run(() => applySuggestedTeam(rev.id), 'Equipe recalculada pelas horas-meta da AWS.')}>
+                  Aplicar equipe sugerida
+                </button>
+              )}
+            </div>
+          )}
 
           <h3>Horas por tipo de cabo (horas T)</h3>
           <div className="table-scroll">

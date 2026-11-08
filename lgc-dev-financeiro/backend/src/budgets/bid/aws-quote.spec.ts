@@ -1,4 +1,4 @@
-import { businessDays, computeAwsQuote, distribute, type AwsQuoteInput } from './aws-quote.js';
+import { businessDays, computeAwsQuote, distribute, suggestTeam, type AwsQuoteInput } from './aws-quote.js';
 import type { BidTargets } from './bid-template-reader.js';
 
 /** Números fictícios conferidos à mão (comentários mostram a conta). */
@@ -126,5 +126,22 @@ describe('peças', () => {
   it('distribuição com sobra na primeira linha', () => {
     expect(distribute(10, [1, 1, 1])).toEqual([4, 3, 3]);
     expect(distribute(10, [0, 0])).toEqual([0, 0]);
+  });
+});
+
+describe('suggestTeam', () => {
+  it('menor equipe que cabe na janela e menores dias para ela (caso da Bid real)', () => {
+    expect(suggestTeam(176.4, 7, 8)).toEqual({ foremen: 1, technicians: 3, days: 6 });
+  });
+
+  it('janela folgada: 1 encarregado + 1 técnico; janela apertada: mais técnicos', () => {
+    expect(suggestTeam(40, 10, 8)).toEqual({ foremen: 1, technicians: 1, days: 3 });
+    expect(suggestTeam(400, 5, 8)).toEqual({ foremen: 1, technicians: 9, days: 5 });
+  });
+
+  it('sem janela usa 1 técnico; sem horas-meta não sugere', () => {
+    expect(suggestTeam(100, null, 8)).toEqual({ foremen: 1, technicians: 1, days: 7 });
+    expect(suggestTeam(0, 7, 8)).toBeNull();
+    expect(suggestTeam(100, 7, null)).toBeNull();
   });
 });

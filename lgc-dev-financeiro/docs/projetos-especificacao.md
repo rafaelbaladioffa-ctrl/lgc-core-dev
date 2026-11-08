@@ -712,7 +712,20 @@ de custo; outros modelos de cliente além do AWS.
   `GET /revisions/:id/bid/preview` (`budget:write`, prévia sem gravar), `GET /revisions/:id/bid/output`.
 - Tela: parte "Bid para a AWS" no painel da cotação (situação, fornecedor, linha de cada tipo de cabo e
   função, prévia e Bid enviada).
-- Não verificado: aprovação com login real e entrega contra um Core rodando.
+- Verificado em 2026-11-08 no ambiente de desenvolvimento do dono: cotação aprovada, entregue ao Core e
+  marcada como ganha.
+- **Pré-preenchimento pela SOW (pedido do dono em 2026-11-08), tudo editável:**
+  - *Equipe:* sempre 1 encarregado; técnicos e dias para as horas de campo cobrirem as horas-meta da AWS
+    dentro da janela da SOW (menor equipe que cabe na janela, depois os menores dias). Aplicada ao iniciar a
+    cotação quando a equipe está vazia; botão "Aplicar equipe sugerida" recalcula. Conferido com a Bid real:
+    176,4 h e janela de 7 dias úteis → 1 encarregado + 3 técnicos × 6 dias.
+  - *Linha de cada tipo de cabo:* sem mapeamento salvo, o sistema sugere a linha pelo número de fibras e pelas
+    pontas da descrição (MTP = MPO, leque de LC = LC), preferindo monomodo, amarelo, linha com fornecedor e o
+    fornecedor mais usado no perfil; cobre vai para a linha livre de cobre. O plano da Bid usa a sugestão; a
+    tela marca "sugerida pela SOW" e "Confirmar" grava no perfil. Conferido: com a preferência pela AFL, a
+    sugestão escolhe as mesmas linhas da Bid real.
+  - "Continuar cotação" num rascunho que já tem a SOW e o Bid Template do mesmo pedido não reimporta
+    (preserva cabos corrigidos, horas T e justificativas).
 
 ## 17. Decisões pendentes
 

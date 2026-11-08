@@ -22,6 +22,7 @@ const optionLabel = (l: BidTemplateLine) => `${l.subcategory} · ${l.code}${l.su
 function CableRow({
   type,
   current,
+  suggestion,
   options,
   editable,
   busy,
@@ -29,17 +30,27 @@ function CableRow({
 }: {
   type: string;
   current: BidCableLineProfile | null;
+  /** Linha sugerida pela SOW quando não há mapeamento salvo. */
+  suggestion: (BidCableLineProfile & { reason: string }) | null;
   options: BidTemplateLine[];
   editable: boolean;
   busy: boolean;
   onSave: (value: BidCableLineProfile) => void;
 }) {
-  const [draft, setDraft] = useState<BidCableLineProfile>(current ?? { code: '' });
+  const initial: BidCableLineProfile = current ?? (suggestion ? { code: suggestion.code, description: suggestion.description, supplier: suggestion.supplier, partNumber: suggestion.partNumber, unit: suggestion.unit } : { code: '' });
+  const [draft, setDraft] = useState<BidCableLineProfile>(initial);
   const free = draft.code.startsWith('free_');
   const dirty = JSON.stringify(draft) !== JSON.stringify(current ?? { code: '' });
   return (
     <tr>
-      <td>{type}</td>
+      <td>
+        {type}
+        {!current && suggestion && (
+          <div className="cell-sub" title={suggestion.reason}>
+            <Badge tone="neutral">sugerida pela SOW</Badge>
+          </div>
+        )}
+      </td>
       <td>
         <select value={draft.code} disabled={!editable || busy} aria-label={`Linha do Bid Template para ${type}`} onChange={(e) => setDraft({ ...draft, code: e.target.value })}>
           <option value="">— escolher —</option>
@@ -64,7 +75,7 @@ function CableRow({
       <td>
         {editable && dirty && draft.code && (
           <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => onSave(draft)}>
-            Salvar
+            {!current && suggestion && draft.code === suggestion.code ? 'Confirmar' : 'Salvar'}
           </button>
         )}
       </td>
@@ -204,9 +215,10 @@ export function RevisionBidSection({ rev, canWrite }: { rev: Revision; canWrite:
               <tbody>
                 {quote.perType.map((t) => (
                   <CableRow
-                    key={`${t.type}-${profile.cables[t.type]?.code ?? ''}`}
+                    key={`${t.type}-${profile.cables[t.type]?.code ?? ''}-${status?.suggestedCables?.[t.type]?.code ?? ''}`}
                     type={t.type}
                     current={profile.cables[t.type] ?? null}
+                    suggestion={status?.suggestedCables?.[t.type] ?? null}
                     options={cableOptions}
                     editable={editable}
                     busy={busy}
@@ -216,7 +228,10 @@ export function RevisionBidSection({ rev, canWrite }: { rev: Revision; canWrite:
               </tbody>
             </table>
           </div>
-          <p className="muted">Tipos que caem na mesma linha são somados (ex.: Cat6 de cores diferentes numa linha livre de cobre). O mapeamento vale para as próximas cotações.</p>
+          <p className="muted">
+            Cada tipo já vem com a linha sugerida pela SOW (mesmas fibras e pontas, monomodo, fornecedor que vocês mais usam); troque só se precisar. Tipos que caem na mesma linha são somados (ex.: Cat6
+            de cores diferentes na linha livre de cobre). O que você salvar vale para as próximas cotações.
+          </p>
 
           {roles.length > 0 && (
             <div className="table-scroll">
@@ -252,7 +267,7 @@ export function RevisionBidSection({ rev, canWrite }: { rev: Revision; canWrite:
               </table>
             </div>
           )}
-          <p className="muted">Materiais da LGC entram pela "referência no formulário do cliente" do catálogo de materiais (código da linha no Bid Template).</p>
+          <p className="muted">Materiais da LGC entram pela "referência no formulário do cliente" do catálogo de materiais (código ou número da linha no Bid Template, ex.: "Bid linha 379").</p>
         </>
       )}
 

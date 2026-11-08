@@ -44,7 +44,7 @@ function fixture({ revisionStatus = 'rascunho', budget = null as unknown, reques
     quoteRequest: { findUnique: vi.fn().mockResolvedValue(request), findFirst: vi.fn().mockResolvedValue(request), update: vi.fn().mockResolvedValue({}) },
     projectBudget: { findUnique: vi.fn().mockResolvedValue(budget) },
     budgetRevision: { findUnique: vi.fn().mockResolvedValue({ id: 'r1', number: 1, status: revisionStatus, budget: { axisProjectId: 'p1' } }) },
-    revisionBidTemplate: { upsert: vi.fn().mockResolvedValue({}) },
+    revisionBidTemplate: { upsert: vi.fn().mockResolvedValue({}), findUnique: vi.fn().mockResolvedValue(null) },
     budgetRevisionSow: {
       upsert: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
@@ -79,6 +79,14 @@ describe('SowService.startQuote', () => {
 
     const sent = fixture({ budget: { id: 'b1', revisions: [{ id: 'r1', status: 'enviada' }] } });
     expect((await sent.service.startQuote('q1', ORC)).revisionId).toBe('r-next');
+  });
+
+  it('continuar num rascunho que já tem os documentos deste pedido não reimporta (preserva correções)', async () => {
+    const { service, tx, core } = fixture({ budget: { id: 'b1', revisions: [{ id: 'r1', status: 'rascunho' }] }, sowRow: { quoteRequestId: 'q1' } });
+    Object.assign(tx.revisionBidTemplate, { findUnique: vi.fn().mockResolvedValue({ quoteRequestId: 'q1' }) });
+    const out = await service.startQuote('q1', ORC);
+    expect(out).toMatchObject({ revisionId: 'r1', sowImported: true, bidTemplateImported: true });
+    expect(core.download).not.toHaveBeenCalled();
   });
 
   it('falha no download não perde o rascunho: devolve o erro para a tela', async () => {
@@ -201,5 +209,49 @@ describe('CoreDocumentsClient', () => {
     const forbidden = vi.fn(async () => new Response('', { status: 403 }));
     await expect(client.download('p1', 'd1', sha, forbidden as unknown as typeof fetch)).rejects.toBeInstanceOf(BadGatewayException);
     await expect(new CoreDocumentsClient(config({})).download('p1', 'd1', sha, ok as unknown as typeof fetch)).rejects.toThrow('AXIS_API_KEY');
+  });
+});
+
+describe('SowService.applySuggestedTeam', () => {
+  function teamFixture(inputs: Record<string, unknown>, suggestedTeam: unknown = { foremen: 1, technicians: 3, days: 6 }) {
+    const rev = {
+      id: 'r1',
+      number: 1,
+      status: 'rascunho',
+      inputs,
+      budget: { axisProjectId: 'p1' },
+      parameterSet: { roles: [{ roleKey: 'tecnico' }, { roleKey: 'encarregado' }, { roleKey: 'gerente_projeto' }] },
+    };
+    const budgets = {
+      loadRevisionFull: vi.fn().mockResolvedValue(rev),
+      projectInfoOrNull: vi.fn().mockResolvedValue(null),
+      awsInfo: vi.fn().mockReturnValue({ quote: { suggestedTeam } }),
+      updateRevision: vi.fn().mockResolvedValue({}),
+    };
+    const audit = { record: vi.fn().mockResolvedValue({}) };
+    const service = new SowService({} as PrismaService, audit as unknown as AuditService, budgets as unknown as BudgetsService, {} as CoreDocumentsClient);
+    return { service, budgets };
+  }
+  const empty = { workDays: 0, team: [{ roleKey: 'tecnico', people: 0 }, { roleKey: 'encarregado', people: 0 }, { roleKey: 'gerente_projeto', hours: '0' }], materials: [] };
+
+  it('revisão vazia recebe 1 encarregado + técnicos × dias das horas-meta', async () => {
+    const { service, budgets } = teamFixture(empty);
+    await service.applySuggestedTeam('r1', ORC, { onlyIfEmpty: true });
+    expect(budgets.updateRevision).toHaveBeenCalledWith('r1', { inputs: expect.objectContaining({ workDays: 6, team: [{ roleKey: 'tecnico', people: 3 }, { roleKey: 'encarregado', people: 1 }, { roleKey: 'gerente_projeto', hours: '0' }] }) }, ORC);
+  });
+
+  it('no automático não mexe em equipe já preenchida; o botão recalcula', async () => {
+    const filled = { ...empty, workDays: 4, team: [{ roleKey: 'tecnico', people: 2 }, { roleKey: 'encarregado', people: 1 }] };
+    const auto = teamFixture(filled);
+    await auto.service.applySuggestedTeam('r1', ORC, { onlyIfEmpty: true });
+    expect(auto.budgets.updateRevision).not.toHaveBeenCalled();
+    const manual = teamFixture(filled);
+    await manual.service.applySuggestedTeam('r1', ORC, { onlyIfEmpty: false });
+    expect(manual.budgets.updateRevision.mock.calls[0][1].inputs).toMatchObject({ workDays: 6, team: [{ roleKey: 'tecnico', people: 3 }, { roleKey: 'encarregado', people: 1 }] });
+  });
+
+  it('sem SOW e Bid Template não há como calcular', async () => {
+    const { service } = teamFixture(empty, null);
+    await expect(service.applySuggestedTeam('r1', ORC, { onlyIfEmpty: false })).rejects.toThrow('Importe a SOW e o Bid Template');
   });
 });

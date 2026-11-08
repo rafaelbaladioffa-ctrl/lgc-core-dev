@@ -63,6 +63,21 @@ export function distribute(total: number, weights: number[]): number[] {
   return parts;
 }
 
+/**
+ * Equipe alinhada ao que a AWS projeta (pedido do dono em 2026-11-08): sempre 1 encarregado; técnicos e dias
+ * para que as horas de campo cubram as horas-meta do Bid Template dentro da janela da SOW. Primeiro acha a
+ * menor equipe que cabe na janela; depois os menores dias para essa equipe. Sem janela, usa 1 técnico.
+ * Conferido com uma Bid real: 176,4 h, janela de 7 dias úteis, 8 h/dia → 1 encarregado + 3 técnicos × 6 dias.
+ */
+export function suggestTeam(targetHours: number, windowDays: number | null, hoursPerDay: number | null): { foremen: number; technicians: number; days: number } | null {
+  if (!(targetHours > 0) || !hoursPerDay || hoursPerDay <= 0) return null;
+  const foremen = 1;
+  let crew = windowDays && windowDays > 0 ? Math.ceil(targetHours / (windowDays * hoursPerDay)) : foremen + 1;
+  crew = Math.max(crew, foremen + 1);
+  const days = Math.ceil(targetHours / (crew * hoursPerDay));
+  return { foremen, technicians: crew - foremen, days };
+}
+
 export function computeAwsQuote(input: AwsQuoteInput) {
   const { types, targets, result } = input;
   const hpm = targets.targets.hoursPerMeter;
@@ -137,6 +152,8 @@ export function computeAwsQuote(input: AwsQuoteInput) {
     hoursTSum,
     hoursTMatches,
     suggestedDays,
+    /** Equipe que cobre as horas-meta na janela (1 encarregado + técnicos × dias); o orçamentista pode mudar. */
+    suggestedTeam: suggestTeam(targetHours, windowBusinessDays, input.hoursPerDay),
     workDays: result.workDays,
     windowBusinessDays,
     fitsWindow,

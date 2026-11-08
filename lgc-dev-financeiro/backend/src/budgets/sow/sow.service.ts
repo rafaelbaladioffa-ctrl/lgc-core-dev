@@ -10,6 +10,8 @@ import { normalizeType, parseSow, summarizeTypes, totalsOf, type SowCableLine } 
 import { presentSow } from './sow-view.js';
 import { readBidTargets } from '../bid/bid-template-reader.js';
 import { KPI_LABEL, type KpiKey } from '../bid/aws-quote.js';
+import type { BudgetInputsDto } from '../budget-inputs.dto.js';
+import type { BudgetInputs } from '../budget-engine.js';
 
 export interface SowCableInput {
   type: string;
@@ -114,16 +116,28 @@ export class SowService {
       await this.audit.record(user.userId, 'quote_request.started', 'quote_request', id, { project: request.projectCode, budgetId, revisionId }, tx);
     });
     const out = { revisionId, sowImported: true, sowError: null as string | null, bidTemplateImported: true, bidTemplateError: null as string | null };
-    try {
-      await this.importFromCore(revisionId, { quoteRequestId: id }, user);
-    } catch (e) {
-      Object.assign(out, { sowImported: false, sowError: (e as Error).message });
+    // "Continuar cotação" num rascunho que já tem os documentos deste pedido não reimporta: preserva cabos
+    // corrigidos, horas T e justificativas. Pedido diferente (ex.: SOW nova) reimporta.
+    const [currentSow, currentBid] = await Promise.all([
+      this.prisma.budgetRevisionSow.findUnique({ where: { revisionId }, select: { quoteRequestId: true } }),
+      this.prisma.revisionBidTemplate.findUnique({ where: { revisionId }, select: { quoteRequestId: true } }),
+    ]);
+    if (currentSow?.quoteRequestId !== id) {
+      try {
+        await this.importFromCore(revisionId, { quoteRequestId: id }, user);
+      } catch (e) {
+        Object.assign(out, { sowImported: false, sowError: (e as Error).message });
+      }
     }
-    try {
-      await this.importBidTemplate(revisionId, { quoteRequestId: id }, user);
-    } catch (e) {
-      Object.assign(out, { bidTemplateImported: false, bidTemplateError: (e as Error).message });
+    if (currentBid?.quoteRequestId !== id) {
+      try {
+        await this.importBidTemplate(revisionId, { quoteRequestId: id }, user);
+      } catch (e) {
+        Object.assign(out, { bidTemplateImported: false, bidTemplateError: (e as Error).message });
+      }
     }
+    // Revisão nova (equipe vazia) já nasce com a equipe alinhada às horas-meta da AWS.
+    if (out.sowImported && out.bidTemplateImported) await this.applySuggestedTeam(revisionId, user, { onlyIfEmpty: true }).catch(() => undefined);
     return out;
   }
 
@@ -194,6 +208,28 @@ export class SowService {
       );
     });
     return { version: data.version, filename: data.filename, targets };
+  }
+
+  /**
+   * Equipe pela SOW e pelo Bid Template (pedido do dono em 2026-11-08): 1 encarregado e os técnicos e dias que
+   * cobrem as horas-meta da AWS na janela da SOW. `onlyIfEmpty` não mexe numa equipe já preenchida.
+   */
+  async applySuggestedTeam(revisionId: string, user: AuthenticatedUser, opts: { onlyIfEmpty: boolean }) {
+    const rev = await this.budgets.loadRevisionFull(revisionId);
+    if (rev.status !== 'rascunho') throw new ConflictException(`A revisão R${rev.number} não está em rascunho.`);
+    const aws = this.budgets.awsInfo(rev, await this.budgets.projectInfoOrNull(rev.budget.axisProjectId));
+    const team = aws?.quote?.suggestedTeam;
+    if (!team) throw new BadRequestException('Importe a SOW e o Bid Template para calcular a equipe pelas horas-meta da AWS.');
+    const inputs = rev.inputs as unknown as BudgetInputs;
+    const filled = (inputs.workDays ?? 0) > 0 || inputs.team.some((t) => (t.people ?? 0) > 0);
+    if (opts.onlyIfEmpty && filled) return;
+    const roles = new Set(rev.parameterSet.roles.map((r) => r.roleKey));
+    if (!roles.has('tecnico') || !roles.has('encarregado')) throw new BadRequestException('Os parâmetros vigentes precisam das funções "tecnico" e "encarregado".');
+    const people: Record<string, number> = { tecnico: team.technicians, encarregado: team.foremen };
+    const nextTeam = inputs.team.map((t) => (t.roleKey in people ? { ...t, people: people[t.roleKey] } : t));
+    for (const key of Object.keys(people)) if (!nextTeam.some((t) => t.roleKey === key)) nextTeam.push({ roleKey: key, people: people[key] });
+    await this.budgets.updateRevision(revisionId, { inputs: { ...inputs, workDays: team.days, team: nextTeam } as unknown as BudgetInputsDto }, user);
+    await this.audit.record(user.userId, 'budget_revision.team_suggested', 'budget_revision', revisionId, { ...team, onlyIfEmpty: opts.onlyIfEmpty });
   }
 
   /** Horas T à mão por tipo de cabo; `null` volta ao proporcional (§7.2). */

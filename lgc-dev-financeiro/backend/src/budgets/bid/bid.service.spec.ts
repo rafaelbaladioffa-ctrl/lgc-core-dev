@@ -50,7 +50,10 @@ function fixture({ model = 'aws_sow', blockers = [] as string[] } = {}) {
       return { id: 'r2' };
     }),
   } as unknown as BudgetsService & { transition: ReturnType<typeof vi.fn> };
-  return { service: new BidService(prisma, { record: vi.fn() } as unknown as AuditService, outbox, budgets), tx, outbox, budgets };
+  const service = new BidService(prisma, { record: vi.fn() } as unknown as AuditService, outbox, budgets);
+  // O modelo do teste é fictício: as linhas do Bid Template (para sugestões e referências) vêm simuladas.
+  vi.spyOn(service as unknown as { allTemplateLines: () => Promise<unknown[]> }, 'allTemplateLines').mockResolvedValue([]);
+  return { service, tx, outbox, budgets };
 }
 
 describe('BidService.approveSend', () => {

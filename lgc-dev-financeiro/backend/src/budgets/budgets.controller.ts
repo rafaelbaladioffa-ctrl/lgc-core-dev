@@ -134,8 +134,16 @@ export class RevisionsController {
   @Get(':id/bid/plan')
   @RequirePermissions('budget:read')
   async bidPlan(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
-    const { plan, blockers, unmappedCables, unmappedRoles } = await this.bid.plan(id, user);
-    return { ready: !!plan, blockers, unmappedCables, unmappedRoles, lines: plan?.lines.map((l) => ({ code: l.code, label: l.label, supplier: l.supplier ?? null })) ?? [], kpiYes: plan?.kpiYes ?? [] };
+    const { plan, blockers, unmappedCables, unmappedRoles, suggestedCables } = await this.bid.plan(id, user);
+    return {
+      ready: !!plan,
+      blockers,
+      unmappedCables,
+      unmappedRoles,
+      suggestedCables,
+      lines: plan?.lines.map((l) => ({ code: l.code, label: l.label, supplier: l.supplier ?? null })) ?? [],
+      kpiYes: plan?.kpiYes ?? [],
+    };
   }
 
   @Get(':id/bid/preview')
@@ -174,6 +182,15 @@ export class RevisionsController {
   @RequirePermissions('budget:write')
   async importBidTemplate(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ImportBidTemplateDto, @CurrentUser() user: AuthenticatedUser) {
     await this.sow.importBidTemplate(id, { quoteRequestId: dto.quoteRequestId }, user);
+    return this.budgets.getRevision(id, user);
+  }
+
+  /** Equipe alinhada às horas-meta da AWS: 1 encarregado + técnicos × dias (continua editável). */
+  @Post(':id/aws/suggest-team')
+  @HttpCode(200)
+  @RequirePermissions('budget:write')
+  async suggestTeam(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    await this.sow.applySuggestedTeam(id, user, { onlyIfEmpty: false });
     return this.budgets.getRevision(id, user);
   }
 
