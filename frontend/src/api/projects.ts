@@ -31,6 +31,23 @@ export interface CreateProjectInput {
 /** O cliente não muda depois de criado: ele faz parte do código do projeto. */
 export type UpdateProjectInput = Partial<Omit<CreateProjectInput, 'clientId' | 'status'>>;
 
+export type ProjectDocumentKind = 'sow';
+
+export const PROJECT_DOCUMENT_LABEL: Record<ProjectDocumentKind, string> = { sow: 'SOW' };
+
+export interface ProjectDocument {
+  id: string;
+  projectId: string;
+  kind: ProjectDocumentKind;
+  version: number;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string;
+  createdAt: string;
+  uploadedBy?: { email: string };
+}
+
 export const projectsApi = {
   list: () => api.get<Project[]>('/projects').then((r) => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then((r) => r.data),
@@ -39,4 +56,9 @@ export const projectsApi = {
   updateStatus: (id: string, status: ProjectStatus) =>
     api.put<Project>(`/projects/${id}/status`, { status }).then((r) => r.data),
   remove: (id: string) => api.delete(`/projects/${id}`),
+  listDocuments: (id: string) => api.get<ProjectDocument[]>(`/projects/${id}/documents`).then((r) => r.data),
+  addDocument: (id: string, input: { kind: ProjectDocumentKind; filename: string; contentBase64: string }) =>
+    api.post<ProjectDocument>(`/projects/${id}/documents`, input).then((r) => r.data),
+  downloadDocument: (id: string, documentId: string) =>
+    api.get<Blob>(`/projects/${id}/documents/${documentId}/content`, { responseType: 'blob' }).then((r) => r.data),
 };

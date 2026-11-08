@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FormPage, FormSection } from '../components/layout/FormPage';
 import { projectsApi, type CreateProjectInput } from '../api/projects';
 import { clientsApi, type Client } from '../api/clients';
 import { costCentersApi, type CostCenter } from '../api/costCenters';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { translateApiError } from '../utils/apiError';
+import { useAuth } from '../context/AuthContext';
+import { ProjectDocuments } from '../components/ProjectDocuments';
+import { DOCUMENT_ACCEPT, readFileAsBase64 } from '../utils/fileUpload';
 
 const emptyForm: CreateProjectInput = {
   name: '',
@@ -23,12 +26,16 @@ export function ProjectFormPage() {
   const { id } = useParams<{ id: string }>();
   const isEdit = Boolean(id);
   const navigate = useNavigate();
+  const { hasPermission } = useAuth();
+  const [sowFile, setSowFile] = useState<File | null>(null);
   const [clients, setClients] = useState<Client[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [collaborators, setCollaborators] = useState<CollaboratorSafe[]>([]);
   const [form, setForm] = useState<CreateProjectInput>(emptyForm);
   const [code, setCode] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const location = useLocation();
+  // Mensagem vinda da criação quando o projeto foi criado mas a SOW não subiu.
+  const [error, setError] = useState<string | null>((location.state as { error?: string } | null)?.error ?? null);
   const [loading, setLoading] = useState(isEdit);
 
   useEffect(() => {
@@ -79,7 +86,20 @@ export function ProjectFormPage() {
           plannedEndDate,
         });
       } else {
-        await projectsApi.create({ ...form, plannedStartDate, plannedEndDate });
+        const created = await projectsApi.create({ ...form, plannedStartDate, plannedEndDate });
+        if (sowFile) {
+          try {
+            const contentBase64 = await readFileAsBase64(sowFile);
+            await projectsApi.addDocument(created.id, { kind: 'sow', filename: sowFile.name, contentBase64 });
+          } catch (uploadErr) {
+            // O projeto já existe: leva para a edição, onde dá para tentar anexar de novo.
+            const detail = translateApiError(uploadErr, 'Erro ao anexar a SOW.');
+            navigate(`/projects/${created.id}/edit`, {
+              state: { error: `Projeto ${created.code} criado, mas a SOW não foi anexada (${detail}). Tente de novo abaixo.` },
+            });
+            return;
+          }
+        }
       }
       navigate('/projects');
     } catch (err) {
@@ -162,6 +182,20 @@ export function ProjectFormPage() {
             />
           </label>
         </div>
+      </FormSection>
+      <FormSection title="SOW do cliente">
+        {isEdit && id ? (
+          <ProjectDocuments projectId={id} kind="sow" />
+        ) : hasPermission('project:update') ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <input type="file" accept={DOCUMENT_ACCEPT} onChange={(e) => setSowFile(e.target.files?.[0] ?? null)} />
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+              Opcional. PDF, DOCX, XLSX, PNG ou JPG, até 25MB. Também dá para anexar depois, na edição do projeto.
+            </p>
+          </div>
+        ) : (
+          <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>A SOW pode ser anexada na edição do projeto.</p>
+        )}
       </FormSection>
     </FormPage>
   );

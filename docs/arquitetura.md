@@ -109,12 +109,13 @@ satélites assinantes com envelope `{event_id, event_type, occurred_at, payload}
 satélite deduplica por `event_id`.
 
 Eventos emitidos hoje: `client.created|updated`, `collaborator.created|updated|offboarded`,
-`project.created|updated|status_changed|deleted`, `cost_center.created|updated`,
+`project.created|updated|status_changed|deleted|document_added`, `cost_center.created|updated`,
 `request.submitted|status_changed|completed`,
 `sla.warning|breached`. **Não** são emitidos: `user.*`, `material_request.*`, `purchase_order.*`.
 
 **Consulta síncrona (satélite → Core).** `GET /api/v1/integration/{collaborators,users,clients,projects,sectors,cost-centers}`
-com API key; só campos não sensíveis.
+com API key; só campos não sensíveis. Exceção: documentos do projeto (SOW) em `/integration/projects/:id/documents`, só para o
+satélite que assina `project.document_added` ([cadastros.md §10.1](dominio/cadastros.md#101-documentos-do-projeto-sow)).
 
 **Administração.** `POST /integration/satellites` devolve API key e segredo HMAC uma única vez;
 `POST /integration/satellites/:id/test-webhook`; `POST /integration/satellites/:id/launch` gera URL

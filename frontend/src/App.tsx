@@ -265,7 +265,7 @@ function AppRoutes() {
         path="/projects/new"
         element={
           <PrivateRoute permission="project:create">
-            <ProjectFormPage />
+            <ProjectFormPage key="new" />
           </PrivateRoute>
         }
       />
@@ -273,7 +273,7 @@ function AppRoutes() {
         path="/projects/:id/edit"
         element={
           <PrivateRoute permission="project:update">
-            <ProjectFormPage />
+            <ProjectFormPage key="edit" />
           </PrivateRoute>
         }
       />

@@ -70,7 +70,7 @@ Criar/editar papel **não** gera auditoria nem evento. Não há exclusão de pap
 |---|---|
 | `admin` | todas as permissões do catálogo |
 | `rh` | leitura de setor/CC/cargo/jornada; `collaborator:create/read/read_sensitive/update/delete`; `certification:*`; `request:create/read/comment/approve`; `delegation:create/read`; `user:create/read/update/reset_password` |
-| `gestor` | leitura de setor/CC/cargo/jornada/certificação/cliente; `collaborator:read/update`; `project:create/read/update`; `request_category:read`; `request:create/read/update/assign/approve/comment`; `delegation:create/read` |
+| `gestor` | leitura de setor/CC/cargo/jornada/certificação/cliente; `collaborator:read/update`; `project:create/read/update/read_documents`; `request_category:read`; `request:create/read/update/assign/approve/comment`; `delegation:create/read` |
 | `tecnico` | `sector:read`, `collaborator:read`, `certification:read`, `request:create/read/update/comment` |
 | `analista_suprimentos` | `sector:read`, `collaborator:read`, `request_category:read`, `request:create/read/update/assign/comment` |
 | `colaborador` | `sector:read`, `collaborator:read`, `request:create/read/comment` |
@@ -262,7 +262,28 @@ O planning previa `cost_center_id` e flags de provisionamento no `collaborator.c
 | `project.status_changed` | `PUT /projects/:id/status` | `previous_status` |
 | `project.deleted` | exclusão de proposta | `deleted: true`; `status` vai como `encerrado` para os satélites marcarem o projeto inativo sem mudança do lado deles |
 
-**Frontend:** `/projects` (lista com nome, prazo previsto, troca de status na linha e exclusão de propostas), `/projects/new`, `/projects/:id/edit` (o nome na lista abre a edição), `/projects/dashboard`. A seleção de projeto na nova requisição mostra `código — nome`.
+### 10.1 Documentos do projeto (SOW)
+
+A SOW do cliente fica anexada ao projeto do Core e é consumida pelo módulo Projetos do Financeiro (importação da SOW, §7.1 da especificação de Projetos do Financeiro).
+
+- Tabela `project_documents`: `project_id`, `kind` (hoje só `sow`), `version`, `filename` (nome original sem caminho, só para exibição), `mime_type`, `size_bytes`, `content_hash` (SHA-256), `content` (`BYTEA`), `uploaded_by_user_id`, `created_at`. Único por (`project_id`, `kind`, `version`).
+- **Versões:** cada envio do mesmo tipo cria a versão seguinte; nenhuma versão é sobrescrita nem apagada. A mais recente é a vigente. Os documentos só somem com a exclusão do projeto (que só vale para proposta sem requisições).
+- **Arquivo:** mesmas regras dos anexos de requisição ([attachment-security.ts](../../backend/src/requests/attachment-security.ts)): tipo detectado pelos bytes (PDF, PNG, JPG e ZIP, que cobre DOCX/XLSX), executáveis bloqueados, até 25MB, conteúdo em base64 no corpo JSON. **Não há antivírus de verdade.**
+- **Permissões:** enviar exige `project:update`; listar e baixar exige `project:read_documents` (nova; dada a `admin` e `gestor` pela migração `20261123000001_projetos_documentos` e pelo seed), porque a SOW é documento do cliente.
+
+| Método | Rota | Permissão | Auditoria |
+|---|---|---|---|
+| POST | `/projects/:id/documents` (`kind`, `filename`, `contentBase64`) | `project:update` | `upload_project_document` |
+| GET | `/projects/:id/documents` (metadados, sem conteúdo) | `project:read_documents` | — |
+| GET | `/projects/:id/documents/:documentId/content` | `project:read_documents` | `download_project_document` |
+
+O download devolve o arquivo com `Content-Disposition` (nome original) e `X-Content-SHA256`.
+
+**Evento `project.document_added`** (na mesma transação do envio): `project_id`, `code`, `document_id`, `kind`, `version`, `filename`, `mime_type`, `size_bytes`, `content_hash`, `uploaded_at`. Não leva o conteúdo.
+
+**Satélites (API key):** `GET /api/v1/integration/projects/:id/documents` e `GET /api/v1/integration/projects/:id/documents/:documentId/content`. Só respondem ao satélite que **assina** `project.document_added`; os outros recebem `403`. O Financeiro também pode baixar com o token do usuário (rotas acima), respeitando `project:read_documents`.
+
+**Frontend:** `/projects` (lista com nome, prazo previsto, troca de status na linha e exclusão de propostas), `/projects/new` (SOW opcional, enviada logo depois de criar o projeto; se o envio falhar, abre a edição com o aviso), `/projects/:id/edit` (o nome na lista abre a edição; seção "SOW do cliente" com envio de nova versão, lista de versões e download), `/projects/dashboard`. A seleção de projeto na nova requisição mostra `código — nome`.
 
 ---
 
