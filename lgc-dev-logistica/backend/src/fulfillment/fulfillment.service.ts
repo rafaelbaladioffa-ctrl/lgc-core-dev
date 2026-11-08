@@ -2,12 +2,12 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { ConfigService } from '@nestjs/config';
 import { FulfillmentStatus, Prisma } from '@prisma/client';
 import type { FulfillmentOrder } from '@prisma/client';
-import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { problem } from '../common/errors.js';
 import { todayBR } from '../stock/availability.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import type { CreateFulfillmentDto, ListFulfillmentQuery } from './fulfillment.dto.js';
+import { emitOutbound, orderCode, orderEventBase, summarizeItems } from './order-events.js';
 
 type Tx = Prisma.TransactionClient;
 type Actor = { userId: string };
@@ -17,7 +17,7 @@ const PRE_PICKING: FulfillmentStatus[] = ['RECEBIDA', 'EM_ANALISE', 'RESERVADA',
 const RESERVE_DAYS_AFTER_NEEDED = 7;
 const RESERVE_DEFAULT_DAYS = 14;
 
-export const orderCode = (seq: number) => `ATD-${String(seq).padStart(8, '0')}`;
+export { orderCode };
 
 @Injectable()
 export class FulfillmentService {
@@ -27,9 +27,7 @@ export class FulfillmentService {
   ) {}
 
   private emit(tx: Tx, eventType: string, payload: Record<string, unknown>) {
-    return tx.integrationMessage.create({
-      data: { direction: 'OUTBOUND', eventId: randomUUID(), eventType, occurredAt: new Date(), status: 'PENDING', payload: payload as Prisma.InputJsonValue },
-    });
+    return emitOutbound(tx, eventType, payload);
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -69,6 +67,17 @@ export class FulfillmentService {
       if (!project) warnings.push(`Projeto ${dto.projectAxisId} ainda não sincronizado do Axis.`);
       else if (!project.active) throw new UnprocessableEntityException(problem(`O projeto ${project.code ?? dto.projectAxisId} não está ativo no Axis.`, 'AXIS_REFERENCE_INVALID'));
     }
+    // Centro de custo e site de destino: o cache pode ainda não ter o cadastro (evento em trânsito); só avisa, nunca bloqueia.
+    if (dto.costCenterAxisId) {
+      const cc = await tx.axisMasterCache.findUnique({ where: { kind_axisId: { kind: 'COST_CENTER', axisId: dto.costCenterAxisId } } });
+      if (!cc) warnings.push(`Centro de custo ${dto.costCenterAxisId} ainda não sincronizado do Axis.`);
+      else if (!cc.active) warnings.push(`O centro de custo ${cc.code ?? dto.costCenterAxisId} está inativo no Axis.`);
+    }
+    if (dto.destinationSiteAxisId) {
+      const site = await tx.axisMasterCache.findUnique({ where: { kind_axisId: { kind: 'SITE', axisId: dto.destinationSiteAxisId } } });
+      if (!site) warnings.push(`Site de destino ${dto.destinationSiteAxisId} ainda não sincronizado do Axis.`);
+      else if (!site.active) warnings.push(`O site de destino ${site.code ?? dto.destinationSiteAxisId} está inativo no Axis.`);
+    }
     if (dto.recipientAxisId) {
       const collab = await tx.axisMasterCache.findFirst({ where: { axisId: dto.recipientAxisId, kind: { in: ['COLLABORATOR', 'USER'] } } });
       if (!collab) warnings.push(`Destinatário ${dto.recipientAxisId} ainda não sincronizado do Axis.`);
@@ -94,15 +103,34 @@ export class FulfillmentService {
         axisRequestId: dto.axisRequestId, requestVersion: version, sourceEventId, warehouseId: warehouse?.id,
         projectAxisId: dto.projectAxisId, costCenterAxisId: dto.costCenterAxisId, requesterAxisId: dto.requesterAxisId, recipientAxisId: dto.recipientAxisId,
         neededBy: dto.neededBy ? new Date(dto.neededBy) : undefined, notes: dto.notes, referenceWarnings: warnings, createdBy: actor.userId,
+        destinationSiteAxisId: dto.destinationSiteAxisId, destinationText: dto.destinationText, destinationLat: dto.destinationLat, destinationLng: dto.destinationLng,
         items: { create: [...merged.values()].map((m) => ({ materialId: m.materialId, requestedMaterialId: m.materialId, quantity: m.quantity, uomId: m.uomId, notes: m.notes })) },
       },
     });
-    await this.emit(tx, 'fulfillment.created', { order_id: order.id, code: orderCode(order.seq), axis_request_id: order.axisRequestId, version });
 
-    if (blockReason) return { order: await this.setStatus(tx, order.id, 'BLOQUEADA', blockReason), replayed: false };
-    if (needsAnalysis) return { order: await this.setStatus(tx, order.id, 'EM_ANALISE', `Versão ${version} recebida com separação já iniciada na versão anterior: requer análise.`), replayed: false };
-    if (!warehouse) return { order: await this.setStatus(tx, order.id, 'AGUARDANDO_INFORMACAO', 'Almoxarifado de atendimento não definido.'), replayed: false };
-    return { order: await this.reserve(tx, order.id), replayed: false };
+    // Situação inicial: bloqueada, em análise, sem almoxarifado ou o resultado da reserva (AGUARDANDO_ESTOQUE quando falta material).
+    const finalOrder = blockReason
+      ? await this.setStatus(tx, order.id, 'BLOQUEADA', blockReason)
+      : needsAnalysis
+        ? await this.setStatus(tx, order.id, 'EM_ANALISE', `Versão ${version} recebida com separação já iniciada na versão anterior: requer análise.`)
+        : !warehouse
+          ? await this.setStatus(tx, order.id, 'AGUARDANDO_INFORMACAO', 'Almoxarifado de atendimento não definido.')
+          : await this.reserve(tx, order.id);
+    await this.emitCreated(tx, finalOrder);
+    return { order: finalOrder, replayed: false };
+  }
+
+  /**
+   * `fulfillment.created` (Logística → Core): confirma a ordem, com a situação já resolvida pela reserva e, por item, o
+   * quanto está reservado e o que falta (a ordem fica AGUARDANDO_ESTOQUE enquanto faltar material: PA-11).
+   */
+  private async emitCreated(tx: Tx, order: FulfillmentOrder) {
+    const items = await tx.fulfillmentItem.findMany({ where: { orderId: order.id }, include: { reservations: { where: { status: { in: ['ATIVA', 'CONSUMIDA'] } } } }, orderBy: { createdAt: 'asc' } });
+    const rows = items.map((i) => {
+      const reserved = i.reservations.reduce((s, r) => s.plus(r.quantity), new Prisma.Decimal(0));
+      return { materialId: i.materialId, quantity: i.quantity, extra: { reserved: reserved.toString(), shortage: Prisma.Decimal.max(i.quantity.minus(reserved), 0).toString() } };
+    });
+    await this.emit(tx, 'fulfillment.created', { ...orderEventBase(order), items: await summarizeItems(tx, rows) });
   }
 
   private async resolveWarehouse(tx: Tx, dto: CreateFulfillmentDto) {
@@ -173,7 +201,7 @@ export class FulfillmentService {
 
     const status: FulfillmentStatus = fully === order.items.length ? 'RESERVADA' : any > 0 ? 'RESERVADA_PARCIAL' : 'AGUARDANDO_ESTOQUE';
     const updated = await this.setStatus(tx, order.id, status, status === 'RESERVADA' ? undefined : status === 'RESERVADA_PARCIAL' ? 'Reserva parcial: há itens com falta de estoque.' : 'Sem estoque disponível para reservar.');
-    await this.emit(tx, status === 'RESERVADA' ? 'reservation.confirmed' : status === 'RESERVADA_PARCIAL' ? 'reservation.partial' : 'reservation.failed', { order_id: order.id, code: orderCode(order.seq), axis_request_id: order.axisRequestId, version: order.requestVersion });
+    await this.emit(tx, status === 'RESERVADA' ? 'reservation.confirmed' : status === 'RESERVADA_PARCIAL' ? 'reservation.partial' : 'reservation.failed', orderEventBase(updated));
     await this.emit(tx, 'availability.changed', { warehouse_id: order.warehouseId, material_ids: order.items.map((i) => i.materialId) });
     return updated;
   }

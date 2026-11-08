@@ -13,9 +13,10 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
 | SSO por JWT compartilhado | Core → Logística | Funciona; tem falhas de segurança (§1) |
 | Launcher (`axisToken` de 90 s) | Core → Logística | Funciona |
 | Catálogo de compra e disponibilidade | Navegador do Core → Logística | Funciona via nginx; sem proxy no `vite dev` |
-| Webhook de eventos | Core → Logística | Envelope e assinatura batem; **os tipos de evento não** |
-| Eventos de saída da Logística | Logística → Core | **Não existe receptor no Core** |
+| Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística já entende `material_request.*` com destino, `site.*` e `cost_center.*`; **o Core ainda não emite** `material_request.*` nem `site.*` (§3) |
+| Eventos de saída da Logística | Logística → Core | Formato fixado (§4); **ainda não existe receptor no Core** |
 | API de consulta por API key | Logística → Core | Disponível no Core; **a Logística não usa** |
+| Consulta de materiais e custo por API key | Core → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); **o Core ainda não a chama** |
 
 ## 1. Identidade e sessão
 
@@ -73,35 +74,117 @@ e idempotência por `event_id`.
 |---|---|---|
 | `collaborator.created/updated/offboarded` | sim | sim |
 | `client.created/updated` | sim | sim |
-| `project.created/updated/status_changed/deleted` | sim (estado completo; ver [cadastros.md §10](dominio/cadastros.md#10-projetos)) | sim (qualquer `project.*` atualiza o cache; `deleted` chega com `status: encerrado`; desde 2026-11-08 o payload traz `site_id`, `site_code` e `site_name`, que o cache da Logística ainda não guarda) |
-| `cost_center.created/updated` | sim | **não (ignora)** |
-| `site.created/updated` (site do cliente, com endereço e coordenadas; ver [cadastros.md §9.1](dominio/cadastros.md#91-sites)) | sim (desde 2026-11-08) | **não assina ainda**; é o endereço de entrega que a ordem de envio para obra vai usar (PT-04 do plano "projeto aprovado → obra") |
+| `project.created/updated/status_changed/deleted` | sim (estado completo; ver [cadastros.md §10](dominio/cadastros.md#10-projetos)) | sim (qualquer `project.*` atualiza o cache; `deleted` chega com `status: encerrado`; desde 2026-11-08 o payload traz `site_id`, `site_code` e `site_name`) |
+| `cost_center.created/updated` | sim | **sim** (cache `COST_CENTER`; antes ignorado): a ordem confere o centro de custo, sem bloquear |
+| `site.created/updated` (site do cliente, com endereço e coordenadas; ver [cadastros.md §9.1](dominio/cadastros.md#91-sites)) | sim (desde 2026-11-08) | **sim** (cache `SITE`): destino das ordens de envio para obra |
 | `project.document_added` (SOW) | sim | não assina; o evento só vai para quem assinar |
 | `project.quote_requested` (cotação pelo Financeiro) | sim | não assina; o evento só vai para quem assinar |
 | `user.*` (inclui `user.disabled`) | **não** | sim |
 | `request.submitted/status_changed/completed` | sim | **não (ignora)** |
 | `sla.warning/breached` | sim | não |
-| `material_request.*` | **não** | sim (`material-request.adapter.ts`) |
+| `material_request.*` | **não** | sim (`material-request.adapter.ts`), inclusive o `destination` do envio para obra |
 | `ticket.status_changed` | **não** (módulo não existe) | sim (adaptador legado) |
 | `purchase_order.approved/changed` | **não** | sim |
 
 **Consequência:** uma requisição de material aprovada no Core não gera ordem de atendimento na
 Logística, e a desativação de usuário não chega.
 
+### 3.1 Envio de material para obra (`material_request.approved` com destino)
+
+Contrato do plano de projeto aprovado (§4.3), já aceito pela Logística. O Core emitirá o evento quando a requisição
+`envio_material` for aprovada:
+
+```json
+{
+  "request_id": "<uuid>", "version": 1, "code": "REQ-…",
+  "project_id": "<uuid>", "cost_center_id": "<uuid>",
+  "requester_id": null, "recipient_id": "<colaborador responsável do projeto>",
+  "warehouse_code": null, "needed_by": "2026-11-24",
+  "destination": { "site_id": "<uuid>", "site_code": "GRU53", "address": "…", "city": "…", "state": "SP",
+                   "latitude": -23.4, "longitude": -46.5 },
+  "items": [ { "material_code": "RED-CAB-0123", "quantity": "1200.000" } ]
+}
+```
+
+Regras do lado da Logística (detalhe na [especificação §12.2.1](../lgc-dev-logistica/docs/especificacao.md)):
+
+- Cada item traz `material_code` **ou** `material_id` e `quantity` em string decimal (até 6 casas) ou número, maior que zero; item
+  inválido ou material inexistente/inativo recusa a ordem inteira (400/422), e o Core reentrega.
+- `destination` é opcional. Vira o destino da ordem (`site_id`, texto `GRU53 — endereço, cidade/UF`, latitude e longitude, que vêm
+  juntas ou nenhuma) e preenche o destino do romaneio, editável antes da expedição.
+- Idempotente por (`request_id`, `version`); versão maior substitui a ordem se ainda não houve separação; `cancel_requested` cancela.
+- Projeto inativo bloqueia a ordem. **Centro de custo e site ausentes do cache só geram aviso** na ordem (os cadastros podem chegar
+  depois do evento); inativos também só avisam.
+- Sem estoque, a ordem fica `AGUARDANDO_ESTOQUE`; a Logística não compra (Suprimentos abre a compra do faltante).
+- Material vai direto ao site e é baixado na confirmação da entrega (`SAIDA_ENTREGA` com projeto e centro de custo).
+
+**`site.created/updated`** (a confirmar com o PT-01 do Core): a Logística lê `site_id` (obrigatório), `code` (ou `site_code`), `name`,
+`active` (opcional) e guarda o payload inteiro no cache. **`cost_center.*`** usa `cost_center_id`, `code`, `name` e `active`, como o Core já emite.
+
 ## 4. Eventos Logística → Core
 
 O outbox da Logística envia para `AXIS_EVENTS_URL` com `X-Logistica-Signature` e `Idempotency-Key`
-(`outbox-dispatcher.service.ts`). **O Core não tem endpoint de entrada**; com `AXIS_EVENTS_URL`
-vazio, as mensagens ficam `PENDING`. Eventos produzidos: `receipt.divergent`,
-`inventory.variance_detected`, `replenishment.suggested`, `alert.raised`, entre outros.
+(`outbox-dispatcher.service.ts`), no envelope `{ event_id, event_type, occurred_at, correlation_id, source: "logistica", payload }`.
+**O Core não tem endpoint de entrada** (PT-02 do plano); com `AXIS_EVENTS_URL` vazio, as mensagens ficam `PENDING`.
+Eventos produzidos: `receipt.divergent`, `inventory.variance_detected`, `replenishment.suggested`, `alert.raised`, entre outros, e os
+da ordem de atendimento abaixo, que o Core acompanhará (PT-09).
+
+### 4.1 Eventos da ordem de envio (formato exato)
+
+`fulfillment.created`, `reservation.confirmed|partial|failed`, `shipment.dispatched` e `delivery.confirmed|partial|refused` são gravados
+no outbox **na mesma transação** da escrita de negócio. Eventos da mesma transação têm o mesmo `created_at`: não dependa da ordem de
+chegada, use `status` e `request_version`. Fonte do detalhe: [especificação §12.3.2](../lgc-dev-logistica/docs/especificacao.md).
+
+Campos comuns do `payload`:
+
+| Campo | Conteúdo |
+|---|---|
+| `fulfillment_order_id` (e `order_id`, igual) | id da ordem na Logística |
+| `order_code` | `ATD-00000007` |
+| `axis_request_id` | `request_id` do `material_request.approved` do Core |
+| `request_version` | versão da requisição atendida |
+| `project_id`, `cost_center_id` | como vieram no pedido |
+| `status` | situação da ordem **depois** da operação (`RESERVADA`, `RESERVADA_PARCIAL`, `AGUARDANDO_ESTOQUE`, `EXPEDIDA`, `ENTREGUE`, `DIVERGENCIA`, …) |
+| `status_reason` | motivo legível ou `null` |
+| `destination` | `{ site_id, text, latitude, longitude }` ou `null` |
+| `items` | `[{ material_id, material_code, description, unit, quantity }]`, `quantity` em string decimal (não vai em `reservation.*`) |
+
+| Evento | Situação (`status`) | `items` | Campos extras |
+|---|---|---|---|
+| `fulfillment.created` | resultado da reserva: `RESERVADA`, `RESERVADA_PARCIAL`, `AGUARDANDO_ESTOQUE`, `AGUARDANDO_INFORMACAO`, `BLOQUEADA` ou `EM_ANALISE` | o pedido, com `reserved` e `shortage` por item | — |
+| `shipment.dispatched` | `EXPEDIDA` | itens dos volumes expedidos | `shipment_id`, `shipment_code`, `manifest`, `carrier`, `route`, `vehicle`, `dispatched_at`, `packages` |
+| `delivery.confirmed` | `ENTREGUE` | entregue **nesta** confirmação | `shipment_id`, `shipment_code`, `manifest`, `delivered_at`, `receiver_name`, `receiver_id`, `pending_packages: 0` |
+| `delivery.partial` | `EXPEDIDA` | entregue nesta confirmação | os mesmos, com `pending_packages` maior que zero |
+| `delivery.refused` | `DIVERGENCIA` | o recusado | os mesmos, mais `reason` |
+
+Mapeamento sugerido para o Core (PT-09): `fulfillment.created` → requisição `em_atendimento`, guarda `order_code` e mostra
+`AGUARDANDO_ESTOQUE` e as faltas; `shipment.dispatched` → `aguardando_entrega`; `delivery.confirmed` → encerra; `delivery.partial` → mantém,
+somando os `items` por `shipment_id`; `delivery.refused` → comentário com `reason`. O custo em R$ da entrega vem em
+`stock.movement.posted` (`project_id`, `cost_center_id`) e, no Financeiro, por `consumption-by-cost-center`.
+
+### 4.2 Consulta de materiais e custo (Core → Logística, por chave)
+
+`GET /api/v1/integration/materials?codes=A,B` com `X-Api-Key` (`INTEGRATION_API_KEY` da Logística), 1 a 200 códigos, `warehouse_code`
+opcional. Resposta `200`:
+
+```json
+{ "items": [ { "id": "<uuid>", "code": "RED-CAB-0123", "shortDescription": "Cabo óptico 12F", "unit": "M",
+               "averageCost": "3.3000", "lastCost": "3.4500", "available": "1500", "active": true } ],
+  "notFound": ["COD-DESCONHECIDO"] }
+```
+
+Sem chave ou chave errada `401`; sem `INTEGRATION_API_KEY` no servidor `503`; `codes` ausente, vazio ou com mais de 200 `400`. Custos são
+strings com 4 casas (ou `null`); `available` é o disponível publicável. O custo médio é móvel e recalculado a cada recebimento
+([especificação §12.5](../lgc-dev-logistica/docs/especificacao.md)); o Core usa o valor só para estimar a requisição.
 
 ## 5. Próximos passos (ordem sugerida)
 
 1. Endurecer o SSO (§1) — risco de segurança.
-2. Definir e implementar o contrato de requisição de material: o Core emitir `material_request.*`
-   (ou a Logística consumir `request.*` filtrando por categoria) e `user.disabled`.
-3. Criar o receptor de eventos da Logística no Core (`POST /integration/inbound`, HMAC, idempotência).
-4. Validar preço e material no servidor (o Core consulta a Logística com credencial de serviço).
+2. Definir e implementar o contrato de requisição de material: o Core emitir `material_request.*` (a Logística já o aceita, §3.1;
+   falta o lado do Core, PT-06) e `user.disabled`.
+3. Criar o receptor de eventos da Logística no Core (`POST /integration/inbound`, HMAC, idempotência; PT-02) e os handlers dos
+   eventos da §4.1 (PT-09).
+4. Validar preço e material no servidor: a rota da §4.2 já existe na Logística; falta o Core chamá-la com a chave de serviço (PT-06).
 5. Proteger custo no `purchase-catalog` (`material:read_cost`) e paginar.
 6. ~~Remover `SEED_REVISED_CATALOG` do runtime~~ (feito: o filtro saiu da listagem e do
    `purchase-catalog`, e o compose a define como `false`). Falta aposentar o seed `REV-` em si:

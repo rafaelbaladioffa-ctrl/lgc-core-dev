@@ -596,24 +596,29 @@ enum ReservationStatus {
 }
 
 model FulfillmentOrder {
-  id                String            @id @default(uuid())
-  seq               Int               @unique @default(autoincrement())
-  axisRequestId     String            @map("axis_request_id")
-  requestVersion    Int               @default(1) @map("request_version")
-  sourceEventId     String?           @map("source_event_id")
-  status            FulfillmentStatus @default(RECEBIDA)
-  statusReason      String?           @map("status_reason")
-  warehouseId       String?           @map("warehouse_id")
-  projectAxisId     String?           @map("project_axis_id")
-  costCenterAxisId  String?           @map("cost_center_axis_id")
-  requesterAxisId   String?           @map("requester_axis_id")
-  recipientAxisId   String?           @map("recipient_axis_id")
-  neededBy          DateTime?         @map("needed_by") @db.Date
-  notes             String?
-  referenceWarnings Json              @default("[]") @map("reference_warnings")
-  createdBy         String            @map("created_by")
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
+  id                    String            @id @default(uuid())
+  seq                   Int               @unique @default(autoincrement())
+  axisRequestId         String            @map("axis_request_id")
+  requestVersion        Int               @default(1) @map("request_version")
+  sourceEventId         String?           @map("source_event_id")
+  status                FulfillmentStatus @default(RECEBIDA)
+  statusReason          String?           @map("status_reason")
+  warehouseId           String?           @map("warehouse_id")
+  projectAxisId         String?           @map("project_axis_id")
+  costCenterAxisId      String?           @map("cost_center_axis_id")
+  requesterAxisId       String?           @map("requester_axis_id")
+  recipientAxisId       String?           @map("recipient_axis_id")
+  neededBy              DateTime?         @map("needed_by") @db.Date
+  // Destino da entrega (envio de material para obra, plano PT-04): site do Axis e texto legível para o romaneio.
+  destinationSiteAxisId String?           @map("destination_site_axis_id")
+  destinationText       String?           @map("destination_text")
+  destinationLat        Decimal?          @map("destination_lat") @db.Decimal(9, 6)
+  destinationLng        Decimal?          @map("destination_lng") @db.Decimal(9, 6)
+  notes                 String?
+  referenceWarnings     Json              @default("[]") @map("reference_warnings")
+  createdBy             String            @map("created_by")
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
 
   items FulfillmentItem[]
 
@@ -1410,7 +1415,7 @@ model IntegrationMessage {
 /// Cache dos mestres do Axis (empresa, unidade, usuário, colaborador, cliente, projeto, centro de custo):
 /// guarda só identificador externo + dados mínimos; nunca é editável aqui (3.3).
 model AxisMasterCache {
-  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER | COMPANY | UNIT
+  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER | SITE | COMPANY | UNIT
   axisId           String   @map("axis_id")
   code             String?
   name             String?

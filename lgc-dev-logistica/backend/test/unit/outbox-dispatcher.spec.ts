@@ -143,7 +143,7 @@ describe('OutboxDispatcherService (unit)', () => {
       await d.svc.dispatchOnce(50, NOW);
       expect(d.findMany).toHaveBeenCalledWith({
         where: { direction: 'OUTBOUND', status: 'PENDING', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: NOW } }] },
-        orderBy: { createdAt: 'asc' },
+        orderBy: [{ createdAt: 'asc' }, { occurredAt: 'asc' }],
         take: 50,
       });
     });

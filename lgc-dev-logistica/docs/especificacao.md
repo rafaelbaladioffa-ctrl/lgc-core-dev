@@ -296,7 +296,7 @@ Regras:
 - criticidade operacional A/B/C e classificação XYZ de demanda;
 - exige autorização HSE, Qualidade, TI ou gestor;
 - retornável, reparável, calibrável, locado ou descartável;
-- custo médio e último custo recebidos do Axis, conforme permissão.
+- custo médio e último custo, conforme permissão: o custo médio é móvel e é recalculado pela Logística a cada recebimento com custo (seção 12.5); o catálogo carregado traz o valor inicial.
 
 ### 7.3 Governança do cadastro
 
@@ -526,7 +526,7 @@ Campos: pedido Axis, fornecedor, NF/romaneio, veículo, volumes, item, quantidad
 ### 9.5 Entrega e consumo
 
 - entrega a colaborador: identificação, aceite e custódia quando retornável;
-- entrega a projeto/local: recebedor autorizado, data, geolocalização opcional e comprovante;
+- entrega a projeto/local: recebedor autorizado, data, geolocalização opcional e comprovante; quando a ordem vem de um envio para obra (seção 12.2.1), o romaneio sai com o destino do site do Axis (editável antes de expedir);
 - EPI: colaborador, CA, lote, tamanho, data e termo;
 - ativo/ferramenta: patrimônio/série, condição, custodiante e devolução prevista;
 - consumível: baixa para projeto/centro de custo somente após entrega confirmada;
@@ -642,16 +642,59 @@ Alternativos: `DIVERGENTE`, `QUARENTENA`, `REJEITADO` e `DEVOLVIDO_FORNECEDOR`.
 | `master.company.changed` | sincronizar empresa/unidade |
 | `master.user.changed` | usuário, vínculo, gestor e status (hoje: `user.created`/`user.updated`/`user.disabled` do Axis) |
 | `project.changed` | projeto, cliente, datas e status (hoje: `project.created`/`project.status_changed`) |
-| `cost_center.changed` | centro de custo permitido (hoje: não publicado como evento — resolver por reconciliação síncrona via `GET /cost-centers` até o Axis publicar) |
+| `site.created/updated` | site do cliente (código, nome, endereço, coordenadas): cache `SITE`, destino das ordens de envio para obra (seção 12.2.1) |
+| `cost_center.changed` | centro de custo (hoje: `cost_center.created/updated`): cache `COST_CENTER`; a ordem de atendimento confere o centro de custo nesse cache, sem bloquear (seção 12.2.1) |
 | `supplier.changed` | fornecedor e homologação (não publicado hoje — depende do Axis ter cadastro de fornecedores homologados; ver seção 0.4) |
 | `purchase_order.approved` | permitir recebimento contra pedido (não publicado hoje — ver seção 0.4) |
 | `purchase_order.changed` | atualizar itens, saldos e previsão (não publicado hoje) |
-| `material_request.approved` | criar ordem/reserva (MVP via adaptador de `ticket.status_changed`, ver seção 0.4) |
+| `material_request.approved` | criar ordem/reserva, com destino quando for envio para obra (seção 12.2.1; também via adaptador de `ticket.status_changed`, ver seção 0.4) |
 | `material_request.changed` | aplicar nova versão ou solicitar análise (idem) |
 | `material_request.cancel_requested` | avaliar cancelamento físico (idem) |
 | `stock_adjustment.approved` | autorizar ajuste inventarial (não publicado hoje — fluxo manual via tela de aprovação cruzada até existir) |
 | `disposal.approved` | autorizar descarte/baixa física (idem) |
 | `employee.terminated` | bloquear entregas e gerar pendências (hoje: `collaborator.offboarded`) |
+
+### 12.2.1 Envio de material para obra (`material_request.approved` com destino)
+
+Contrato do plano `docs/plano-projeto-aprovado-ponta-a-ponta.md` §4.3. O Core emite o evento quando a requisição de envio
+(`envio_material`) é aprovada pelo responsável do centro de custo; o adaptador (`material-request.adapter.ts`) o traduz na ordem de
+atendimento. Payload:
+
+```json
+{
+  "request_id": "<uuid>", "version": 1, "code": "REQ-…",
+  "project_id": "<uuid>", "cost_center_id": "<uuid>",
+  "requester_id": null, "recipient_id": "<colaborador responsável do projeto>",
+  "warehouse_code": null, "needed_by": "2026-11-24",
+  "destination": { "site_id": "<uuid>", "site_code": "GRU53", "address": "…", "city": "…", "state": "SP",
+                   "latitude": -23.4, "longitude": -46.5 },
+  "items": [ { "material_code": "RED-CAB-0123", "quantity": "1200.000" } ]
+}
+```
+
+- **Itens:** `material_code` ou `material_id`; `quantity` em string decimal (`^\d+(\.\d{1,6})?$`) ou número, maior que zero; o que não
+  se encaixa é 400 (o Core reentrega). Repetidos do mesmo material são somados. Material inexistente ou inativo recusa a ordem inteira
+  (`AXIS_REFERENCE_INVALID`).
+- **Destino (`destination`, opcional):** vira `fulfillment_orders.destination_site_axis_id` (`site_id`), `destination_text`
+  (`GRU53 — endereço, cidade/UF`, até 300 caracteres) e `destination_lat`/`destination_lng` (6 casas). Latitude e longitude vêm juntas
+  ou nenhuma; fora de ±90/±180 é 400. Sem `destination` (ticket legado, retirada) a ordem fica sem destino.
+- **Romaneio:** a expedição nasce com `shipments.destination` = texto do destino da ordem; `pack` ou `dispatch` com `destination` o
+  substituem (o site do Axis continua na ordem). A tela de Atendimento mostra o destino da ordem.
+- **Origem e prazo:** `warehouse_code` nulo usa o almoxarifado padrão (`DEFAULT_WAREHOUSE_CODE`); `needed_by` define a validade da reserva.
+- **Falta de material (PA-11):** a ordem fica `AGUARDANDO_ESTOQUE` (ou `RESERVADA_PARCIAL`); não há compra automática. O `fulfillment.created`
+  já informa, por item, `reserved` e `shortage`.
+- **Entrega direta ao site (PA-12):** a baixa `SAIDA_ENTREGA` acontece na confirmação da entrega, com `cost_center_id` e `project_id` da
+  ordem e o custo médio vigente (na falta, o último custo). Não há transferência para almoxarifado de obra.
+- **Referências do Axis:** projeto, centro de custo e site são conferidos no cache. Cadastro ainda não recebido **não bloqueia**: a ordem
+  guarda um aviso em `reference_warnings` (`Centro de custo … ainda não sincronizado do Axis.`, idem `Site de destino …`). Projeto inativo
+  bloqueia (como antes); centro de custo e site inativos só avisam.
+- **Versão e cancelamento:** `material_request.changed` (versão maior) substitui a ordem se ainda não houve separação, senão vai para
+  análise; `material_request.cancel_requested` cancela ou abre tarefa de retorno.
+
+**Cadastros (webhook):** `site.created/updated` grava o cache `SITE` (`axis_id` = `site_id`; `code` = `code` ou `site_code`; `name`;
+`active` se vier no payload; demais campos em `data`). `cost_center.*` grava o cache `COST_CENTER` (`cost_center_id`, `code`, `name`,
+`active`). Os dois seguem a regra de ordem da seção 12.4 (evento mais antigo que o guardado é descartado) e o reenvio de cadastros do
+Core (`resync-master-data`) os preenche.
 
 ### 12.3 Logística → Axis
 
@@ -659,11 +702,11 @@ Alternativos: `DIVERGENTE`, `QUARENTENA`, `REJEITADO` e `DEVOLVIDO_FORNECEDOR`.
 |---|---|
 | `material.changed` | publicar cadastro/versão |
 | `availability.changed` | invalidar cache e atualizar disponibilidade |
-| `fulfillment.created` | confirmar ordem logística |
-| `reservation.confirmed/partial/failed` | informar compromisso de estoque |
+| `fulfillment.created` | confirmar ordem logística, com situação e faltas (seção 12.3.2) |
+| `reservation.confirmed/partial/failed` | informar compromisso de estoque (campos comuns da seção 12.3.2) |
 | `picking.started/completed` | progresso operacional |
-| `shipment.dispatched` | romaneio, volumes e trânsito |
-| `delivery.confirmed/partial/refused` | comprovar entrega |
+| `shipment.dispatched` | romaneio, volumes e trânsito (seção 12.3.2) |
+| `delivery.confirmed/partial/refused` | comprovar entrega (seção 12.3.2) |
 | `receipt.confirmed/divergent` | confirmar recebimento físico |
 | `inventory.variance_detected` | solicitar análise/aprovação |
 | `stock.movement.posted/reversed` | refletir consumo/custo e auditoria |
@@ -694,6 +737,82 @@ Contrato em [../../docs/integracao-centros-de-custo.md §5](../../docs/integraca
   × custo médio do material (na falta, o último custo; sem custo, zero). Termos devolvidos ou perdidos não entram.
 - As duas rotas só leem; não passam pela auditoria de acesso (não há usuário) e não emitem eventos.
 
+### 12.3.2 Eventos de retorno ao Core (envio para obra)
+
+`fulfillment.created`, `reservation.*`, `shipment.dispatched` e `delivery.confirmed|partial|refused` são gravados no outbox
+(`integration_messages`, `direction = OUTBOUND`) **na mesma transação** da escrita de negócio e entregues a `AXIS_EVENTS_URL` no
+envelope `{ event_id, event_type, occurred_at, correlation_id, source: "logistica", payload }`, com `X-Logistica-Signature` e
+`Idempotency-Key = event_id` (seção 12.1). Eventos da mesma transação têm o mesmo `created_at`; a entrega desempata por `occurred_at`.
+O receptor deve tratar a ordem de chegada como não garantida e usar `status` e `request_version` do payload, não a sequência.
+
+**Campos comuns** (todos os eventos acima):
+
+| Campo | Conteúdo |
+|---|---|
+| `fulfillment_order_id` | id da ordem de atendimento (`order_id` repete o mesmo valor, por compatibilidade com `picking.*`) |
+| `order_code` | `ATD-00000007` |
+| `axis_request_id` | `request_id` do `material_request.approved` que originou a ordem |
+| `request_version` | versão da requisição atendida por esta ordem |
+| `project_id`, `cost_center_id` | como vieram no pedido (nulos se não vieram) |
+| `status` | situação da ordem **depois** da operação (`RESERVADA`, `AGUARDANDO_ESTOQUE`, `EXPEDIDA`, `ENTREGUE`, `DIVERGENCIA`…) |
+| `status_reason` | motivo legível da situação, ou `null` |
+| `destination` | `{ site_id, text, latitude, longitude }` (coordenadas em número ou `null`), ou `null` sem destino; em `shipment.dispatched` e `delivery.*` o `text` é o do romaneio |
+| `items` | `[{ material_id, material_code, description, unit, quantity }]`; `quantity` em string decimal na unidade de estoque (só `fulfillment.created`, `shipment.dispatched` e `delivery.*`) |
+
+**Campos próprios:**
+
+| Evento | Quando | `items` | Campos extras |
+|---|---|---|---|
+| `fulfillment.created` | ordem criada e reserva tentada (mesma transação) | o pedido, com `reserved` e `shortage` por item | — |
+| `reservation.confirmed` / `partial` / `failed` | reserva (re)calculada, inclusive por reserva manual ou nova tentativa | não leva | — |
+| `shipment.dispatched` | expedição despachada | itens dos volumes expedidos | `shipment_id`, `shipment_code` (`EXP-…`), `manifest` (`ROM-…`), `carrier`, `route`, `vehicle`, `dispatched_at`, `packages` |
+| `delivery.confirmed` | todos os volumes entregues (`status = ENTREGUE`) | o que foi entregue **nesta** confirmação | `shipment_id`, `shipment_code`, `manifest`, `delivered_at`, `receiver_name`, `receiver_id`, `pending_packages = 0` |
+| `delivery.partial` | parte dos volumes entregue (`status = EXPEDIDA`) | o entregue nesta confirmação | os mesmos, com `pending_packages` maior que zero |
+| `delivery.refused` | recusa (`status = DIVERGENCIA`) | o que foi recusado | os mesmos, mais `reason`; não há baixa de estoque |
+
+Exemplo (`delivery.partial`):
+
+```json
+{
+  "fulfillment_order_id": "…", "order_id": "…", "order_code": "ATD-00000007", "axis_request_id": "<request_id do Core>", "request_version": 1,
+  "project_id": "<uuid>", "cost_center_id": "<uuid>", "status": "EXPEDIDA", "status_reason": "Entrega parcial: 1 volume(s) pendente(s).",
+  "destination": { "site_id": "<uuid>", "text": "GRU53 — Rua das Fibras, 100, Sumaré/SP", "latitude": -23.4, "longitude": -46.5 },
+  "shipment_id": "…", "shipment_code": "EXP-00000003", "manifest": "ROM-00000003", "delivered_at": "2026-11-20T14:00:00.000Z",
+  "receiver_name": "Maria Souza", "receiver_id": "<colaborador>", "pending_packages": 1,
+  "items": [ { "material_id": "…", "material_code": "RED-CAB-0123", "description": "Cabo óptico 12F", "unit": "M", "quantity": "1000" } ]
+}
+```
+
+Para o total entregue de uma expedição parcial, some os `items` dos eventos `delivery.*` do mesmo `shipment_id`. Uma falha do Core nunca desfaz a
+entrega: o evento fica `PENDING` e é reenviado (seção 12.4). O consumo em R$ continua nos eventos `stock.movement.posted/reversed` (com
+`project_id` e `cost_center_id`) e na leitura da seção 12.3.1.
+
+### 12.3.3 Consulta de materiais para o Core (por chave)
+
+`GET /api/v1/integration/materials?codes=A,B` com `X-Api-Key` (mesma `INTEGRATION_API_KEY` e mesmo guard da seção 12.3.1; fora do JWT).
+O Core usa para estimar o valor da requisição de envio e mostrar a disponibilidade; nunca grava custo.
+
+- `codes`: de 1 a 200 códigos (`Material.code`) separados por vírgula (aceita `codes` repetido; espaços, vazios e repetidos são descartados;
+  cada código tem até 40 caracteres). Sem códigos, mais de 200 ou parâmetro desconhecido: **400**. Sem a chave ou com chave errada: **401**.
+  Chave não configurada no servidor: **503**.
+- `warehouse_code` (opcional): almoxarifado da disponibilidade; inexistente é 400. Sem ele vale `DEFAULT_WAREHOUSE_CODE` e, se não houver
+  (ou não existir), a soma de todos os almoxarifados.
+- Resposta **200** (itens na ordem pedida):
+
+```json
+{
+  "items": [
+    { "id": "<uuid>", "code": "RED-CAB-0123", "shortDescription": "Cabo óptico 12F", "unit": "M",
+      "averageCost": "3.3000", "lastCost": "3.4500", "available": "1500", "active": true }
+  ],
+  "notFound": ["COD-DESCONHECIDO"]
+}
+```
+
+`averageCost` e `lastCost` são strings decimais com 4 casas (ou `null` se o material ainda não tem custo); `available` é o disponível
+publicável (seção 4: condição `DISPONIVEL`, lote liberado e não vencido, menos o reservado); `active` é falso para material inativo (que a
+Logística não aceita em ordem nova). Código inexistente vem só em `notFound`.
+
 ### 12.4 Consistência e falhas
 
 - sistemas não compartilham tabelas de banco;
@@ -704,6 +823,24 @@ Contrato em [../../docs/integracao-centros-de-custo.md §5](../../docs/integraca
 - divergência gera fila de reconciliação, nunca correção silenciosa;
 - cache de catálogo no Axis deve mostrar momento da última atualização;
 - disponibilidade exibida no Axis é informativa até a reserva confirmada.
+
+### 12.5 Custo médio móvel
+
+A Logística mantém `materials.average_cost` (média móvel) e `last_cost` a partir do próprio ledger; não os recebe do Axis. A cada movimento
+`ENTRADA_RECEBIMENTO` com `unit_cost` e propriedade `PROPRIO`, na mesma transação do movimento (`StockService.updateAverageCost`):
+
+1. trava a linha do material (`SELECT … FOR UPDATE`): duas entradas simultâneas não ponderam sobre o mesmo saldo;
+2. lê o saldo próprio do material **antes** da entrada, somando todos os endereços e condições (quarentena e bloqueado incluídos);
+3. `average_cost = (saldo × custo médio + quantidade × custo da entrada) ÷ (saldo + quantidade)`, em `Prisma.Decimal`, arredondado a 4 casas
+   (meio para cima); com saldo zero, ou sem custo anterior, vale o custo da entrada. Material só com `last_cost` (carga do catálogo) usa esse
+   valor como base;
+4. `last_cost` = custo da entrada.
+
+**Estorno** de um recebimento (`POST /stock/movements/:id/reverse`): retira da média a quantidade e o valor da entrada
+(`(saldo × média − quantidade × custo) ÷ (saldo − quantidade)`); se o saldo zerar, ou o valor a retirar passar do que resta (parte já
+saiu), a média atual fica; `last_cost` volta ao custo do recebimento anterior ainda não estornado (sem recebimento anterior, fica como está).
+Saídas, transferências, ajustes e devoluções não alteram o custo. A baixa `SAIDA_ENTREGA` grava `unit_cost` = custo médio vigente (na falta,
+o último custo), que é o que o Financeiro lê na seção 12.3.1.
 
 ## 13. API do sistema logístico
 
@@ -781,7 +918,7 @@ Usar Problem Details e mensagens em português. Códigos mínimos: `INSUFFICIENT
 | `stock_balances` | dimensão de estoque e quantidades derivadas/otimizadas |
 | `stock_movements` | ledger imutável de entradas, saídas, reservas e transferências |
 | `reservations` | origem Axis, item, quantidade, lote/série e expiração |
-| `fulfillment_orders/items` | requisição Axis, projeto, CC, destinatário e estados |
+| `fulfillment_orders/items` | requisição Axis, projeto, CC, destinatário, destino (site do Axis, texto, latitude e longitude) e estados |
 | `picking_tasks/items` | rota de separação e confirmações |
 | `packages` | volume, peso, dimensões, lacre e conteúdo |
 | `shipments` | origem, destino, transportador, rota, romaneio e status |

@@ -5,7 +5,7 @@ import { fmtDateTime } from '../lib/format';
 import { fetchAllPages } from '../lib/paging';
 import { DataTable, Pager, useLoad, type Column } from '../ui';
 
-interface Order { id: string; seq: number; axisRequestId: string; status: string; statusReason: string | null; neededBy: string | null; notes: string | null; createdAt: string; updatedAt: string }
+interface Order { id: string; seq: number; axisRequestId: string; status: string; statusReason: string | null; neededBy: string | null; destinationText: string | null; destinationSiteAxisId: string | null; notes: string | null; createdAt: string; updatedAt: string }
 interface Page<T> { total: number; page: number; pageSize: number; items: T[] }
 
 const STATUS: Record<string, string> = { RECEBIDA: 'Recebida', EM_ANALISE: 'Em análise', RESERVADA: 'Reservada', RESERVADA_PARCIAL: 'Reservada parcial', LIBERADA_SEPARACAO: 'Liberada p/ separação', EM_SEPARACAO: 'Em separação', SEPARADA: 'Separada', EM_CONFERENCIA: 'Em conferência', PRONTA_EXPEDICAO: 'Pronta p/ expedição', EXPEDIDA: 'Expedida', ENTREGUE: 'Entregue', ENCERRADA: 'Encerrada', AGUARDANDO_ESTOQUE: 'Aguardando estoque', AGUARDANDO_INFORMACAO: 'Aguardando informação', BLOQUEADA: 'Bloqueada', CANCELAMENTO_SOLICITADO: 'Cancelamento solicitado', CANCELADA: 'Cancelada', DIVERGENCIA: 'Divergência' };
@@ -41,6 +41,7 @@ export function Fulfillment() {
     { key: 'r', header: 'Requisição no Axis', render: (o) => <code>{o.axisRequestId.slice(0, 8)}</code> },
     { key: 's', header: 'Situação', render: (o) => <span className={`pill ${['AGUARDANDO_ESTOQUE', 'AGUARDANDO_INFORMACAO'].includes(o.status) ? 'warn' : DONE.includes(o.status) ? 'ok' : ''}`}>{STATUS[o.status] ?? o.status}</span> },
     { key: 'n', header: 'Necessário até', render: (o) => { const s = sla(o); return o.neededBy ? <span className={s === 'late' ? 'err' : undefined}>{dateBr(o.neededBy)}{s === 'late' ? ' · atrasada' : s === 'soon' ? ' · vence em breve' : ''}</span> : '—'; } },
+    { key: 'd', header: 'Destino (site)', render: (o) => o.destinationText ?? (o.destinationSiteAxisId ? <code>{o.destinationSiteAxisId.slice(0, 8)}</code> : '—') },
     { key: 'm', header: 'Motivo', render: (o) => o.statusReason ?? '—' },
     { key: 'u', header: 'Atualizada em', render: (o) => fmtDateTime(o.updatedAt) },
   ];

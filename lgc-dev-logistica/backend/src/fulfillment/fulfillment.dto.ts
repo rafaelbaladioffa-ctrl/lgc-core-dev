@@ -28,6 +28,12 @@ export class CreateFulfillmentDto {
   @IsOptional() @IsDateString({ strict: true }, { message: 'Data necessária inválida (AAAA-MM-DD).' }) neededBy?: string;
   @IsOptional() @IsString() @MaxLength(500) notes?: string;
 
+  /** Destino da entrega (envio de material para obra): site do Axis, texto legível para o romaneio e coordenadas. */
+  @IsOptional() @IsString() @MaxLength(60) destinationSiteAxisId?: string;
+  @IsOptional() @IsString() @MaxLength(300) destinationText?: string;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 6 }, { message: 'Latitude inválida.' }) @Min(-90) @Max(90) destinationLat?: number;
+  @IsOptional() @IsNumber({ maxDecimalPlaces: 6 }, { message: 'Longitude inválida.' }) @Min(-180) @Max(180) destinationLng?: number;
+
   @IsArray({ message: 'Informe os itens.' }) @ArrayMinSize(1, { message: 'Informe ao menos um item.' }) @ArrayMaxSize(200, { message: 'No máximo 200 itens.' })
   @ValidateNested({ each: true }) @Type(() => FulfillmentItemDto)
   items!: FulfillmentItemDto[];

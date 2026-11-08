@@ -6,6 +6,7 @@ import { problem } from '../common/errors.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
+import { averageAfterEntry, averageAfterEntryReversal } from './cost.js';
 import type { ListBalancesQuery, ListMovementsQuery, PostMovementDto, ReverseMovementDto } from './stock.dto.js';
 
 const ENTRY_TYPES = ['ENTRADA_RECEBIMENTO', 'ENTRADA_DEVOLUCAO', 'AJUSTE_POSITIVO'];
@@ -212,6 +213,12 @@ export class StockService {
       throw new BadRequestException('Quantidade deve ser inteira para esta unidade.');
     }
 
+    // Custo médio móvel (PT-04): só a entrada por recebimento com custo informado, e o estorno dela, mexe no custo do material.
+    // Roda antes de alterar o saldo: a média pondera pelo saldo que existia antes desta entrada.
+    if (input.type === 'ENTRADA_RECEBIMENTO' && input.unitCost != null && ownership === 'PROPRIO') {
+      await this.updateAverageCost(tx, material.id, qty, new Prisma.Decimal(input.unitCost), isReversal, input.reversesMovementId);
+    }
+
     // Saldos: saída atômica (nunca negativo) e entrada por upsert.
     const lotKey = input.lotId ?? '';
     if (input.fromLocationId) {
@@ -251,6 +258,32 @@ export class StockService {
       },
     });
     return movement;
+  }
+
+  /**
+   * Recalcula `averageCost` (média ponderada pelo saldo próprio) e atualiza `lastCost` numa só transação.
+   * A linha do material é travada: duas entradas simultâneas do mesmo material não ponderam sobre o mesmo saldo.
+   * Estorno de entrada: retira a entrada da média e devolve `lastCost` ao custo do recebimento anterior
+   * (sem recebimento anterior registrado, o último custo fica como está).
+   */
+  async updateAverageCost(tx: Prisma.TransactionClient, materialId: string, quantity: Prisma.Decimal, unitCost: Prisma.Decimal, isReversal: boolean, reversesMovementId?: string) {
+    await tx.$queryRaw`SELECT id FROM materials WHERE id = ${materialId} FOR UPDATE`;
+    const material = await tx.material.findUniqueOrThrow({ where: { id: materialId }, select: { averageCost: true, lastCost: true } });
+    const { _sum } = await tx.stockBalance.aggregate({ where: { materialId, ownership: 'PROPRIO' }, _sum: { quantity: true } });
+    const onHand = _sum.quantity ?? new Prisma.Decimal(0);
+    // Material com custo só no último custo (carga do catálogo) usa esse valor como base da média.
+    const current = material.averageCost ?? material.lastCost;
+
+    if (!isReversal) {
+      await tx.material.update({ where: { id: materialId }, data: { averageCost: averageAfterEntry(onHand, current, quantity, unitCost), lastCost: unitCost } });
+      return;
+    }
+    const previous = await tx.stockMovement.findFirst({
+      where: { materialId, type: 'ENTRADA_RECEBIMENTO', unitCost: { not: null }, reversesMovementId: null, reversedBy: { is: null }, ...(reversesMovementId && { id: { not: reversesMovementId } }) },
+      orderBy: { seq: 'desc' }, select: { unitCost: true },
+    });
+    const average = averageAfterEntryReversal(onHand, current, quantity, unitCost);
+    await tx.material.update({ where: { id: materialId }, data: { ...(average && { averageCost: average }), lastCost: previous?.unitCost ?? material.lastCost } });
   }
 
   async listMovements(query: ListMovementsQuery, user: AuthenticatedUser) {

@@ -42,7 +42,7 @@ export class OutboxDispatcherService {
       // Uma instância por vez (a VPS pode ter réplicas): quem não obtém o lock simplesmente pula o ciclo.
       const [{ ok }] = await tx.$queryRaw<Array<{ ok: boolean }>>`SELECT pg_try_advisory_xact_lock(hashtext('outbox-dispatch')) AS ok`;
       if (!ok) return { ...summary, skippedLock: true };
-      const due = await tx.integrationMessage.findMany({ where: { direction: 'OUTBOUND', status: 'PENDING', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] }, orderBy: { createdAt: 'asc' }, take: limit });
+      const due = await tx.integrationMessage.findMany({ where: { direction: 'OUTBOUND', status: 'PENDING', OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] }, orderBy: [{ createdAt: 'asc' }, { occurredAt: 'asc' }], take: limit }); // createdAt = início da transação: eventos da mesma escrita desempatam por occurredAt
       for (const m of due) {
         try {
           await this.send(url, secret, m);

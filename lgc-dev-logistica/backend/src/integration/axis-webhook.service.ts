@@ -129,6 +129,18 @@ export class AxisWebhookService {
         if (!str('project_id')) throw new BadRequestException('project_id ausente.');
         master = { kind: 'PROJECT', axisId: str('project_id')!, code: str('code'), name: str('name'), active: str('status') ? !INACTIVE_PROJECT_STATUS.includes(str('status')!) : undefined, data: p };
         break;
+      case 'cost_center':
+        // Cadastro de centro de custo (cache): a ordem de atendimento o valida sem bloquear (PT-04).
+        if (!str('cost_center_id')) throw new BadRequestException('cost_center_id ausente.');
+        master = { kind: 'COST_CENTER', axisId: str('cost_center_id')!, code: str('code'), name: str('name'), active: typeof p['active'] === 'boolean' ? (p['active'] as boolean) : undefined, data: p };
+        break;
+      case 'site': {
+        // Site (obra/endereço de entrega) do Core: destino das ordens de envio de material (PT-04).
+        const siteId = str('site_id');
+        if (!siteId) throw new BadRequestException('site_id ausente.');
+        master = { kind: 'SITE', axisId: siteId, code: str('code') ?? str('site_code'), name: str('name'), active: typeof p['active'] === 'boolean' ? (p['active'] as boolean) : undefined, data: p };
+        break;
+      }
       case 'purchase_order':
         // Pedido aprovado/alterado no Axis (9.9): registra previsão e evita nova sugestão equivalente.
         if (action !== 'approved' && action !== 'changed') return 'ignored';

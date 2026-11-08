@@ -133,3 +133,79 @@ describe('adaptMaterialRequestEvent — outros eventos', () => {
     expect(adaptMaterialRequestEvent('material_request.rejected', { request_id: 'R1' })).toBeNull();
   });
 });
+
+// Envio de material para obra (plano projeto aprovado §4.3): destino do site e quantidade decimal em string.
+describe('adaptMaterialRequestEvent — material_request.approved com destino (§4.3)', () => {
+  const payload = (over: Record<string, unknown> = {}) => ({
+    request_id: '11111111-1111-4111-8111-111111111111', version: 1, code: 'REQ-1', project_id: 'proj-1', cost_center_id: 'cc-1',
+    requester_id: null, recipient_id: 'colab-1', warehouse_code: null, needed_by: '2026-11-24',
+    destination: { site_id: 'site-1', site_code: 'GRU53', address: 'Rua das Fibras, 100', city: 'Sumaré', state: 'SP', latitude: -23.4, longitude: -46.5 },
+    items: [{ material_code: 'RED-CAB-0123', quantity: '1200.000' }],
+    ...over,
+  });
+  const order = (p: Record<string, unknown>) => {
+    const r = adaptMaterialRequestEvent('material_request.approved', p);
+    if (r?.kind !== 'approved') throw new Error('esperava approved');
+    return r.order;
+  };
+
+  it('lê o destino do payload e monta o texto do romaneio', () => {
+    expect(order(payload())).toMatchObject({
+      axisRequestId: '11111111-1111-4111-8111-111111111111', projectAxisId: 'proj-1', costCenterAxisId: 'cc-1', recipientAxisId: 'colab-1', neededBy: '2026-11-24',
+      destinationSiteAxisId: 'site-1', destinationText: 'GRU53 — Rua das Fibras, 100, Sumaré/SP', destinationLat: -23.4, destinationLng: -46.5,
+    });
+    expect(order(payload()).requesterAxisId).toBeUndefined(); // requester_id nulo
+  });
+
+  it('quantidade decimal em string vira número; material_code ou material_id', () => {
+    const o = order(payload({ items: [{ material_code: 'A', quantity: '1200.000' }, { material_id: 'uuid-b', quantity: '0.5' }, { material_code: 'C', quantity: 3 }] }));
+    expect(o.items).toEqual([
+      { materialId: undefined, materialCode: 'A', quantity: 1200, notes: undefined },
+      { materialId: 'uuid-b', materialCode: undefined, quantity: 0.5, notes: undefined },
+      { materialId: undefined, materialCode: 'C', quantity: 3, notes: undefined },
+    ]);
+  });
+
+  it('quantidade inválida (texto, zero, negativa, notação científica, mais de 6 casas) é 400', () => {
+    for (const quantity of ['abc', '0', '0.000', '-1', '1e3', '1,5', '1.1234567', '', null, undefined, NaN]) {
+      expect(() => order(payload({ items: [{ material_code: 'A', quantity }] })), String(quantity)).toThrow('quantidade inválida');
+    }
+  });
+
+  it('sem destination a ordem fica sem destino (ticket legado e retirada continuam valendo)', () => {
+    const o = order(payload({ destination: undefined }));
+    expect(o.destinationSiteAxisId).toBeUndefined();
+    expect(o.destinationText).toBeUndefined();
+    expect(o.destinationLat).toBeUndefined();
+    expect(order(payload({ destination: null })).destinationText).toBeUndefined();
+    expect(order(ticket()).destinationText).toBeUndefined();
+  });
+
+  it('destino parcial: só o código do site já gera texto; endereço sem cidade não deixa "/" sobrando', () => {
+    expect(order(payload({ destination: { site_id: 's', site_code: 'GRU53' } })).destinationText).toBe('GRU53');
+    expect(order(payload({ destination: { site_id: 's', address: 'Av. X' } })).destinationText).toBe('Av. X');
+    expect(order(payload({ destination: { site_id: 's', city: 'Sumaré', state: 'SP' } })).destinationText).toBe('Sumaré/SP');
+    expect(order(payload({ destination: { site_id: 's' } })).destinationText).toBeUndefined();
+  });
+
+  it('coordenadas: aceita string decimal; arredonda a 6 casas; fora do intervalo ou só uma delas é 400', () => {
+    expect(order(payload({ destination: { site_id: 's', latitude: '-23.123456789', longitude: '-46.5' } }))).toMatchObject({ destinationLat: -23.123457, destinationLng: -46.5 });
+    expect(() => order(payload({ destination: { site_id: 's', latitude: 91, longitude: 0 } }))).toThrow('latitude inválida');
+    expect(() => order(payload({ destination: { site_id: 's', latitude: 0, longitude: 181 } }))).toThrow('longitude inválida');
+    expect(() => order(payload({ destination: { site_id: 's', latitude: 'norte', longitude: 0 } }))).toThrow('latitude inválida');
+    expect(() => order(payload({ destination: { site_id: 's', latitude: -23.4 } }))).toThrow('devem vir juntas');
+  });
+
+  it('destination que não é objeto é 400', () => {
+    for (const destination of ['GRU53', 7, ['x']]) expect(() => order(payload({ destination }))).toThrow('destination inválido');
+  });
+
+  it('material_request.changed leva o destino da nova versão', () => {
+    const r = adaptMaterialRequestEvent('material_request.changed', payload({ version: 2 }));
+    expect(r).toMatchObject({ kind: 'approved', order: { requestVersion: 2, destinationSiteAxisId: 'site-1' } });
+  });
+
+  it('cancel_requested segue sem destino', () => {
+    expect(adaptMaterialRequestEvent('material_request.cancel_requested', { request_id: 'r1', reason: 'Projeto cancelado' })).toEqual({ kind: 'cancel_requested', axisRequestId: 'r1', reason: 'Projeto cancelado' });
+  });
+});
