@@ -12,6 +12,11 @@ import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { ProjectDocumentsService, contentDisposition } from './project-documents.service.js';
 import { CreateProjectDocumentDto } from './dto/create-project-document.dto.js';
+import { ProjectQuotesService } from './project-quotes.service.js';
+import { RequestProjectQuoteDto } from './dto/project-quote.dto.js';
+
+/** A Bid é guardada como ZIP genérico (detecção pelos bytes); o download usa o tipo de planilha. */
+const BID_CONTENT_TYPE = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 @Controller('projects')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -19,6 +24,7 @@ export class ProjectsController {
   constructor(
     private readonly projectsService: ProjectsService,
     private readonly documentsService: ProjectDocumentsService,
+    private readonly quotesService: ProjectQuotesService,
   ) {}
 
   @Post()
@@ -88,5 +94,33 @@ export class ProjectsController {
       'X-Content-SHA256': document.contentHash,
     });
     res.send(document.content);
+  }
+
+  // Cotação pelo Financeiro (docs/integracao-core-financeiro.md §4). Pedir exige project:update;
+  // ver a cotação e baixar a Bid exige project:read_documents (a Bid traz os valores cobrados).
+  @Post(':id/quote-requests')
+  @RequirePermissions('project:update')
+  @AuditAction({ action: 'request_project_quote', resourceType: 'project', resourceIdParam: 'id' })
+  requestQuote(@Param('id') id: string, @Body() dto: RequestProjectQuoteDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.quotesService.request(id, dto, user.userId);
+  }
+
+  @Get(':id/quotes')
+  @RequirePermissions('project:read_documents')
+  listQuotes(@Param('id') id: string) {
+    return this.quotesService.list(id);
+  }
+
+  @Get(':id/quotes/:quoteId/bid')
+  @RequirePermissions('project:read_documents')
+  @AuditAction({ action: 'download_project_bid', resourceType: 'project', resourceIdParam: 'id' })
+  async downloadBid(@Param('id') id: string, @Param('quoteId') quoteId: string, @Res() res: Response) {
+    const quote = await this.quotesService.getBid(id, quoteId);
+    res.set({
+      'Content-Type': BID_CONTENT_TYPE,
+      'Content-Disposition': contentDisposition(quote.bidFilename),
+      'X-Content-SHA256': quote.bidContentHash,
+    });
+    res.send(quote.bidContent);
   }
 }

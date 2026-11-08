@@ -2,6 +2,7 @@
 @import "./styles/request-catalog.css";
 @import "./styles/request-form.css";
 @import "./styles/request-quotations.css";
+@import "./styles/project-quotes.css";
 
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100svh; margin: 0; }

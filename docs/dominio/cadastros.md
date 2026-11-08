@@ -285,6 +285,44 @@ O download devolve o arquivo com `Content-Disposition` (nome original) e `X-Cont
 
 **Frontend:** `/projects` (lista com nome, prazo previsto, troca de status na linha e exclusão de propostas), `/projects/new` (SOW opcional, enviada logo depois de criar o projeto; se o envio falhar, abre a edição com o aviso), `/projects/:id/edit` (o nome na lista abre a edição; seção "SOW do cliente" com envio de nova versão, lista de versões e download), `/projects/dashboard`. A seleção de projeto na nova requisição mostra `código — nome`.
 
+### 10.2 Cotação pelo Financeiro
+
+O comercial pede a cotação no Core e o módulo Projetos do Financeiro devolve, a cada revisão aprovada
+para envio, a **Bid preenchida** e a **equipe orçada** (quantidade por função × dias). Custo, salário e
+lucro nunca vêm para o Core. Contrato: [integracao-core-financeiro.md §4](../integracao-core-financeiro.md#4-cotação-do-projeto).
+
+- **Pedido** (`project_quote_requests`): `project_id`, `sow_document_id` (a SOW vigente no momento),
+  `notes` (recado para o orçamentista, até 2000 caracteres), `requested_by_user_id`, `created_at`. Só
+  projeto em `proposta` e com SOW (`400` nos outros casos). Pode ser repetido (ex.: SOW nova); cada
+  pedido fica no histórico e emite `project.quote_requested`.
+- **Cotação** (`project_quotes`): uma por revisão do Financeiro, única por (`satellite_id`,
+  `external_revision_id`). Guarda `revision_number`, a SOW usada, `work_days`, início e conclusão
+  previstos da cotação (não mudam o prazo do projeto), `team` (por função: `role_key`, `role_name`,
+  `field_role`, `people`, `days`, `hours`), `field_people` e `total_hours` somados, quem aprovou o
+  envio no Financeiro e a Bid (`bid_*`, `BYTEA`, SHA-256). A de maior revisão é a vigente.
+- **Situação** mostrada na tela: `nao_solicitada`, `aguardando` (há pedido mais novo que a última
+  cotação) e `recebida`.
+- **Permissões:** pedir exige `project:update`; ver a cotação e baixar a Bid exige
+  `project:read_documents` (a Bid traz os valores cobrados do cliente).
+
+| Método | Rota | Permissão | Auditoria |
+|---|---|---|---|
+| POST | `/projects/:id/quote-requests` (`notes?`) | `project:update` | `request_project_quote` |
+| GET | `/projects/:id/quotes` (situação, pedidos e cotações, sem a Bid) | `project:read_documents` | — |
+| GET | `/projects/:id/quotes/:quoteId/bid` | `project:read_documents` | `download_project_bid` |
+
+**Evento `project.quote_requested`** (na mesma transação do pedido): estado completo do projeto (§10)
+mais `quote_request_id`, `sow_document_id`, `sow_version`, `sow_filename`, `sow_content_hash`, `notes`,
+`requested_by_user_id`, `requested_by_email`, `requested_at`.
+
+**Satélite (API key):** `POST /api/v1/integration/projects/:id/quotes`, só para o satélite que
+**assina** `project.quote_requested` (`403` para os outros). Sem `@AuditAction`, porque não há usuário: a
+cotação guarda o satélite que enviou.
+
+**Frontend:** seção "Cotação do Financeiro" em `/projects/:id/edit`: situação, botão "Solicitar
+cotação" (com recado opcional; só em proposta), cartões por revisão (dias, pessoas em campo, horas,
+equipe por função, download da Bid) e histórico de pedidos.
+
 ---
 
 ## 11. Divergências em relação ao planning v0.2

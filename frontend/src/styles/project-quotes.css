@@ -1,0 +1,23 @@
+/* Edição do projeto: cotação do Financeiro (pedido, situação, equipe orçada e Bid). */
+.project-quotes { display: flex; flex-direction: column; gap: var(--space-3); font-size: var(--text-sm); }
+.project-quotes__status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.project-quotes__hint { margin: 0; color: var(--foreground-muted); font-size: var(--text-xs); }
+.project-quotes__request { display: flex; flex-direction: column; gap: var(--space-2); }
+.project-quotes__request textarea { width: 100%; min-height: 56px; resize: vertical; }
+.project-quotes__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.project-quotes__notice { margin: 0; color: var(--success); font-size: var(--text-xs); }
+.project-quotes__error { margin: 0; color: var(--danger); font-size: var(--text-xs); }
+.project-quote-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
+.project-quote-card--old { background: var(--bg-elevated); }
+.project-quote-card__head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); }
+.project-quote-card__title { font-weight: 600; }
+.project-quote-card__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-2) var(--space-3); margin: 0; }
+.project-quote-card__grid dt { color: var(--foreground-muted); font-size: var(--text-xs); }
+.project-quote-card__grid dd { margin: 0; font-weight: 600; }
+.project-quote-team__scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.project-quote-team { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.project-quote-team th, .project-quote-team td { padding: var(--space-2) var(--space-3); text-align: left; border-bottom: 1px solid var(--border-subtle); }
+.project-quote-team thead th { color: var(--foreground-muted); background: var(--surface-secondary); font-weight: 600; white-space: nowrap; }
+.project-quote-team td.num, .project-quote-team th.num { text-align: right; }
+.project-quote-team tfoot td { font-weight: 600; background: var(--surface-secondary); border-bottom: 0; }
+.project-quote-history { margin: 0; padding-left: var(--space-4); color: var(--foreground-muted); font-size: var(--text-xs); }

@@ -48,6 +48,57 @@ export interface ProjectDocument {
   uploadedBy?: { email: string };
 }
 
+export type ProjectQuoteStatus = 'nao_solicitada' | 'aguardando' | 'recebida';
+
+export const PROJECT_QUOTE_STATUS_LABEL: Record<ProjectQuoteStatus, string> = {
+  nao_solicitada: 'Cotação não solicitada',
+  aguardando: 'Aguardando o Financeiro',
+  recebida: 'Cotação recebida',
+};
+
+export interface ProjectQuoteRequest {
+  id: string;
+  createdAt: string;
+  notes: string | null;
+  requestedByEmail: string;
+  sowVersion: number;
+}
+
+/** Uma função da equipe orçada: quantidade de pessoas, nunca nomes. */
+export interface ProjectQuoteTeamLine {
+  role_key: string;
+  role_name: string;
+  field_role: boolean;
+  people: number | null;
+  days: number | null;
+  hours: number;
+}
+
+export interface ProjectQuote {
+  id: string;
+  revisionNumber: number;
+  sowVersion: number | null;
+  workDays: number;
+  /** AAAA-MM-DD */
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  team: ProjectQuoteTeamLine[];
+  fieldPeople: number;
+  totalHours: number;
+  approvedAt: string | null;
+  approvedByEmail: string | null;
+  bidFilename: string;
+  bidSizeBytes: number;
+  receivedAt: string;
+  satelliteName: string;
+}
+
+export interface ProjectQuotes {
+  status: ProjectQuoteStatus;
+  requests: ProjectQuoteRequest[];
+  quotes: ProjectQuote[];
+}
+
 export const projectsApi = {
   list: () => api.get<Project[]>('/projects').then((r) => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then((r) => r.data),
@@ -61,4 +112,9 @@ export const projectsApi = {
     api.post<ProjectDocument>(`/projects/${id}/documents`, input).then((r) => r.data),
   downloadDocument: (id: string, documentId: string) =>
     api.get<Blob>(`/projects/${id}/documents/${documentId}/content`, { responseType: 'blob' }).then((r) => r.data),
+  listQuotes: (id: string) => api.get<ProjectQuotes>(`/projects/${id}/quotes`).then((r) => r.data),
+  requestQuote: (id: string, notes?: string) =>
+    api.post<ProjectQuoteRequest>(`/projects/${id}/quote-requests`, notes ? { notes } : {}).then((r) => r.data),
+  downloadBid: (id: string, quoteId: string) =>
+    api.get<Blob>(`/projects/${id}/quotes/${quoteId}/bid`, { responseType: 'blob' }).then((r) => r.data),
 };

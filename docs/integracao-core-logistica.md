@@ -76,6 +76,7 @@ e idempotência por `event_id`.
 | `project.created/updated/status_changed/deleted` | sim (estado completo; ver [cadastros.md §10](dominio/cadastros.md#10-projetos)) | sim (qualquer `project.*` atualiza o cache; `deleted` chega com `status: encerrado`) |
 | `cost_center.created/updated` | sim | **não (ignora)** |
 | `project.document_added` (SOW) | sim | não assina; o evento só vai para quem assinar |
+| `project.quote_requested` (cotação pelo Financeiro) | sim | não assina; o evento só vai para quem assinar |
 | `user.*` (inclui `user.disabled`) | **não** | sim |
 | `request.submitted/status_changed/completed` | sim | **não (ignora)** |
 | `sla.warning/breached` | sim | não |

@@ -14,6 +14,6 @@ import { AuthModule } from '../auth/auth.module.js';
   imports: [ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]), AuthModule],
   controllers: [IntegrationQueryController, IntegrationAdminController, IntegrationOutboxController],
   providers: [OutboxService, OutboxDispatcherService, SatellitesService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
-  exports: [OutboxService],
+  exports: [OutboxService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
 })
 export class IntegrationModule {}

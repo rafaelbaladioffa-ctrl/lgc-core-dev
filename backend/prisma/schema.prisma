@@ -85,6 +85,7 @@ model User {
   collaboratorId String?   @unique @map("collaborator_id")
   collaborator   Collaborator? @relation(fields: [collaboratorId], references: [id])
   projectDocuments ProjectDocument[]
+  projectQuoteRequests ProjectQuoteRequest[]
   refreshTokens  RefreshToken[]
   userRoles      UserRole[]
   auditLogs      AuditLog[]
@@ -358,6 +359,8 @@ model Project {
   proposalSequence          Int      @map("proposal_sequence")
   requests                  Request[]
   documents                 ProjectDocument[]
+  quoteRequests             ProjectQuoteRequest[]
+  quotes                    ProjectQuote[]
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
@@ -385,10 +388,63 @@ model ProjectDocument {
   content          Bytes
   uploadedByUserId String              @map("uploaded_by_user_id")
   uploadedBy       User                @relation(fields: [uploadedByUserId], references: [id])
+  quoteRequests    ProjectQuoteRequest[]
+  quotes           ProjectQuote[]
   createdAt        DateTime            @default(now()) @map("created_at")
 
   @@unique([projectId, kind, version])
   @@map("project_documents")
+}
+
+/// Pedido de cotação ao Financeiro ("Solicitar cotação"). Histórico: cada pedido fica guardado e
+/// emite `project.quote_requested` com a SOW vigente no momento.
+model ProjectQuoteRequest {
+  id                String          @id @default(uuid())
+  projectId         String          @map("project_id")
+  project           Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sowDocumentId     String          @map("sow_document_id")
+  sowDocument       ProjectDocument @relation(fields: [sowDocumentId], references: [id], onDelete: Cascade)
+  notes             String?
+  requestedByUserId String          @map("requested_by_user_id")
+  requestedBy       User            @relation(fields: [requestedByUserId], references: [id])
+  createdAt         DateTime        @default(now()) @map("created_at")
+
+  @@index([projectId])
+  @@map("project_quote_requests")
+}
+
+/// Cotação devolvida pelo Financeiro: uma por revisão aprovada para envio. Traz a Bid preenchida e
+/// a equipe orçada (quantidade por função × dias). Nunca traz custo, salário ou lucro.
+model ProjectQuote {
+  id                 String               @id @default(uuid())
+  projectId          String               @map("project_id")
+  project            Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  satelliteId        String               @map("satellite_id")
+  satellite          IntegrationSatellite @relation(fields: [satelliteId], references: [id])
+  /// Id da revisão no satélite; reenviar a mesma revisão não duplica.
+  externalRevisionId String               @map("external_revision_id")
+  revisionNumber     Int                  @map("revision_number")
+  sowDocumentId      String?              @map("sow_document_id")
+  sowDocument        ProjectDocument?     @relation(fields: [sowDocumentId], references: [id], onDelete: SetNull)
+  workDays           Decimal              @map("work_days") @db.Decimal(8, 2)
+  plannedStartDate   DateTime?            @map("planned_start_date") @db.Date
+  plannedEndDate     DateTime?            @map("planned_end_date") @db.Date
+  /// Linhas por função: role_key, role_name, field_role, people, days, hours.
+  team               Json
+  fieldPeople        Int                  @map("field_people")
+  totalHours         Decimal              @map("total_hours") @db.Decimal(12, 2)
+  approvedAt         DateTime?            @map("approved_at")
+  approvedByEmail    String?              @map("approved_by_email")
+  bidFilename        String               @map("bid_filename")
+  bidMimeType        String               @map("bid_mime_type")
+  bidSizeBytes       Int                  @map("bid_size_bytes")
+  bidContentHash     String               @map("bid_content_hash")
+  bidContent         Bytes                @map("bid_content")
+  receivedAt         DateTime             @default(now()) @map("received_at")
+
+  @@unique([satelliteId, externalRevisionId])
+  @@index([projectId])
+  @@map("project_quotes")
 }
 
 enum RequestConfidentiality {
@@ -774,6 +830,7 @@ model IntegrationSatellite {
   apiKeyHash    String          @map("api_key_hash")
   status        SatelliteStatus @default(active)
   subscriptions IntegrationSubscription[]
+  projectQuotes ProjectQuote[]
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 

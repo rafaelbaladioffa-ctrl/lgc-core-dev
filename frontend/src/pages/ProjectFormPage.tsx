@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FormPage, FormSection } from '../components/layout/FormPage';
-import { projectsApi, type CreateProjectInput } from '../api/projects';
+import { projectsApi, type CreateProjectInput, type ProjectStatus } from '../api/projects';
 import { clientsApi, type Client } from '../api/clients';
 import { costCentersApi, type CostCenter } from '../api/costCenters';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { translateApiError } from '../utils/apiError';
 import { useAuth } from '../context/AuthContext';
 import { ProjectDocuments } from '../components/ProjectDocuments';
+import { ProjectQuotes } from '../components/ProjectQuotes';
 import { DOCUMENT_ACCEPT, readFileAsBase64 } from '../utils/fileUpload';
 
 const emptyForm: CreateProjectInput = {
@@ -33,6 +34,7 @@ export function ProjectFormPage() {
   const [collaborators, setCollaborators] = useState<CollaboratorSafe[]>([]);
   const [form, setForm] = useState<CreateProjectInput>(emptyForm);
   const [code, setCode] = useState<string | null>(null);
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
   const location = useLocation();
   // Mensagem vinda da criação quando o projeto foi criado mas a SOW não subiu.
   const [error, setError] = useState<string | null>((location.state as { error?: string } | null)?.error ?? null);
@@ -54,6 +56,7 @@ export function ProjectFormPage() {
       .get(id)
       .then((p) => {
         setCode(p.code);
+        setProjectStatus(p.status);
         setForm({
           name: p.name ?? '',
           clientId: p.clientId,
@@ -197,6 +200,11 @@ export function ProjectFormPage() {
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>A SOW pode ser anexada na edição do projeto.</p>
         )}
       </FormSection>
+      {isEdit && id && (
+        <FormSection title="Cotação do Financeiro">
+          <ProjectQuotes projectId={id} projectStatus={projectStatus} />
+        </FormSection>
+      )}
     </FormPage>
   );
 }

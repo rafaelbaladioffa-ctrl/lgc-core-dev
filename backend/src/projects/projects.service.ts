@@ -14,19 +14,19 @@ const ALLOWED_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
   encerrado: [],
 };
 
-const SNAPSHOT_INCLUDE = {
+export const SNAPSHOT_INCLUDE = {
   costCenter: { select: { id: true, code: true, name: true } },
 } satisfies Prisma.ProjectInclude;
 
 type ProjectWithCostCenter = Prisma.ProjectGetPayload<{ include: typeof SNAPSHOT_INCLUDE }>;
 
 /** `AAAA-MM-DD` → Date em UTC (coluna `DATE`); `null` apaga; `undefined` mantém. */
-function toDateOnly(value: string | null | undefined): Date | null | undefined {
+export function toDateOnly(value: string | null | undefined): Date | null | undefined {
   if (value === undefined || value === null) return value;
   return new Date(`${value}T00:00:00Z`);
 }
 
-function formatDateOnly(value: Date | null): string | null {
+export function formatDateOnly(value: Date | null): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
 }
 

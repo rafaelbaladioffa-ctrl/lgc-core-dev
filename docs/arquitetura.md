@@ -71,7 +71,7 @@ Domínio em detalhe: [dominio/cadastros.md](dominio/cadastros.md) e
 
 ### Modelo de dados
 
-31 models e 21 enums em `backend/prisma/schema.prisma`; 29 migrações, aplicadas com
+36 models e 22 enums em `backend/prisma/schema.prisma`; 35 migrações, aplicadas com
 `npm run db:migrate` ([operacao.md §4](operacao.md#4-migrações--cuidados-obrigatórios)). Desde
 2026-11-07 o histórico aplica do zero e o banco não tem objetos do BPM (`20261121000000_remove_bpm`).
 
@@ -112,13 +112,17 @@ satélites assinantes com envelope `{event_id, event_type, occurred_at, payload}
 satélite deduplica por `event_id`.
 
 Eventos emitidos hoje: `client.created|updated`, `collaborator.created|updated|offboarded`,
-`project.created|updated|status_changed|deleted|document_added`, `cost_center.created|updated`,
+`project.created|updated|status_changed|deleted|document_added|quote_requested`, `cost_center.created|updated`,
 `request.submitted|status_changed|completed`,
 `sla.warning|breached`. **Não** são emitidos: `user.*`, `material_request.*`, `purchase_order.*`.
 
 **Consulta síncrona (satélite → Core).** `GET /api/v1/integration/{collaborators,users,clients,projects,sectors,cost-centers}`
 com API key; só campos não sensíveis. Exceção: documentos do projeto (SOW) em `/integration/projects/:id/documents`, só para o
 satélite que assina `project.document_added` ([cadastros.md §10.1](dominio/cadastros.md#101-documentos-do-projeto-sow)).
+
+**Escrita satélite → Core.** Única rota hoje: `POST /api/v1/integration/projects/:id/quotes`, em que o
+Financeiro devolve a cotação do projeto (Bid e equipe orçada), só para o satélite que assina
+`project.quote_requested` ([cadastros.md §10.2](dominio/cadastros.md#102-cotação-pelo-financeiro)).
 
 **Administração.** `POST /integration/satellites` devolve API key e segredo HMAC uma única vez;
 `POST /integration/satellites/:id/test-webhook`; `POST /integration/satellites/:id/launch` gera URL
