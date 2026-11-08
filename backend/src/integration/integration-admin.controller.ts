@@ -1,7 +1,8 @@
-import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Post, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, Patch, Post, UseGuards } from '@nestjs/common';
 import { SatellitesService } from './satellites.service.js';
 import { OutboxDispatcherService } from './outbox-dispatcher.service.js';
 import { CreateSatelliteDto } from './dto/create-satellite.dto.js';
+import { UpdateSatelliteDto } from './dto/update-satellite.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
@@ -46,6 +47,20 @@ export class IntegrationAdminController {
   @RequirePermissions('integration:read')
   list() {
     return this.satellitesService.statusOverview();
+  }
+
+  @Get(':id')
+  @RequirePermissions('integration:read')
+  findOne(@Param('id') id: string) {
+    return this.satellitesService.findSafe(id);
+  }
+
+  /** Edita a assinatura de um satélite já cadastrado (a tela de satélite, em modo edição). */
+  @Patch(':id')
+  @RequirePermissions('integration:manage')
+  @AuditAction({ action: 'update_satellite_subscriptions', resourceType: 'integration', resourceIdParam: 'id' })
+  update(@Param('id') id: string, @Body() dto: UpdateSatelliteDto) {
+    return this.satellitesService.updateSubscriptions(id, dto.subscribedEvents);
   }
 
   @Post(':id/test-webhook')

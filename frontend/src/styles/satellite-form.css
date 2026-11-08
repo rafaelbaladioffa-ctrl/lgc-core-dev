@@ -1,0 +1,25 @@
+/* Cadastro de satélite e edição da assinatura: eventos agrupados por família (docs/mapa-interoperabilidade.md §6). */
+.satellite-form-fields { display: flex; flex-direction: column; gap: var(--space-3); }
+.satellite-form-fields input { width: 100%; box-sizing: border-box; }
+.satellite-form-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
+.satellite-form-summary dt { color: var(--foreground-muted); }
+.satellite-form-summary dd { margin: 0; word-break: break-all; }
+.satellite-form-hint { margin: 0 0 var(--space-3); font-size: var(--text-xs); color: var(--foreground-muted); }
+.satellite-form-error { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--danger); }
+
+.event-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--space-3); }
+.event-picker-family { margin: 0; padding: var(--space-3); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--surface-secondary); }
+.event-picker-family legend { padding: 0 var(--space-1); }
+.event-picker-family-toggle { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); font-weight: 600; color: var(--foreground); }
+.event-picker-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.event-picker-item { display: flex; align-items: flex-start; gap: var(--space-2); font-size: var(--text-sm); }
+.event-picker-item input { margin-top: 3px; }
+.event-picker-item code { font-size: var(--text-xs); color: var(--foreground); }
+.event-picker-item span { display: block; font-size: var(--text-xs); color: var(--foreground-muted); }
+.event-picker-count { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--foreground-muted); }
+
+.satellite-credentials { max-width: 520px; }
+.satellite-credentials-warning { margin: 0 0 var(--space-3); font-size: var(--text-sm); font-weight: 600; color: var(--danger); }
+.satellite-credentials label { display: block; font-size: var(--text-xs); color: var(--foreground-muted); }
+.satellite-credentials code { display: block; margin: var(--space-1) 0 var(--space-3); padding: var(--space-2); border-radius: var(--radius-sm); background: var(--background); word-break: break-all; }
+.satellite-credentials-close { width: 100%; }

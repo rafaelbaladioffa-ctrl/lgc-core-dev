@@ -409,6 +409,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/integrations/:id/edit"
+        element={
+          <PrivateRoute permission="integration:manage">
+            <SatelliteFormPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
         path="/users"
         element={
           <PrivateRoute permission="user:read">

@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { FieldEncryptionService } from '../common/crypto/field-encryption.service.js';
 import { CreateSatelliteDto } from './dto/create-satellite.dto.js';
+import { isKnownEventType } from './event-catalog.js';
 
 @Injectable()
 export class SatellitesService {
@@ -57,6 +58,39 @@ export class SatellitesService {
     });
     if (!satellite) throw new NotFoundException('Satellite not found');
     return satellite;
+  }
+
+  /** Satélite sem os segredos (hash da API key e segredo HMAC cifrado), com a assinatura como lista de tipos. */
+  async findSafe(id: string) {
+    const satellite = await this.findOne(id);
+    return {
+      id: satellite.id,
+      name: satellite.name,
+      webhookUrl: satellite.webhookUrl,
+      frontendUrl: satellite.frontendUrl,
+      status: satellite.status,
+      subscribedEvents: satellite.subscriptions.map((s) => s.eventType).sort(),
+    };
+  }
+
+  /**
+   * Substitui a assinatura do satélite. Aceita os tipos do catálogo (event-catalog.ts) e, para não obrigar a
+   * limpar assinaturas antigas de uma vez, os que o satélite já assinava; tipo desconhecido e novo é recusado.
+   * A troca vale para os eventos ainda pendentes no outbox: o despacho lê a assinatura na hora de entregar.
+   */
+  async updateSubscriptions(id: string, subscribedEvents: string[]) {
+    const satellite = await this.findOne(id);
+    const current = new Set(satellite.subscriptions.map((s) => s.eventType));
+    const unknown = subscribedEvents.filter((type) => !isKnownEventType(type) && !current.has(type));
+    if (unknown.length > 0) {
+      throw new BadRequestException(`Evento desconhecido: ${unknown.join(', ')}. Escolha entre os eventos que o Core emite.`);
+    }
+    const unique = [...new Set(subscribedEvents)];
+    await this.prisma.$transaction(async (tx) => {
+      await tx.integrationSubscription.deleteMany({ where: { satelliteId: id } });
+      await tx.integrationSubscription.createMany({ data: unique.map((eventType) => ({ satelliteId: id, eventType })) });
+    });
+    return this.findSafe(id);
   }
 
   /** Last delivery per satellite, derived from the outbox rows targeting its subscribed event types. */

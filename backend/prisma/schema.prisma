@@ -381,16 +381,28 @@ model SensitiveDataAccessLog {
 }
 
 model Client {
-  id        String   @id @default(uuid())
-  code      Int      @unique
-  legalName String   @map("legal_name")
-  cnpj      String?  @unique
-  contacts  Json?
-  address   Json?
-  projects  Project[]
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  sites     Site[]
+  id                String    @id @default(uuid())
+  code              Int       @unique
+  legalName         String    @map("legal_name")
+  tradeName         String?   @map("trade_name")
+  cnpj              String?   @unique
+  phone             String?
+  email             String?
+  cep               String?   @map("cep")
+  addressStreet     String?   @map("address_street")
+  addressNumber     String?   @map("address_number")
+  addressComplement String?   @map("address_complement")
+  addressDistrict   String?   @map("address_district")
+  addressCity       String?   @map("address_city")
+  addressState      String?   @map("address_state")
+  /// Legado (JSON livre, sem campo na tela). Use as colunas acima.
+  contacts          Json?
+  /// Legado (JSON livre, sem campo na tela). Use as colunas address_* acima.
+  address           Json?
+  projects          Project[]
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  sites             Site[]
 
   @@map("clients")
 }

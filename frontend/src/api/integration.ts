@@ -36,13 +36,48 @@ export interface CreateSatelliteResult {
   hmacSecret: string;
 }
 
+/** Satélite já cadastrado, sem segredos (GET/PATCH /integration/satellites/:id). */
+export interface SatelliteDetail {
+  id: string;
+  name: string;
+  webhookUrl: string;
+  frontendUrl: string | null;
+  status: 'active' | 'inactive';
+  subscribedEvents: string[];
+}
+
+/** Evento que o Core emite (GET /integration/event-types); `family` é o prefixo do tipo, `familyLabel` o nome na tela. */
+export interface EventTypeInfo {
+  type: string;
+  description: string;
+  family: string;
+  familyLabel: string;
+}
+
+/** Quantos cadastros o "Reenviar cadastros" registrou no outbox, por tipo. */
+export interface MasterDataResyncResult {
+  costCenters: number;
+  collaborators: number;
+  allocations: number;
+  sites: number;
+  clients: number;
+  projects: number;
+  users: number;
+  jobTitles: number;
+  holidays: number;
+}
+
 export const integrationApi = {
   list: () => api.get<Satellite[]>('/integration/satellites').then((r) => r.data),
   create: (input: CreateSatelliteInput) =>
     api.post<CreateSatelliteResult>('/integration/satellites', input).then((r) => r.data),
-  /** Reenvia centros de custo, colaboradores e alocações vigentes aos satélites (carga inicial do cache). */
-  resyncMasterData: () =>
-    api.post<{ costCenters: number; collaborators: number; allocations: number; sites: number }>('/integration/satellites/resync-master-data').then((r) => r.data),
+  get: (id: string) => api.get<SatelliteDetail>(`/integration/satellites/${id}`).then((r) => r.data),
+  /** Substitui a assinatura do satélite pela lista informada. */
+  updateSubscriptions: (id: string, subscribedEvents: string[]) =>
+    api.patch<SatelliteDetail>(`/integration/satellites/${id}`, { subscribedEvents }).then((r) => r.data),
+  eventTypes: () => api.get<EventTypeInfo[]>('/integration/event-types').then((r) => r.data),
+  /** Reenvia o estado atual dos cadastros aos satélites inscritos (carga inicial do cache). */
+  resyncMasterData: () => api.post<MasterDataResyncResult>('/integration/satellites/resync-master-data').then((r) => r.data),
   testWebhook: (id: string) => api.post(`/integration/satellites/${id}/test-webhook`).then((r) => r.data),
   // Devolve a URL do satélite já com um token de curtíssima duração (90s) — abrir numa nova aba
   // imediatamente, nunca guardar/reusar essa URL depois de montada.

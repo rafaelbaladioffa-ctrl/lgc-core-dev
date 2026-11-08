@@ -28,3 +28,12 @@ export const MASKS = {
   cep: '99999-999',
   cnhNumber: '99999999999',
 } as const;
+
+/**
+ * Telefone fixo ou celular: até 10 dígitos usa `(99) 9999-9999`; no 11º passa para o formato de
+ * celular. O padrão de fixo tem uma posição a mais para deixar o 11º dígito ser digitado.
+ */
+export function formatPhoneBR(raw: string): string {
+  const digits = raw.replace(/\D/g, '');
+  return applyMask(digits, digits.length > 10 ? MASKS.phone : '(99) 9999-99999');
+}

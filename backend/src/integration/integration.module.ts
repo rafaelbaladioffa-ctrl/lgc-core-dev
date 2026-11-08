@@ -18,6 +18,7 @@ import { INBOUND_EVENT_HANDLERS } from './inbound/inbound-handler.js';
 import { LogisticsFulfillmentHandler } from './inbound/handlers/logistics-fulfillment.handler.js';
 import { FieldProjectHandler } from './inbound/handlers/field-project.handler.js';
 import { AuthModule } from '../auth/auth.module.js';
+import { IntegrationEventTypesController } from './integration-event-types.controller.js';
 
 @Module({
   imports: [ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]), AuthModule],
@@ -27,6 +28,7 @@ import { AuthModule } from '../auth/auth.module.js';
     IntegrationOutboxController,
     InboundEventsController,
     InboxAdminController,
+    IntegrationEventTypesController,
   ],
   providers: [
     MasterDataResyncService,

@@ -38,6 +38,11 @@ const KNOWN_MESSAGES: Record<string, string> = {
   'Cost center effective date cannot be before the start of the current allocation':
     'A data de início no novo centro de custo não pode ser anterior ao início no centro de custo atual.',
   'CPF already registered': 'CPF já cadastrado.',
+  // Usuários (já em pt-BR no servidor).
+  'Já existe um usuário com este e-mail. Use outro e-mail ou reative o usuário existente.':
+    'Já existe um usuário com este e-mail. Use outro e-mail ou reative o usuário existente.',
+  'Este colaborador já tem um usuário de acesso.': 'Este colaborador já tem um usuário de acesso.',
+  'A client with this CNPJ already exists': 'Já existe um cliente com este CNPJ.',
 };
 
 export function translateApiError(err: unknown, fallback: string): string {

@@ -20,6 +20,12 @@ function setup(initial: { status?: string; costCenterId?: string | null; allocat
     status: initial.status ?? 'ativo',
     offboardedAt: null,
     admissionDate: day('2026-01-05'),
+    corporateEmail: 'ana@lgc.com.br',
+    matricula: '0042',
+    phone: '(19) 98888-7777',
+    yellowBadge: 'CA-123',
+    supervisorId: 'col-sup',
+    managementLevel: 'colaborador',
   };
   type SeedAllocation = { costCenterId: string; validFrom: string; validTo?: string | null };
   const seeded: SeedAllocation[] = initial.allocations ?? (collaborator.costCenterId ? [{ costCenterId: collaborator.costCenterId as string, validFrom: '2026-01-05' }] : []);
@@ -159,5 +165,52 @@ describe('alocação do colaborador no centro de custo', () => {
       ['cc-a', '2026-01-05', '2026-11-10'],
       ['cc-b', '2026-11-10', null],
     ]);
+  });
+});
+
+describe('payload dos eventos collaborator.* (contrato V1, docs/mapa-interoperabilidade.md §6)', () => {
+  const FULL_STATE = {
+    collaborator_id: 'col-1',
+    name: 'Ana Técnica',
+    sector_id: 'sec-1',
+    cost_center_id: 'cc-a',
+    job_title_id: 'jt-1',
+    job_title_name: 'Técnico de campo',
+    job_title_is_technician: true,
+    admission_date: '2026-01-05',
+    email: 'ana@lgc.com.br',
+    matricula: '0042',
+    phone: '(19) 98888-7777',
+    yellow_badge: 'CA-123',
+    supervisor_id: 'col-sup',
+    management_level: 'colaborador',
+  };
+
+  it('collaborator.updated leva o estado completo, active e changed_fields', async () => {
+    const { service, events } = setup();
+    await service.update('col-1', { phone: '(19) 98888-7777' });
+    expect(events('collaborator.updated')).toEqual([{ ...FULL_STATE, status: 'ativo', active: true, changed_fields: ['phone'] }]);
+  });
+
+  it('desligar pela tela: updated e offboarded dizem os dois desligado (active false), offboarded com offboarded_at', async () => {
+    const { service, events, collaborator } = setup();
+    await service.update('col-1', { status: 'desligado' });
+    const [updated] = events('collaborator.updated');
+    const [offboarded] = events('collaborator.offboarded');
+    expect(updated).toMatchObject({ status: 'desligado', active: false });
+    expect(offboarded).toEqual({ ...FULL_STATE, cost_center_id: 'cc-a', status: 'desligado', active: false, offboarded_at: collaborator.offboardedAt });
+    expect(offboarded.offboarded_at).toBeInstanceOf(Date);
+  });
+
+  it('POST offboard emite offboarded com o estado completo', async () => {
+    const { service, events, collaborator } = setup();
+    await service.offboard('col-1');
+    expect(events('collaborator.offboarded')).toEqual([{ ...FULL_STATE, status: 'desligado', active: false, offboarded_at: collaborator.offboardedAt }]);
+  });
+
+  it('afastado e férias continuam active true', async () => {
+    const { service, events } = setup();
+    await service.update('col-1', { status: 'ferias' });
+    expect(events('collaborator.updated')[0]).toMatchObject({ status: 'ferias', active: true });
   });
 });

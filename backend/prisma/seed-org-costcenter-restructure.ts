@@ -23,9 +23,10 @@
 // seed-org.ts after the test session hit it there).
 import { PrismaService } from '../dist/prisma/prisma.service.js';
 import { CostCentersService } from '../dist/cost-centers/cost-centers.service.js';
+import { OutboxService } from '../dist/integration/outbox.service.js';
 
 const prisma = new PrismaService();
-const costCentersService = new CostCentersService(prisma);
+const costCentersService = new CostCentersService(prisma, new OutboxService());
 
 // Each old root cost center -> its own sector (unchanged, homonymous) and its children (also
 // homonymous with their own sector). This mirrors the original seed-org.ts list exactly, just

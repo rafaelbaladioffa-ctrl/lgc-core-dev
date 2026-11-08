@@ -5,6 +5,7 @@ import { DataTable, StatusBadge, type ColumnDef } from '../components/DataTable'
 import { KpiCard, KpiRow } from '../components/KpiCard';
 import { SlideOver } from '../components/SlideOver';
 import { integrationApi, type Satellite } from '../api/integration';
+import { resyncSummary } from '../utils/resyncSummary';
 import { outboxApi, type OutboxEvent, type OutboxEventDetail, type OutboxStatus } from '../api/outbox';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
@@ -40,12 +41,12 @@ export function IntegrationsPage() {
 
   // Carga inicial do cache dos satélites: manda o estado atual dos cadastros como eventos de atualização.
   const resyncMasterData = async () => {
-    if (!window.confirm('Reenviar a todos os satélites inscritos os centros de custo, colaboradores e alocações atuais?')) return;
+    if (!window.confirm('Reenviar a todos os satélites inscritos o estado atual dos cadastros (centros de custo, colaboradores, clientes, sites, projetos, usuários, cargos e feriados)?')) return;
     setResyncing(true);
     setResyncMessage(null);
     try {
       const r = await integrationApi.resyncMasterData();
-      setResyncMessage({ tone: 'ok', text: `Reenvio registrado: ${r.costCenters} centros de custo, ${r.collaborators} colaboradores, ${r.allocations} alocações e ${r.sites} sites. A entrega aparece em Eventos (Outbox).` });
+      setResyncMessage({ tone: 'ok', text: `Reenvio registrado: ${resyncSummary(r)}. A entrega aparece em Eventos (Outbox).` });
     } catch (err) {
       setResyncMessage({ tone: 'error', text: translateApiError(err, 'Não foi possível reenviar os cadastros.') });
     } finally {
@@ -129,6 +130,11 @@ export function IntegrationsPage() {
               style={{ fontSize: 12, padding: '4px 10px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--accent-soft)', color: 'var(--accent)' }}
             >
               Abrir
+            </button>
+          )}
+          {hasPermission('integration:manage') && (
+            <button className="integration-row-action" onClick={() => navigate(`/integrations/${s.id}/edit`)}>
+              Editar assinatura
             </button>
           )}
           {hasPermission('integration:manage') && (
