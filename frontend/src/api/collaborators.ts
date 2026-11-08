@@ -103,6 +103,19 @@ export interface CreateCollaboratorInput {
 
 export interface UpdateCollaboratorInput extends Partial<CreateCollaboratorInput> {
   status?: CollaboratorStatus;
+  /** Início da alocação no novo centro de custo (`AAAA-MM-DD`); em branco = hoje. Só quando o CC muda. */
+  costCenterEffectiveFrom?: string;
+}
+
+/** Período do colaborador num centro de custo. `validTo` é exclusivo (último dia = anterior); `null` = vigente. */
+export interface CostCenterAllocation {
+  id: string;
+  costCenterId: string;
+  costCenterCode: string;
+  costCenterName: string;
+  costCenterShortCode: string | null;
+  validFrom: string;
+  validTo: string | null;
 }
 
 export const collaboratorsApi = {
@@ -114,6 +127,7 @@ export const collaboratorsApi = {
   update: (id: string, input: UpdateCollaboratorInput) =>
     api.put<CollaboratorSafe>(`/collaborators/${id}`, input).then((r) => r.data),
   offboard: (id: string) => api.post<CollaboratorSafe>(`/collaborators/${id}/offboard`).then((r) => r.data),
+  costCenterHistory: (id: string) => api.get<CostCenterAllocation[]>(`/collaborators/${id}/cost-center-history`).then((r) => r.data),
   orgChart: () => api.get<OrgChartNode[]>('/collaborators/org-chart').then((r) => r.data),
 };
 

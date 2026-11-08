@@ -23,7 +23,12 @@ const analysis = {
   ],
 };
 
-function setup(overrides: { status?: string; formData?: Record<string, unknown>; responsible?: string | null; kind?: string } = {}) {
+const PARENT_APPROVER = 'col-responsavel-cc-pai';
+const CURRENT_YEAR = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', year: 'numeric' }).format(new Date()));
+
+type BudgetOverride = { status: 'ok' | 'alerta' | 'estourado'; year?: number; parentResponsible?: string | null };
+
+function setup(overrides: { status?: string; formData?: Record<string, unknown>; responsible?: string | null; kind?: string; budget?: BudgetOverride } = {}) {
   const state: Record<string, any> = {
     id: 'req-1',
     code: 'REQ-000001',
@@ -49,7 +54,14 @@ function setup(overrides: { status?: string; formData?: Record<string, unknown>;
     categoryVersion: {
       findUniqueOrThrow: vi.fn().mockResolvedValue({ id: 'cv-1', slaFirstResponseMinutes: 60, slaResolutionMinutes: 120, category: { kind: overrides.kind ?? 'compra_material' } }),
     },
-    costCenter: { findUnique: vi.fn().mockResolvedValue({ responsibleCollaboratorId: overrides.responsible === undefined ? APPROVER : overrides.responsible }) },
+    costCenter: {
+      findUnique: vi.fn().mockResolvedValue({
+        responsibleCollaboratorId: overrides.responsible === undefined ? APPROVER : overrides.responsible,
+        budgetStatus: overrides.budget?.status ?? null,
+        budgetYear: overrides.budget ? (overrides.budget.year ?? CURRENT_YEAR) : null,
+        parentCostCenter: overrides.budget ? { responsibleCollaboratorId: overrides.budget.parentResponsible === undefined ? PARENT_APPROVER : overrides.budget.parentResponsible } : null,
+      }),
+    },
     requestAttachment: { findMany: vi.fn().mockResolvedValue([]) },
     requestApproval: {
       create: vi.fn().mockImplementation(({ data }) => {
@@ -237,6 +249,28 @@ describe('decisão de compra', () => {
     expect(outbox.record).toHaveBeenCalledWith(prisma, 'request.status_changed', { request_id: 'req-1', status: 'aprovada' });
   });
 
+  it('aprovação final emite purchase.approved com total e grupos (Estoque à parte)', async () => {
+    const { outbox, prisma, service, qb, qc } = await awaitingApproval();
+    await service.decidePurchase('req-1', APPROVER, { decision: 'aprovar', selections: [{ materialId: 'm1', quotationId: qb }, { materialId: 'm2', quotationId: qc }] });
+    const calls = outbox.record.mock.calls.filter((c: any[]) => c[1] === 'purchase.approved');
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe(prisma);
+    const payload = calls[0][2];
+    expect(payload).toMatchObject({ request_id: 'req-1', code: 'REQ-000001', cost_center_id: 'cc-1', project_id: null, requester_id: REQUESTER, total: '24.00' });
+    expect(typeof payload.approved_at).toBe('string');
+    expect(payload.groups).toEqual([
+      { group_id: qb, supplier: 'Forn B', total: '6.00', items: [{ material_id: 'm1', description: 'Cabo UTP', quantity: 3, unit_price: '2.00', total: '6.00' }] },
+      { group_id: qc, supplier: 'Forn C', total: '18.00', items: [{ material_id: 'm2', description: 'Conector', quantity: 2, unit_price: '9.00', total: '18.00' }] },
+      { group_id: 'estoque', supplier: 'Estoque', total: '1.00', items: [{ material_id: 'm3', description: 'Fita', quantity: 1, unit_price: '1.00', total: '1.00' }] },
+    ]);
+  });
+
+  it('reprovar não emite purchase.approved', async () => {
+    const { outbox, service } = await awaitingApproval();
+    await service.decidePurchase('req-1', APPROVER, { decision: 'reprovar', reason: 'Preço alto demais' });
+    expect(outbox.record.mock.calls.some((c: any[]) => c[1] === 'purchase.approved')).toBe(false);
+  });
+
   it('seleção incompleta responde 400 e não grava', async () => {
     const { state, service, qb } = await awaitingApproval();
     await expect(service.decidePurchase('req-1', APPROVER, { decision: 'aprovar', selections: [{ materialId: 'm1', quotationId: qb }] })).rejects.toBeInstanceOf(BadRequestException);
@@ -300,5 +334,74 @@ describe('decisão de compra', () => {
     const { service } = await awaitingApproval();
     await expect(service.approve('req-1', APPROVER, {})).rejects.toThrow('Use a decisão de compra.');
     await expect(service.reject('req-1', APPROVER, { comment: 'não' })).rejects.toThrow('Use a decisão de compra.');
+  });
+});
+
+describe('orçamento do centro de custo estourado (etapa orcamento_cc)', () => {
+  async function submitted(budget: BudgetOverride) {
+    const f = setup({ budget });
+    await f.quote('Forn A', [['m1', '2.50'], ['m2', '10.00']]);
+    await f.service.submitPurchaseForApproval('req-1', PROCUREMENT, ROLES);
+    const [qa] = f.state.formData.procurementQuotations.map((q: any) => q.quotationId);
+    return { ...f, qa, selections: [{ materialId: 'm1', quotationId: qa }, { materialId: 'm2', quotationId: qa }] };
+  }
+
+  it('CC estourado no ano corrente acrescenta a etapa final do responsável do CC pai', async () => {
+    const { approvals, audits } = await submitted({ status: 'estourado' });
+    expect(approvals).toEqual([
+      expect.objectContaining({ stepOrder: 1, approverId: APPROVER, approvalSource: 'centro_custo' }),
+      expect.objectContaining({ stepOrder: 2, approverId: PARENT_APPROVER, approvalSource: 'orcamento_cc' }),
+    ]);
+    expect(audits()).toContain('request.purchase_submitted_for_approval');
+  });
+
+  it('sem etapa extra: alerta, ano anterior, CC pai sem responsável, mesmo responsável ou solicitante', async () => {
+    const cases: BudgetOverride[] = [
+      { status: 'alerta' },
+      { status: 'estourado', year: CURRENT_YEAR - 1 },
+      { status: 'estourado', parentResponsible: null },
+      { status: 'estourado', parentResponsible: APPROVER },
+      { status: 'estourado', parentResponsible: REQUESTER },
+    ];
+    for (const budget of cases) {
+      const { approvals } = await submitted(budget);
+      expect(approvals.map((a) => a.approvalSource)).toEqual(['centro_custo']);
+    }
+  });
+
+  it('responsável do CC escolhe; a compra só é aprovada depois do responsável do CC pai', async () => {
+    const { state, approvals, outbox, service, selections } = await submitted({ status: 'estourado' });
+    const afterCc = await service.decidePurchase('req-1', APPROVER, { decision: 'aprovar', selections });
+    expect(afterCc.status).toBe('aguardando_aprovacao');
+    expect(state.formData.procurementSelection).toHaveLength(2);
+    expect(state.estimatedValue).toBe('27.50');
+    expect(approvals.map((a) => a.status)).toEqual(['aprovado', 'pendente']);
+    expect(outbox.record.mock.calls.some((c: any[]) => c[1] === 'purchase.approved')).toBe(false);
+
+    // O responsável do CC não decide de novo; o do pai aprova sem refazer a escolha.
+    await expect(service.decidePurchase('req-1', APPROVER, { decision: 'aprovar', selections })).rejects.toBeInstanceOf(ForbiddenException);
+    const final = await service.decidePurchase('req-1', PARENT_APPROVER, { decision: 'aprovar' });
+    expect(final.status).toBe('aprovada');
+    expect(approvals.map((a) => a.status)).toEqual(['aprovado', 'aprovado']);
+    const approvedEvents = outbox.record.mock.calls.filter((c: any[]) => c[1] === 'purchase.approved');
+    expect(approvedEvents).toHaveLength(1);
+    expect(approvedEvents[0][2]).toMatchObject({ total: '27.50', cost_center_id: 'cc-1' });
+  });
+
+  it('responsável do CC pai pode reprovar', async () => {
+    const { state, service, selections } = await submitted({ status: 'estourado' });
+    await service.decidePurchase('req-1', APPROVER, { decision: 'aprovar', selections });
+    await service.decidePurchase('req-1', PARENT_APPROVER, { decision: 'reprovar', reason: 'Sem orçamento este ano' });
+    expect(state.status).toBe('reprovada');
+  });
+
+  it('devolução ao Suprimentos pela etapa do orçamento descarta a escolha do responsável do CC', async () => {
+    const { state, approvals, service, selections } = await submitted({ status: 'estourado' });
+    await service.decidePurchase('req-1', APPROVER, { decision: 'aprovar', selections });
+    await service.decidePurchase('req-1', PARENT_APPROVER, { decision: 'devolver_suprimentos', reason: 'Buscar fornecedor mais barato' });
+    expect(state.status).toBe('em_atendimento');
+    expect(state.formData.procurementSelection).toBeUndefined();
+    expect(state.formData.procurementQuotations).toHaveLength(1);
+    expect(approvals.map((a) => a.status)).toEqual(['aprovado', 'devolvido']);
   });
 });

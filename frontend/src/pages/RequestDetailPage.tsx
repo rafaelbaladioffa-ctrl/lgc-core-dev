@@ -5,9 +5,10 @@ import { StatusBadge } from '../components/DataTable';
 import { Button } from '../components/Button';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { PurchaseQuotations } from '../components/PurchaseQuotations';
+import { CostCenterBudgetBadge } from '../components/CostCenterBudgetBadge';
 import { PurchaseDeliveries } from '../components/PurchaseDeliveries';
 import { useAuth } from '../context/AuthContext';
-import { requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
+import { approvalStepLabel, requestsApi, type PurchaseAnalysisItem, type RequestDetail, type RequestStatus } from '../api/requests';
 import { formatDateTime } from '../utils/formatDate';
 import { formatBRL } from '../utils/format';
 import { translateApiError } from '../utils/apiError';
@@ -146,7 +147,7 @@ export function RequestDetailPage() {
   const hasSelection = Boolean(request.formData && typeof request.formData === 'object' && Array.isArray((request.formData as { procurementSelection?: unknown }).procurementSelection));
   const canProcureQuotation = Boolean(canProcure) && !requesterLocked && request.status === 'em_atendimento' && !hasSelection;
   // Quem decide (titular ou delegado ativo) vem calculado do servidor em `viewer`; na compra o
-  // servidor já restringe à linha `centro_custo`.
+  // servidor já restringe às linhas `centro_custo` e `orcamento_cc`.
   const canDecideApproval = Boolean(request.viewer?.canDecideApproval) && canApprove && !requesterLocked && request.status === 'aguardando_aprovacao';
   const canDecidePurchase = isPurchaseRequest && canDecideApproval;
   const hasQuotations = Boolean(request.formData && typeof request.formData === 'object' && (
@@ -289,7 +290,7 @@ export function RequestDetailPage() {
           <div>
             <span style={{ color: 'var(--text-muted)' }}>Criada em:</span> {formatDateTime(request.createdAt)}
           </div>
-          {request.costCenter && <div><span style={{ color: 'var(--text-muted)' }}>Centro de custo:</span> {request.costCenter.code} — {request.costCenter.name}{request.costCenter.responsibleCollaborator ? ` · Responsável: ${request.costCenter.responsibleCollaborator.fullName}` : ''}</div>}
+          {request.costCenter && <div><span style={{ color: 'var(--text-muted)' }}>Centro de custo:</span> {request.costCenter.code} — {request.costCenter.name}{request.costCenter.responsibleCollaborator ? ` · Responsável: ${request.costCenter.responsibleCollaborator.fullName}` : ''} <CostCenterBudgetBadge costCenter={request.costCenter} /></div>}
           {request.slaDueResolutionAt && (
             <div>
               <span style={{ color: 'var(--text-muted)' }}>Prazo de solução:</span> {formatDateTime(request.slaDueResolutionAt)}
@@ -304,7 +305,7 @@ export function RequestDetailPage() {
               {request.approvals.map((a) => (
                 <div key={a.id} style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 6, padding: 8 }}>
                   <span>
-                    {a.stepOrder}. {a.approvalSource === 'centro_custo' ? 'Responsável pelo centro de custo' : (a.requiredLevel ?? 'gestor direto')} — {a.approver.fullName}
+                    {a.stepOrder}. {approvalStepLabel(a)} — {a.approver.fullName}
                   </span>
                   <StatusBadge label={a.status} tone={a.status === 'pendente' ? 'default' : a.status === 'aprovado' ? 'success' : 'danger'} />
                 </div>

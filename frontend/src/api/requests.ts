@@ -1,5 +1,6 @@
 import { api } from './client';
 import type { RequestCategoryKind, RequestConfidentiality } from './requestCategories';
+import type { CostCenter } from './costCenters';
 
 export type RequestStatus =
   | 'rascunho'
@@ -64,8 +65,19 @@ export interface RequestApproval {
   status: RequestApprovalStatus;
   decidedAt: string | null;
   comment: string | null;
+  /** `hierarquia`, `centro_custo` (responsável do CC) ou `orcamento_cc` (responsável do CC pai, orçamento estourado). */
   approvalSource?: string;
 }
+
+/** Rótulo da etapa de aprovação na cadeia (detalhe da requisição e "Minhas aprovações"). */
+export function approvalStepLabel(approval: { approvalSource?: string; requiredLevel: string | null }): string {
+  if (approval.approvalSource === 'centro_custo') return 'Responsável pelo centro de custo';
+  if (approval.approvalSource === 'orcamento_cc') return 'Responsável pelo centro de custo pai (orçamento estourado)';
+  return approval.requiredLevel ?? 'gestor direto';
+}
+
+/** Etapas decididas pela tela da compra (escolha do fornecedor e decisão). */
+export const PURCHASE_DECISION_SOURCES = ['centro_custo', 'orcamento_cc'];
 
 export interface RequestComment {
   id: string;
@@ -91,7 +103,7 @@ export interface RequestDetail extends AxisRequest {
   // Ausente (não null) quando mascarado por denúncia anônima — ver requesterDisplay acima.
   requester?: { id: string; fullName: string };
   formData?: { purchaseItems?: PurchaseRequestItem[] } | Record<string, unknown> | null;
-  costCenter?: { id: string; code: string; name: string; responsibleCollaborator?: { id: string; fullName: string } | null } | null;
+  costCenter?: (Pick<CostCenter, 'id' | 'code' | 'name' | 'shortCode' | 'budgetStatus' | 'budgetPercent' | 'budgetYear'> & { responsibleCollaborator?: { id: string; fullName: string } | null }) | null;
   attachments?: RequestAttachmentMeta[];
   /** Calculado no servidor (mesma regra do `approve`/`purchase-decision`, incluindo delegação ativa). */
   viewer?: { canDecideApproval: boolean; decidingAsDelegateOf?: { id: string; fullName: string } };
@@ -211,7 +223,7 @@ export type UpdateRequestInput = Partial<Omit<CreateRequestInput, 'categoryId' |
 
 export interface MyApproval {
   approvalId: string;
-  /** `centro_custo` = aprovação de compra (decidida na tela da requisição). */
+  /** `centro_custo`/`orcamento_cc` = aprovação de compra (decidida na tela da requisição). */
   approvalSource?: string;
   requestId: string;
   code: string;

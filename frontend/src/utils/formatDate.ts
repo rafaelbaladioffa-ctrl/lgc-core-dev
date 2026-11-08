@@ -17,3 +17,11 @@ export function formatDateTime(value: string | Date | null | undefined): string 
   const timePart = date.toLocaleTimeString('pt-BR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hour12: false });
   return `${datePart} ${timePart}`;
 }
+
+/** Data de calendário `AAAA-MM-DD` (coluna `DATE`) → DD/MM/AAAA, sem conversão de fuso (meia-noite UTC
+ * convertida para São Paulo cairia no dia anterior). Aceita também ISO completo, usando só a data. */
+export function formatDateOnly(value: string | null | undefined): string {
+  if (!value) return '—';
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
+  return match ? `${match[3]}/${match[2]}/${match[1]}` : '—';
+}

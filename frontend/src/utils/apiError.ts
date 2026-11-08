@@ -9,6 +9,11 @@ const KNOWN_MESSAGES: Record<string, string> = {
     'Não é possível excluir um setor que ainda possui registros vinculados (colaboradores, centros de custo, chamados, etc.).',
   'Cannot delete a cost center that still has linked projects': 'Não é possível excluir um centro de custo que ainda possui projetos vinculados.',
   'Cannot delete a client that still has linked projects': 'Não é possível excluir um cliente que ainda possui projetos vinculados.',
+  'Cannot delete a cost center that still has linked projects or sub-cost-centers':
+    'Não é possível excluir um centro de custo que ainda possui projetos, sub-centros, requisições ou histórico de colaboradores vinculados.',
+  'Cost center short code already in use': 'Já existe um centro de custo com esta sigla.',
+  'Cost center effective date cannot be before the start of the current allocation':
+    'A data de início no novo centro de custo não pode ser anterior ao início no centro de custo atual.',
   'CPF already registered': 'CPF já cadastrado.',
 };
 

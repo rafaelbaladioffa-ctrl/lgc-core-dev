@@ -4,6 +4,10 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../integration/outbox.service.js';
 import { CreateCostCenterDto } from './dto/create-cost-center.dto.js';
 import { UpdateCostCenterDto } from './dto/update-cost-center.dto.js';
+import type { ReceiveCostCenterBudgetStatusDto } from './dto/budget-status.dto.js';
+
+/** Assinatura exigida do satélite que informa a situação do orçamento (o Financeiro mantém o cadastro de CC em cache). */
+export const COST_CENTER_BUDGET_SUBSCRIPTION_EVENT = 'cost_center.updated';
 
 /** Estado completo do centro de custo em todo evento `cost_center.*` (docs/dominio/cadastros.md §4). */
 export function costCenterEventPayload(costCenter: CostCenter, active = true): Record<string, unknown> {
@@ -14,6 +18,8 @@ export function costCenterEventPayload(costCenter: CostCenter, active = true): R
     sector_id: costCenter.sectorId,
     parent_cost_center_id: costCenter.parentCostCenterId,
     responsible_collaborator_id: costCenter.responsibleCollaboratorId,
+    kind: costCenter.kind,
+    short_code: costCenter.shortCode,
     active,
   };
 }
@@ -28,20 +34,24 @@ export class CostCentersService {
   async create(dto: CreateCostCenterDto) {
     if (dto.parentCostCenterId) await this.assertExists(dto.parentCostCenterId);
 
-    return this.prisma.$transaction(async (tx) => {
-      const code = await this.generateCode(tx, dto.parentCostCenterId);
-      const costCenter = await tx.costCenter.create({
-        data: {
-          code,
-          name: dto.name,
-          sectorId: dto.sectorId,
-          parentCostCenterId: dto.parentCostCenterId,
-          responsibleCollaboratorId: dto.responsibleCollaboratorId,
-        },
-      });
-      await this.outbox.record(tx, 'cost_center.created', costCenterEventPayload(costCenter));
-      return costCenter;
-    });
+    return this.withShortCodeConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const code = await this.generateCode(tx, dto.parentCostCenterId);
+        const costCenter = await tx.costCenter.create({
+          data: {
+            code,
+            name: dto.name,
+            sectorId: dto.sectorId,
+            parentCostCenterId: dto.parentCostCenterId,
+            responsibleCollaboratorId: dto.responsibleCollaboratorId,
+            kind: dto.kind,
+            shortCode: dto.shortCode ?? null,
+          },
+        });
+        await this.outbox.record(tx, 'cost_center.created', costCenterEventPayload(costCenter));
+        return costCenter;
+      }),
+    );
   }
 
   findAll() {
@@ -56,11 +66,14 @@ export class CostCentersService {
 
   async update(id: string, dto: UpdateCostCenterDto) {
     await this.findOne(id);
-    return this.prisma.$transaction(async (tx) => {
-      const costCenter = await tx.costCenter.update({ where: { id }, data: dto });
-      await this.outbox.record(tx, 'cost_center.updated', costCenterEventPayload(costCenter));
-      return costCenter;
-    });
+    // Campos de situação do orçamento (`budget_*`) não estão no DTO: só o Financeiro os grava (§4).
+    return this.withShortCodeConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const costCenter = await tx.costCenter.update({ where: { id }, data: dto });
+        await this.outbox.record(tx, 'cost_center.updated', costCenterEventPayload(costCenter));
+        return costCenter;
+      }),
+    );
   }
 
   async remove(id: string) {
@@ -77,6 +90,68 @@ export class CostCentersService {
       }
       throw err;
     }
+  }
+
+  /** Sigla repetida (índice único `cost_centers_short_code_key`) vira 409 com mensagem traduzível. */
+  private async withShortCodeConflict<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        throw new ConflictException('Cost center short code already in use');
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * Situação do orçamento informada pelo Financeiro (docs/integracao-centros-de-custo.md §4).
+   * Guarda só a faixa, o percentual, o ano e o instante do cálculo; valores ficam no Financeiro.
+   * Entrega fora de ordem (retry do outbox): um cálculo mais antigo que o gravado é ignorado.
+   * Auditoria em `audit_events` (sem usuário: a origem é o satélite).
+   */
+  async receiveBudgetStatus(id: string, satellite: { id: string; name: string }, dto: ReceiveCostCenterBudgetStatusDto) {
+    const computedAt = new Date(dto.computed_at);
+    return this.prisma.$transaction(async (tx) => {
+      const current = await tx.costCenter.findUnique({ where: { id } });
+      if (!current) throw new NotFoundException('Cost center not found');
+      const stale = current.budgetStatusAt !== null && computedAt < current.budgetStatusAt;
+      const before = { status: current.budgetStatus, percent: current.budgetPercent?.toString() ?? null, year: current.budgetYear, computed_at: current.budgetStatusAt };
+      const saved = stale
+        ? current
+        : await tx.costCenter.update({
+            where: { id },
+            data: { budgetStatus: dto.status, budgetPercent: new Prisma.Decimal(dto.percent).toDecimalPlaces(2), budgetYear: dto.year, budgetStatusAt: computedAt },
+          });
+      await tx.auditEvent.create({
+        data: {
+          aggregateType: 'cost_center',
+          aggregateId: id,
+          event: stale ? 'cost_center.budget_status_ignored' : 'cost_center.budget_status_received',
+          actorId: null,
+          source: `integration:${satellite.name}`,
+          beforeJson: before as Prisma.InputJsonValue,
+          afterJson: {
+            year: dto.year,
+            budget: dto.budget,
+            committed: dto.committed,
+            realized: dto.realized,
+            percent: dto.percent,
+            status: dto.status,
+            computed_at: dto.computed_at,
+            satellite_id: satellite.id,
+          },
+        },
+      });
+      return {
+        cost_center_id: saved.id,
+        applied: !stale,
+        budget_status: saved.budgetStatus,
+        budget_percent: saved.budgetPercent?.toFixed(2) ?? null,
+        budget_year: saved.budgetYear,
+        budget_status_at: saved.budgetStatusAt,
+      };
+    });
   }
 
   private async assertExists(id: string): Promise<void> {

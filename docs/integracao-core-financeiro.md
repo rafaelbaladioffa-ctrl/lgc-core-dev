@@ -12,7 +12,9 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 | Access token do Core na API do Financeiro | Core → Financeiro | Funciona; o Financeiro recusa tokens com `iss` e não troca por sessão própria |
 | Launcher ("Abrir") | Core → Financeiro | **Não suportado** até o Core emitir token de launcher com `typ`/`aud` e `jti` de uso único |
 | Webhook de dados mestres | Core → Financeiro | Funciona para `collaborator.*`, `client.*`, `project.*`, `cost_center.*` |
-| Webhook de compra, reembolso e adiantamento | Core → Financeiro | **Contratos novos; o Core ainda não emite** |
+| Webhook de compra, reembolso e adiantamento | Core → Financeiro | Core emite desde 2026-11-08 ([integracao-centros-de-custo.md §3](integracao-centros-de-custo.md#3-core-compras-reembolsos-e-adiantamentos)) |
+| Alocação do colaborador no CC (`collaborator.cost_center_changed`) | Core → Financeiro | Core emite desde 2026-11-08 ([integracao-centros-de-custo.md §2](integracao-centros-de-custo.md#2-core-alocação-do-colaborador-no-cc-com-vigência)) |
+| Situação do orçamento do CC (`PUT /integration/cost-centers/:id/budget-status`) | Financeiro → Core | Core recebe desde 2026-11-08 ([integracao-centros-de-custo.md §4](integracao-centros-de-custo.md#4-financeiro--core-situação-do-orçamento-do-cc)) |
 | Eventos de pagamento | Financeiro → Core | Outbox pronto; **o Core não tem receptor** |
 | Pedido de cotação do projeto (`project.quote_requested`) | Core → Financeiro | Core emite e o Financeiro consome desde 2026-11-08 (fila de pedidos de cotação, PJ4) (§4) |
 | Devolução da cotação (`POST /integration/projects/:id/quotes`) | Financeiro → Core | Core recebe e o Financeiro envia desde 2026-11-08 (PJ7: ao aprovar o envio, pelo outbox com retry) (§4) |
@@ -34,7 +36,8 @@ Mesmo envelope e assinatura usados com a Logística (`{event_id, event_type, occ
 
 | Evento | Core emite? | Financeiro consome? |
 |---|---|---|
-| `collaborator.created/updated/offboarded` | sim | sim (cache) |
+| `collaborator.created/updated/offboarded` | sim (`created/updated` com o estado completo desde 2026-11-08) | sim (cache) |
+| `collaborator.cost_center_changed` | sim (desde 2026-11-08) | sim (alocação com vigência) |
 | `client.created/updated` | sim | sim (cache) |
 | `project.created/updated/status_changed/deleted` | sim (`updated` e `deleted` desde 2026-11-07) | sim (cache; `encerrado` = inativo) |
 | `user.disabled` | **não** | sim (bloqueio) |
@@ -48,12 +51,12 @@ Todo `project.*` leva o estado completo do projeto: `project_id`, `code`, `name`
 `changed_fields`; `project.status_changed`, `previous_status`; `project.deleted` (exclusão de
 proposta) vai com `status: 'encerrado'` e `deleted: true`, e o Financeiro marca o projeto inativo.
 Projeto antigo sem nome (`name: null`) não apaga o nome já guardado no cache. `cost_center.*` leva
-`cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`
-e `active`. Contrato no Core: [dominio/cadastros.md §4 e §10](dominio/cadastros.md#10-projetos).
+`cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`,
+`kind`, `short_code` e `active`. Contrato no Core: [dominio/cadastros.md §4 e §10](dominio/cadastros.md#10-projetos).
 O Financeiro usa nome e prazo previsto no cabeçalho do orçamento e o centro de custo no rateio
 (decisão P-07 da especificação de Projetos).
-| `purchase.order_registered`, `purchase.delivery_received` | **não** | a partir da F4 |
-| `finance_request.approved` | **não** | a partir da F5 |
+| `purchase.approved`, `purchase.order_registered`, `purchase.delivery_received`, `purchase.cancelled` | sim (desde 2026-11-08) | sim (centros de custo) |
+| `finance_request.approved` | sim (desde 2026-11-08; `FIN-REEMBOLSO` e `FIN-ADIANTAMENTO`) | sim (centros de custo) |
 | `request.*` | sim | guardado como `IGNORED` |
 
 ## 3. Eventos Financeiro → Core
@@ -136,8 +139,11 @@ da SOW e do Bid Template e envio da cotação). O Financeiro precisa assinar `pr
 1. Incluir a origem do Financeiro em `CORS_ALLOWED_ORIGINS` e cadastrar o satélite (sem `frontendUrl`).
 2. Emitir `user.disabled`. (`cost_center.created/updated` e `project.updated/deleted` com o estado
    completo do projeto já são emitidos desde 2026-11-07.)
-3. Emitir `purchase.order_registered` e `purchase.delivery_received` no registro do pedido e no
-   recebimento da compra, na mesma transação, com fornecedor, itens, valores, CC e projeto.
+3. ~~Emitir `purchase.*` e `finance_request.approved`~~ — feito em 2026-11-08
+   ([integracao-centros-de-custo.md §3](integracao-centros-de-custo.md#3-core-compras-reembolsos-e-adiantamentos)).
+   O Financeiro precisa assinar `purchase.*`, `finance_request.approved` e
+   `collaborator.cost_center_changed`, e assinar `cost_center.updated` para poder enviar a situação do
+   orçamento (`PUT /integration/cost-centers/:id/budget-status`).
 4. Decidir F-01 (dono do cadastro de fornecedores) e, se for o Financeiro, trocar o texto livre
    `supplier` da cotação por `supplierId`.
 5. Criar o receptor de eventos de satélite e mostrar na requisição de compra o estado do pagamento.

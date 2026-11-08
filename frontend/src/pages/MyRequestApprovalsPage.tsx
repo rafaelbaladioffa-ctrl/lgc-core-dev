@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
 import { Button } from '../components/Button';
-import { requestsApi, type MyApproval } from '../api/requests';
+import { approvalStepLabel, PURCHASE_DECISION_SOURCES, requestsApi, type MyApproval } from '../api/requests';
 
 const cardStyle = {
   background: 'var(--bg-elevated)',
@@ -57,7 +57,7 @@ export function MyRequestApprovalsPage() {
                 <button onClick={() => navigate(`/requests/${a.requestId}`)} style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', fontWeight: 700 }}>
                   {a.code}
                 </button>
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Etapa: {a.requiredLevel ?? 'gestor direto'}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Etapa: {approvalStepLabel(a)}</span>
               </div>
               <div style={{ fontSize: 13 }}>{a.title}</div>
               <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
@@ -65,7 +65,7 @@ export function MyRequestApprovalsPage() {
               </div>
               {a.asDelegateOf && <p className="delegate-notice">Como delegado de {a.asDelegateOf.fullName}</p>}
               <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                {a.approvalSource === 'centro_custo' ? (
+                {PURCHASE_DECISION_SOURCES.includes(a.approvalSource ?? '') ? (
                   <Button variant="positive" onClick={() => navigate(`/requests/${a.requestId}`)}>
                     Abrir e decidir a compra
                   </Button>

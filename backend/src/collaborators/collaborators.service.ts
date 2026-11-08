@@ -4,7 +4,23 @@ import { FieldEncryptionService } from '../common/crypto/field-encryption.servic
 import { OutboxService } from '../integration/outbox.service.js';
 import { CreateCollaboratorDto } from './dto/create-collaborator.dto.js';
 import { UpdateCollaboratorDto } from './dto/update-collaborator.dto.js';
-import type { Collaborator, CostCenter, JobTitle, WorkSchedule } from '@prisma/client';
+import type { Collaborator, CostCenter, JobTitle, Prisma, WorkSchedule } from '@prisma/client';
+
+type TxClient = Prisma.TransactionClient;
+
+/** Data de hoje (`AAAA-MM-DD`) no calendário de São Paulo, independente do TZ do processo. */
+export function saoPauloToday(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
+}
+
+/** Coluna `DATE` (o Prisma devolve meia-noite UTC) ou data só-data gravada à meia-noite UTC → `AAAA-MM-DD`. */
+function dateOnly(value: Date | null | undefined): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function toDateColumn(value: string): Date {
+  return new Date(`${value}T00:00:00.000Z`);
+}
 
 type CollaboratorWithRelations = Collaborator & {
   jobTitle: JobTitle;
@@ -13,6 +29,31 @@ type CollaboratorWithRelations = Collaborator & {
 };
 
 const WITH_RELATIONS = { jobTitle: true, workSchedule: true, costCenter: true } as const;
+
+/** Estado do colaborador em `collaborator.created/updated` (docs/integracao-centros-de-custo.md §2). */
+function collaboratorStatePayload(c: CollaboratorWithRelations): Record<string, unknown> {
+  return {
+    collaborator_id: c.id,
+    name: c.fullName,
+    status: c.status,
+    sector_id: c.sectorId,
+    cost_center_id: c.costCenterId,
+    job_title_id: c.jobTitleId,
+    job_title_name: c.jobTitle.name,
+    admission_date: dateOnly(c.admissionDate),
+  };
+}
+
+export interface CostCenterAllocationView {
+  id: string;
+  costCenterId: string;
+  costCenterCode: string;
+  costCenterName: string;
+  costCenterShortCode: string | null;
+  validFrom: string;
+  /** Exclusivo: o último dia alocado é o anterior. `null` = vigente. */
+  validTo: string | null;
+}
 
 export interface CollaboratorSafeView {
   id: string;
@@ -133,11 +174,12 @@ export class CollaboratorsService {
         },
         include: WITH_RELATIONS,
       });
-      await this.outbox.record(tx, 'collaborator.created', {
-        collaborator_id: collaborator.id,
-        name: collaborator.fullName,
-        sector_id: collaborator.sectorId,
-      });
+      await this.outbox.record(tx, 'collaborator.created', collaboratorStatePayload(collaborator));
+      if (collaborator.costCenterId) {
+        // Alocação inicial a partir da admissão (ou de hoje, sem admissão informada).
+        const validFrom = dto.admissionDate?.slice(0, 10) ?? saoPauloToday();
+        await this.openAllocation(tx, collaborator, null, collaborator.costCenterId, validFrom);
+      }
       return collaborator;
     });
     return this.toSafeView(created);
@@ -180,6 +222,14 @@ export class CollaboratorsService {
       if (existing && existing.id !== id) throw new ConflictException('CPF already registered');
     }
 
+    // Vigência (docs/integracao-centros-de-custo.md §2). `costCenterId: null` limpa o CC.
+    const previousStatus = collaborator.status;
+    const nextStatus = dto.status ?? previousStatus;
+    const nextCostCenterId = dto.costCenterId !== undefined ? (dto.costCenterId ?? null) : collaborator.costCenterId;
+    const offboarding = previousStatus !== 'desligado' && nextStatus === 'desligado';
+    const reactivating = previousStatus === 'desligado' && nextStatus !== 'desligado';
+    const costCenterChanged = nextCostCenterId !== collaborator.costCenterId;
+
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.collaborator.update({
         where: { id },
@@ -199,6 +249,8 @@ export class CollaboratorsService {
           asoValidity: dto.asoValidity ? new Date(dto.asoValidity) : undefined,
           yellowBadge: dto.yellowBadge,
           status: dto.status,
+          // Desligar pela tela (PUT com status = desligado) equivale ao POST :id/offboard.
+          offboardedAt: offboarding ? new Date() : undefined,
           managementLevel: dto.managementLevel,
           phone: dto.phone,
           emergencyContactName: dto.emergencyContactName,
@@ -227,17 +279,87 @@ export class CollaboratorsService {
         include: WITH_RELATIONS,
       });
       await this.outbox.record(tx, 'collaborator.updated', {
-        collaborator_id: result.id,
+        ...collaboratorStatePayload(result),
         changed_fields: Object.keys(dto),
       });
+      if (offboarding) {
+        await this.closeAllocationOnOffboard(tx, result);
+        await this.outbox.record(tx, 'collaborator.offboarded', { collaborator_id: result.id, offboarded_at: result.offboardedAt });
+      } else if (reactivating) {
+        if (nextCostCenterId) await this.openAllocation(tx, result, null, nextCostCenterId, dto.costCenterEffectiveFrom ?? saoPauloToday());
+      } else if (costCenterChanged && nextStatus !== 'desligado') {
+        await this.changeAllocation(tx, result, nextCostCenterId, dto.costCenterEffectiveFrom ?? saoPauloToday());
+      }
       return result;
     });
-    void collaborator;
     return this.toSafeView(updated);
   }
 
-  async offboard(id: string): Promise<CollaboratorSafeView> {
+  /** Histórico de alocação em centro de custo, da mais recente para a mais antiga. */
+  async costCenterHistory(id: string): Promise<CostCenterAllocationView[]> {
     await this.getOrThrow(id);
+    const rows = await this.prisma.collaboratorCostCenterAllocation.findMany({
+      where: { collaboratorId: id },
+      orderBy: [{ validFrom: 'desc' }, { createdAt: 'desc' }],
+      include: { costCenter: { select: { code: true, name: true, shortCode: true } } },
+    });
+    return rows.map((row) => ({
+      id: row.id,
+      costCenterId: row.costCenterId,
+      costCenterCode: row.costCenter.code,
+      costCenterName: row.costCenter.name,
+      costCenterShortCode: row.costCenter.shortCode,
+      validFrom: dateOnly(row.validFrom)!,
+      validTo: dateOnly(row.validTo),
+    }));
+  }
+
+  /** Troca de CC: fecha a vigente em `effectiveFrom` (exclusivo) e abre a nova a partir dele. */
+  private async changeAllocation(tx: TxClient, collaborator: CollaboratorWithRelations, nextCostCenterId: string | null, effectiveFrom: string): Promise<void> {
+    const current = await tx.collaboratorCostCenterAllocation.findFirst({ where: { collaboratorId: collaborator.id, validTo: null } });
+    if (current && effectiveFrom < dateOnly(current.validFrom)!) {
+      throw new BadRequestException('Cost center effective date cannot be before the start of the current allocation');
+    }
+    if (current) await tx.collaboratorCostCenterAllocation.update({ where: { id: current.id }, data: { validTo: toDateColumn(effectiveFrom) } });
+    const previousCostCenterId = current?.costCenterId ?? null;
+    if (nextCostCenterId) {
+      await this.openAllocation(tx, collaborator, previousCostCenterId, nextCostCenterId, effectiveFrom);
+    } else {
+      await this.recordCostCenterChanged(tx, collaborator, previousCostCenterId, null, effectiveFrom);
+    }
+  }
+
+  private async openAllocation(tx: TxClient, collaborator: CollaboratorWithRelations, previousCostCenterId: string | null, costCenterId: string, validFrom: string): Promise<void> {
+    await tx.collaboratorCostCenterAllocation.create({ data: { collaboratorId: collaborator.id, costCenterId, validFrom: toDateColumn(validFrom) } });
+    await this.recordCostCenterChanged(tx, collaborator, previousCostCenterId, costCenterId, validFrom);
+  }
+
+  /** Desligamento fecha a alocação vigente na data do desligamento (dia de São Paulo). */
+  private async closeAllocationOnOffboard(tx: TxClient, collaborator: CollaboratorWithRelations): Promise<void> {
+    const current = await tx.collaboratorCostCenterAllocation.findFirst({ where: { collaboratorId: collaborator.id, validTo: null } });
+    if (!current) return;
+    const offboardDate = saoPauloToday(collaborator.offboardedAt ?? new Date());
+    const startedAt = dateOnly(current.validFrom)!;
+    // Alocação com início futuro: fecha vazia no próprio início (a coluna exige valid_to >= valid_from).
+    const validTo = offboardDate < startedAt ? startedAt : offboardDate;
+    await tx.collaboratorCostCenterAllocation.update({ where: { id: current.id }, data: { validTo: toDateColumn(validTo) } });
+    await this.recordCostCenterChanged(tx, collaborator, current.costCenterId, null, validTo);
+  }
+
+  private recordCostCenterChanged(tx: TxClient, collaborator: CollaboratorWithRelations, previousCostCenterId: string | null, costCenterId: string | null, validFrom: string) {
+    return this.outbox.record(tx, 'collaborator.cost_center_changed', {
+      collaborator_id: collaborator.id,
+      name: collaborator.fullName,
+      job_title_id: collaborator.jobTitleId,
+      job_title_name: collaborator.jobTitle.name,
+      previous_cost_center_id: previousCostCenterId,
+      cost_center_id: costCenterId,
+      valid_from: validFrom,
+    });
+  }
+
+  async offboard(id: string): Promise<CollaboratorSafeView> {
+    const collaborator = await this.getOrThrow(id);
     const updated = await this.prisma.$transaction(async (tx) => {
       const result = await tx.collaborator.update({
         where: { id },
@@ -248,6 +370,7 @@ export class CollaboratorsService {
         collaborator_id: result.id,
         offboarded_at: result.offboardedAt,
       });
+      if (collaborator.status !== 'desligado') await this.closeAllocationOnOffboard(tx, result);
       return result;
     });
     return this.toSafeView(updated);

@@ -22,7 +22,8 @@ interface Props {
   purchaseItems: PurchaseRequestItem[];
   /** Suprimentos em `em_atendimento`: registra, edita, exclui e envia para aprovação. */
   canQuote: boolean;
-  /** Responsável do centro de custo em `aguardando_aprovacao`: escolhe o vencedor e decide. */
+  /** Responsável do centro de custo em `aguardando_aprovacao`: escolhe o vencedor e decide. Na etapa
+   * do orçamento estourado (`orcamento_cc`), o responsável do CC pai confirma a escolha já feita. */
   canDecide: boolean;
   onChanged: () => Promise<void>;
 }
@@ -209,6 +210,13 @@ export function PurchaseQuotations({ request, purchaseItems, canQuote, canDecide
   }, 0);
   const chosenSuppliers = new Set(chosen.map(({ quotationId }) => quotationId).filter((qid): qid is string => Boolean(qid)));
 
+  // Escolha já gravada e o leitor ainda decide: é a etapa do orçamento estourado (responsável do CC pai).
+  const approveBudget = () => runDialog(
+    () => requestsApi.decidePurchase(request.id, { decision: 'aprovar' }),
+    () => undefined,
+    'Não foi possível aprovar a compra.',
+  );
+
   const approve = () => runDialog(
     () => requestsApi.decidePurchase(request.id, { decision: 'aprovar', selections: chosen.map(({ item, quotationId }) => ({ materialId: item.materialId, quotationId: quotationId ?? '' })) }),
     () => undefined,
@@ -294,7 +302,7 @@ export function PurchaseQuotations({ request, purchaseItems, canQuote, canDecide
                           );
                           return (
                             <td key={q.quotationId} className={`quotation-map__cell${isLowest ? ' quotation-map__cell--best' : ''}${isWinner ? ' quotation-map__cell--winner' : ''}`}>
-                              {canDecide ? (
+                              {canDecide && !approved ? (
                                 <label className="quotation-map__choice">
                                   <input
                                     type="radio"
@@ -326,7 +334,24 @@ export function PurchaseQuotations({ request, purchaseItems, canQuote, canDecide
           </section>
         )}
 
-        {canDecide && showMap && (
+        {canDecide && approved && (
+          <div className="quotation-decision">
+            <p className="quotation-decision__total" role="status">
+              O orçamento do centro de custo está estourado: a compra precisa também da sua aprovação. Total escolhido: <strong>{formatBRL(selection.reduce((sum, row) => sum + Number(row.total), 0))}</strong>
+            </p>
+            {request.viewer?.decidingAsDelegateOf && (
+              <p className="delegate-notice" role="note">Você está decidindo como delegado de {request.viewer.decidingAsDelegateOf.fullName}.</p>
+            )}
+            <div className="quotation-card__actions">
+              <Button variant="positive" onClick={() => void approveBudget()} disabled={dialogBusy}>Aprovar compra</Button>
+              <Button variant="danger" onClick={() => openDecision('reprovar')} disabled={dialogBusy}>Reprovar</Button>
+              <Button variant="secondary" onClick={() => openDecision('devolver_suprimentos')} disabled={dialogBusy}>Devolver ao Suprimentos</Button>
+            </div>
+            {!decisionKind && dialogError && <p role="alert" className="quotation-error">{dialogError}</p>}
+          </div>
+        )}
+
+        {canDecide && !approved && showMap && (
           <div className="quotation-decision">
             <p className="quotation-decision__total" role="status">
               Total aprovado: <strong>{formatBRL(chosenTotal)}</strong> — {chosenSuppliers.size} {chosenSuppliers.size === 1 ? 'fornecedor' : 'fornecedores'}

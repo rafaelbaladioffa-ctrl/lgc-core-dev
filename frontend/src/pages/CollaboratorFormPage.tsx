@@ -9,6 +9,7 @@ import {
   lookupCep,
   type CollaboratorSafe,
   type CollaboratorStatus,
+  type CostCenterAllocation,
   type ContractType,
   type CreateCollaboratorInput,
   type Gender,
@@ -26,6 +27,8 @@ import {
   type CreateCertificationInput,
 } from '../api/certifications';
 import { translateApiError } from '../utils/apiError';
+import { formatDateOnly } from '../utils/formatDate';
+import '../styles/cost-centers.css';
 
 const emptyForm: CreateCollaboratorInput = {
   fullName: '',
@@ -88,6 +91,11 @@ export function CollaboratorFormPage() {
   });
   const [existingCerts, setExistingCerts] = useState<Certification[]>([]);
   const [loading, setLoading] = useState(isEdit);
+  // Vigência do centro de custo (edição): CC salvo, início da nova alocação e histórico.
+  const [originalCostCenterId, setOriginalCostCenterId] = useState<string | null>(null);
+  const [costCenterEffectiveFrom, setCostCenterEffectiveFrom] = useState('');
+  const [allocationHistory, setAllocationHistory] = useState<CostCenterAllocation[]>([]);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   const [stepIndex, setStepIndex] = useState(0);
   // In create mode the wizard is strictly linear — a step is only reachable once the previous
@@ -113,8 +121,13 @@ export function CollaboratorFormPage() {
 
   useEffect(() => {
     if (!id) return;
+    collaboratorsApi
+      .costCenterHistory(id)
+      .then(setAllocationHistory)
+      .catch((err: unknown) => setHistoryError(translateApiError(err, 'Não foi possível carregar o histórico de centros de custo.')));
     void (async () => {
       const c = await collaboratorsApi.get(id);
+      setOriginalCostCenterId(c.costCenterId);
       setStatus(c.status);
       setMatricula(c.matricula);
       setForm({
@@ -251,6 +264,8 @@ export function CollaboratorFormPage() {
     }
   };
 
+  // Troca de CC na edição: pede a data de início da nova alocação (vigência, docs/integracao-centros-de-custo.md §2).
+  const costCenterChanged = isEdit && Boolean(form.costCenterId) && (form.costCenterId ?? null) !== originalCostCenterId;
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const message = validateStep(currentStep.id);
@@ -262,7 +277,8 @@ export function CollaboratorFormPage() {
     try {
       let collaboratorId = id;
       if (isEdit && id) {
-        await collaboratorsApi.update(id, { ...form, status });
+        const effectiveFrom = costCenterChanged && costCenterEffectiveFrom ? { costCenterEffectiveFrom } : {};
+        await collaboratorsApi.update(id, { ...form, status, ...effectiveFrom });
       } else {
         const created = await collaboratorsApi.create(form);
         collaboratorId = created.id;
@@ -527,10 +543,17 @@ export function CollaboratorFormPage() {
                 <option value="">Centro de custo (opcional)</option>
                 {costCenters.map((cc) => (
                   <option key={cc.id} value={cc.id}>
-                    {cc.code} — {cc.name}
+                    {cc.code}{cc.shortCode ? ` (${cc.shortCode})` : ''} — {cc.name}
                   </option>
                 ))}
               </select>
+              {costCenterChanged && (
+                <label className="cc-field">
+                  <span className="cc-field__label">No novo centro de custo a partir de</span>
+                  <input type="date" value={costCenterEffectiveFrom} onChange={(e) => setCostCenterEffectiveFrom(e.target.value)} />
+                  <span className="cc-field__hint">Em branco = hoje. Não pode ser antes do início no centro de custo atual.</span>
+                </label>
+              )}
               <div style={fieldStyle}>
                 <span style={labelStyle}>Yellow Badge</span>
                 <input placeholder="Identificador do crachá" value={form.yellowBadge ?? ''} onChange={(e) => setForm({ ...form, yellowBadge: e.target.value })} />
@@ -544,6 +567,31 @@ export function CollaboratorFormPage() {
                 <input type="date" value={form.asoValidity ?? ''} onChange={(e) => setForm({ ...form, asoValidity: e.target.value })} />
               </div>
             </div>
+            {isEdit && (
+              <section className="allocation-history" aria-label="Histórico de centros de custo">
+                <h5 className="allocation-history__title">Histórico de centros de custo</h5>
+                {historyError && <p role="alert" className="cc-error">{historyError}</p>}
+                {!historyError && allocationHistory.length === 0 && <p className="allocation-history__empty">Nenhuma alocação registrada.</p>}
+                {allocationHistory.length > 0 && (
+                  <div className="allocation-history__scroll">
+                    <table>
+                      <thead>
+                        <tr><th>Centro de custo</th><th>De</th><th>Até</th></tr>
+                      </thead>
+                      <tbody>
+                        {allocationHistory.map((row) => (
+                          <tr key={row.id}>
+                            <td>{row.costCenterCode}{row.costCenterShortCode ? ` (${row.costCenterShortCode})` : ''} — {row.costCenterName}</td>
+                            <td>{formatDateOnly(row.validFrom)}</td>
+                            <td>{row.validTo ? `antes de ${formatDateOnly(row.validTo)}` : 'vigente'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         )}
 

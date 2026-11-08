@@ -81,6 +81,19 @@ describe("PurchaseQuotations", () => {
     expect(screen.getAllByText("Escolhido").length).toBe(2);
   });
 
+  it("etapa do orçamento estourado: o responsável do CC pai aprova sem refazer a escolha", async () => {
+    const selection = [
+      { materialId: "m1", quotationId: "qb", supplier: "Forn B", unitPrice: "2.0000", quantity: 3, total: "6.00" },
+      { materialId: "m2", quotationId: "qa", supplier: "Forn A", unitPrice: "10.0000", quantity: 2, total: "20.00" },
+    ];
+    render(<PurchaseQuotations request={detail({ procurementSelection: selection })} purchaseItems={purchaseItems} canQuote={false} canDecide onChanged={vi.fn().mockResolvedValue(undefined)} />);
+    expect(screen.getByRole("status").textContent).toContain("orçamento do centro de custo está estourado");
+    expect(screen.queryByLabelText("Escolher Forn A para Cabo UTP")).toBeNull();
+    fireEvent.click(screen.getByText("Aprovar compra"));
+    await waitFor(() => expect(decidePurchase).toHaveBeenCalled());
+    expect(decidePurchase).toHaveBeenCalledWith("req-1", { decision: "aprovar" });
+  });
+
   it("Suprimentos: enviar para aprovação fica desabilitado enquanto falta cotação de item", () => {
     const partial = detail({ procurementQuotations: [{ quotationId: "qb", supplier: "Forn B", totalValue: "6.00", items: [{ materialId: "m1", unitPrice: "2.0000" }] }] }, "em_atendimento");
     render(<PurchaseQuotations request={partial} purchaseItems={purchaseItems} canQuote canDecide={false} onChanged={vi.fn()} />);

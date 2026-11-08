@@ -1,0 +1,25 @@
+/* Centros de custo: lista em árvore, formulário (tipo, sigla, orçamento) e histórico de alocação do colaborador. */
+.cc-tree-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.cc-tree-item__main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.cc-code { color: var(--foreground-muted); font-size: var(--text-xs); }
+.cc-link { padding: 0; color: var(--primary); background: none; border: none; font: inherit; cursor: pointer; }
+.cc-link:hover { text-decoration: underline; }
+.cc-meta { color: var(--foreground-muted); font-size: var(--text-xs); }
+.cc-short-code { padding: 1px var(--space-2); color: var(--foreground); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: var(--text-xs); font-weight: 600; letter-spacing: .02em; }
+.cc-error { margin: 0 0 var(--space-3); color: var(--danger); font-size: var(--text-xs); }
+
+.cc-form-fields { display: flex; flex-direction: column; gap: var(--space-3); }
+.cc-field { display: flex; flex-direction: column; gap: var(--space-1); }
+.cc-field__label { color: var(--foreground-muted); font-size: var(--text-xs); }
+.cc-field__hint { color: var(--foreground-muted); font-size: var(--text-xs); }
+.cc-budget { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.cc-budget__empty { margin: 0; color: var(--foreground-muted); font-size: var(--text-xs); }
+
+/* Histórico de alocação do colaborador (formulário de colaborador, etapa "Dados funcionais"). */
+.allocation-history { display: flex; flex-direction: column; gap: var(--space-2); margin-top: var(--space-4); }
+.allocation-history__title { margin: 0; color: var(--foreground-muted); font-size: var(--text-xs); text-transform: uppercase; }
+.allocation-history__scroll { overflow-x: auto; }
+.allocation-history table { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
+.allocation-history th, .allocation-history td { padding: var(--space-1) var(--space-2); text-align: left; border-bottom: 1px solid var(--border); }
+.allocation-history th { color: var(--foreground-muted); font-weight: 600; }
+.allocation-history__empty { margin: 0; color: var(--foreground-muted); font-size: var(--text-xs); }

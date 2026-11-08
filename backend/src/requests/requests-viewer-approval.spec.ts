@@ -98,8 +98,9 @@ describe('viewer.canDecideApproval no detalhe', () => {
     expect((await view(OWNER)).viewer.canDecideApproval).toBe(false);
   });
 
-  it('em compra só vale a linha centro_custo; fora de compra, qualquer linha pendente', async () => {
+  it('em compra só valem as linhas centro_custo e orcamento_cc; fora de compra, qualquer linha pendente', async () => {
     expect((await setup({ source: 'gestor' }).view(OWNER)).viewer.canDecideApproval).toBe(false);
+    expect((await setup({ source: 'orcamento_cc' }).view(OWNER)).viewer.canDecideApproval).toBe(true);
     expect((await setup({ kind: 'outra', source: 'gestor' }).view(OWNER)).viewer.canDecideApproval).toBe(true);
   });
 

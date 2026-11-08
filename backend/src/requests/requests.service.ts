@@ -67,6 +67,28 @@ const REQUESTER_EDITABLE_STATUSES: RequestStatus[] = ['rascunho', 'devolvida_aju
 /** Chaves de `formData` gravadas só pelo servidor (análise de estoque e cotações do Suprimentos).
  * O cliente nunca as envia (L02) e o reenvio de uma compra devolvida as descarta (ciclo novo). */
 const PROCUREMENT_SERVER_KEYS: readonly string[] = ['procurementAnalysis', 'procurementQuotations', 'procurementQuotation', 'selectedQuotationId', 'procurementSelection', 'procurementDeliveries'];
+/** Linhas de aprovação que decidem uma compra pela `decidePurchase`: o responsável do centro de
+ * custo e, quando o orçamento do CC está estourado, o responsável do CC pai (etapa final). */
+const PURCHASE_DECISION_SOURCES: readonly string[] = ['centro_custo', 'orcamento_cc'];
+/** Categorias que viram `finance_request.approved` (docs/integracao-centros-de-custo.md §3), pelo
+ * código da categoria (o `kind` delas é `padrao`). O valor vem do campo `valor` do formulário. */
+const FINANCE_REQUEST_CATEGORIES: Record<string, 'reembolso' | 'adiantamento'> = {
+  'FIN-REEMBOLSO': 'reembolso',
+  'FIN-ADIANTAMENTO': 'adiantamento',
+};
+
+type PurchaseEventGroup = {
+  group_id: string;
+  supplier: string;
+  total: string;
+  items: Array<{ material_id: string | null; description: string; quantity: number; unit_price: string; total: string }>;
+};
+
+/** Ano corrente no calendário de São Paulo. */
+function saoPauloYear(now: Date = new Date()): number {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', year: 'numeric' }).format(now));
+}
+
 /** Prefixo do comentário público gravado na devolução para ajuste; a tela do solicitante o usa. */
 export const RETURN_FOR_ADJUSTMENT_PREFIX = 'Devolvida para ajuste: ';
 
@@ -361,6 +383,10 @@ export class RequestsService {
         if (!costCenter?.responsibleCollaboratorId) throw new BadRequestException('O centro de custo não possui responsável pela aprovação final.');
         const finalStep = Math.max(0, ...resolved.map((step) => step.stepOrder)) + 1;
         resolved.push({ stepOrder: finalStep, requiredLevel: null, approverId: costCenter.responsibleCollaboratorId, completionRule: 'todos', requiredCount: null, approvalSource: 'centro_custo' });
+        const budgetApproverId = await this.budgetOverrunApprover(tx, request.costCenterId, costCenter.responsibleCollaboratorId, conflicted);
+        if (budgetApproverId) {
+          resolved.push({ stepOrder: finalStep + 1, requiredLevel: null, approverId: budgetApproverId, completionRule: 'todos', requiredCount: null, approvalSource: 'orcamento_cc' });
+        }
       }
       // Quem realiza a triagem passa a ser o responsável pela etapa. Isso evita
       // que o solicitante permaneça como executor quando a requisição chega à
@@ -559,10 +585,22 @@ export class RequestsService {
     if (responsibleId === request.requesterId || responsibleId === request.beneficiaryId) {
       throw new BadRequestException('O responsável pelo centro de custo é o próprio solicitante e não pode aprovar esta compra. Ajuste o responsável do centro de custo.');
     }
+    const costCenterId = request.costCenterId;
     return this.prisma.$transaction(async (tx) => {
       await tx.requestApproval.create({ data: { requestId: id, stepOrder: 1, approverId: responsibleId, completionRule: 'todos', approvalSource: 'centro_custo' } });
+      // Orçamento do CC estourado (informado pelo Financeiro): etapa final do responsável do CC pai.
+      const budgetApproverId = await this.budgetOverrunApprover(tx, costCenterId, responsibleId, new Set([request.requesterId, request.beneficiaryId]));
+      if (budgetApproverId) {
+        await tx.requestApproval.create({ data: { requestId: id, stepOrder: 2, approverId: budgetApproverId, completionRule: 'todos', approvalSource: 'orcamento_cc' } });
+      }
       const updated = await tx.request.update({ where: { id }, data: { status: 'aguardando_aprovacao' } });
-      await this.audit(tx, { aggregateId: id, event: 'request.purchase_submitted_for_approval', actorId, before: { status: request.status }, after: { status: 'aguardando_aprovacao', approverId: responsibleId } });
+      await this.audit(tx, {
+        aggregateId: id,
+        event: 'request.purchase_submitted_for_approval',
+        actorId,
+        before: { status: request.status },
+        after: { status: 'aguardando_aprovacao', approverId: responsibleId, ...(budgetApproverId ? { budgetApproverId } : {}) },
+      });
       await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
       return updated;
     });
@@ -577,7 +615,7 @@ export class RequestsService {
     if (!categoryVersion.category || !isPurchase(categoryVersion.category)) throw new BadRequestException('Esta requisição não é de compras.');
     const stepRows = this.activeStepRows(request.approvals);
     const { row: myRow, onBehalfOf } = await this.findDecidableRow(stepRows, approverId, request.sectorId);
-    if (myRow.approvalSource !== 'centro_custo') throw new BadRequestException('A decisão de compra cabe ao responsável do centro de custo.');
+    if (!PURCHASE_DECISION_SOURCES.includes(myRow.approvalSource)) throw new BadRequestException('A decisão de compra cabe ao responsável do centro de custo.');
     const reason = dto.reason?.trim() ?? '';
     const formData = (request.formData as Record<string, unknown> | null) ?? {};
     const audited = { stepOrder: myRow.stepOrder, onBehalfOf: onBehalfOf ? myRow.approverId : undefined };
@@ -602,7 +640,12 @@ export class RequestsService {
         const now = new Date();
         await tx.requestApproval.update({ where: { id: myRow.id }, data: { status: 'devolvido', decidedAt: now, comment: reason } });
         await tx.requestApproval.updateMany({ where: { requestId: id, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
-        const updated = await tx.request.update({ where: { id }, data: { status: 'em_atendimento' } });
+        // Devolvida pela etapa do orçamento: a escolha do responsável do CC deixa de valer (ciclo novo de cotação).
+        const { procurementSelection: droppedSelection, ...withoutSelection } = formData;
+        const updated = await tx.request.update({
+          where: { id },
+          data: { status: 'em_atendimento', ...(droppedSelection !== undefined ? { formData: withoutSelection as Prisma.InputJsonValue } : {}) },
+        });
         await tx.requestComment.create({ data: { requestId: id, authorId: approverId, visibility: 'publico', body: `Devolvida ao Suprimentos: ${reason}` } });
         await this.audit(tx, { aggregateId: id, event: 'request.purchase_returned_to_procurement', actorId: approverId, before: { status: request.status }, after: { status: 'em_atendimento', reason, ...audited } });
         await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
@@ -610,7 +653,22 @@ export class RequestsService {
       });
     }
 
-    // aprovar
+    // aprovar — etapa do orçamento estourado: confirma a escolha já feita pelo responsável do CC.
+    if (myRow.approvalSource === 'orcamento_cc') {
+      if (!Array.isArray(formData.procurementSelection)) throw new BadRequestException('O responsável do centro de custo ainda não escolheu os fornecedores.');
+      return this.prisma.$transaction(async (tx) => {
+        const now = new Date();
+        await tx.requestApproval.update({ where: { id: myRow.id }, data: { status: 'aprovado', decidedAt: now, comment: reason || undefined } });
+        await tx.requestApproval.updateMany({ where: { requestId: id, stepOrder: myRow.stepOrder, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
+        if (reason) await tx.requestComment.create({ data: { requestId: id, authorId: approverId, visibility: 'publico', body: reason } });
+        await this.audit(tx, { aggregateId: id, event: 'approval.decided', actorId: approverId, after: { decision: 'aprovado', budgetOverrun: true, ...audited } });
+        const version = await tx.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
+        const updated = await this.finalizeApproval(tx, id, version, approverId);
+        await this.recordPurchaseApproved(tx, updated, now);
+        return updated;
+      });
+    }
+
     if (!formData.procurementAnalysis) throw new BadRequestException('A análise de estoque do Suprimentos precisa ser registrada antes da aprovação.');
     const needing = this.itemsNeedingQuotation(formData);
     const selections = dto.selections ?? [];
@@ -636,7 +694,7 @@ export class RequestsService {
       const now = new Date();
       await tx.requestApproval.update({ where: { id: myRow.id }, data: { status: 'aprovado', decidedAt: now, comment: reason || undefined } });
       await tx.requestApproval.updateMany({ where: { requestId: id, stepOrder: myRow.stepOrder, status: 'pendente' }, data: { status: 'devolvido', decidedAt: now } });
-      await tx.request.update({
+      const withSelection = await tx.request.update({
         where: { id },
         data: { estimatedValue: grandTotal.toFixed(2), formData: { ...formData, procurementSelection } as unknown as Prisma.InputJsonValue },
       });
@@ -647,8 +705,79 @@ export class RequestsService {
         actorId: approverId,
         after: { decision: 'aprovado', total: grandTotal.toFixed(2), suppliers: [...new Set(procurementSelection.map((row) => row.supplier))], ...audited },
       });
+      // Etapa seguinte pendente (orçamento do CC estourado): a compra continua aguardando aprovação.
+      if (request.approvals.some((a) => a.status === 'pendente' && a.stepOrder > myRow.stepOrder)) return withSelection;
       const version = await tx.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
-      return this.finalizeApproval(tx, id, version, approverId);
+      const updated = await this.finalizeApproval(tx, id, version, approverId);
+      await this.recordPurchaseApproved(tx, updated, now);
+      return updated;
+    });
+  }
+
+  /** Responsável do CC pai quando o orçamento do CC da compra está estourado no ano corrente
+   * (situação informada pelo Financeiro, docs/integracao-centros-de-custo.md §4). `null` quando o
+   * orçamento não está estourado, o CC não tem pai/responsável no pai, ou o responsável do pai é a
+   * mesma pessoa que já aprova pelo CC ou está em conflito (solicitante/beneficiário). */
+  private async budgetOverrunApprover(client: PrismaService | TxClient, costCenterId: string, costCenterResponsibleId: string, conflicted: Set<string>): Promise<string | null> {
+    const costCenter = await client.costCenter.findUnique({
+      where: { id: costCenterId },
+      select: { budgetStatus: true, budgetYear: true, parentCostCenter: { select: { responsibleCollaboratorId: true } } },
+    });
+    if (costCenter?.budgetStatus !== 'estourado' || costCenter.budgetYear !== saoPauloYear()) return null;
+    const parentResponsibleId = costCenter.parentCostCenter?.responsibleCollaboratorId;
+    if (!parentResponsibleId || parentResponsibleId === costCenterResponsibleId || conflicted.has(parentResponsibleId)) return null;
+    return parentResponsibleId;
+  }
+
+  /** Grupos da compra para os eventos `purchase.*` (docs/integracao-centros-de-custo.md §3): os mesmos
+   * grupos de entrega (`deliveryGroupsOf`), com preço do fornecedor escolhido; o grupo Estoque usa o
+   * valor unitário informado na requisição. Valores em string com 2 casas. */
+  private purchaseEventGroups(formData: Record<string, unknown>): PurchaseEventGroup[] {
+    const selection = Array.isArray(formData.procurementSelection) ? (formData.procurementSelection as Array<Record<string, unknown>>) : [];
+    const purchaseItems = this.purchaseItemsOf(formData);
+    const decimal = (value: unknown) => {
+      try {
+        const parsed = typeof value === 'number' || typeof value === 'string' ? new Prisma.Decimal(value) : new Prisma.Decimal(0);
+        return parsed.isFinite() ? parsed : new Prisma.Decimal(0);
+      } catch {
+        return new Prisma.Decimal(0);
+      }
+    };
+    return this.deliveryGroupsOf(formData).map((group) => {
+      let groupTotal = new Prisma.Decimal(0);
+      const items = group.items.map((item) => {
+        const quantity = decimal(item.quantity);
+        const selected = group.groupId === 'estoque' ? undefined : selection.find((row) => String(row.materialId) === item.materialId);
+        const unitPrice = selected ? decimal(selected.unitPrice) : decimal(purchaseItems.find((row) => String(row.materialId) === item.materialId)?.unitPrice);
+        const total = selected?.total !== undefined ? decimal(selected.total).toDecimalPlaces(2) : unitPrice.times(quantity).toDecimalPlaces(2);
+        groupTotal = groupTotal.plus(total);
+        return { material_id: item.materialId || null, description: item.item, quantity: quantity.toNumber(), unit_price: unitPrice.toFixed(2), total: total.toFixed(2) };
+      });
+      return { group_id: group.groupId, supplier: group.supplier, total: groupTotal.toFixed(2), items };
+    });
+  }
+
+  /** Total comprado: soma dos grupos de fornecedor. O grupo Estoque é consumo de material, não compra. */
+  private purchaseEventTotal(groups: PurchaseEventGroup[]): string {
+    return groups.filter((group) => group.group_id !== 'estoque').reduce((sum, group) => sum.plus(group.total), new Prisma.Decimal(0)).toFixed(2);
+  }
+
+  /** `purchase.approved`: aprovação final da compra (responsável do CC, ou do CC pai quando o orçamento estourou). */
+  private async recordPurchaseApproved(
+    tx: TxClient,
+    request: { id: string; code: string; costCenterId: string | null; projectId: string | null; requesterId: string; formData: Prisma.JsonValue },
+    approvedAt: Date,
+  ) {
+    const groups = this.purchaseEventGroups((request.formData as Record<string, unknown> | null) ?? {});
+    await this.outbox.record(tx, 'purchase.approved', {
+      request_id: request.id,
+      code: request.code,
+      cost_center_id: request.costCenterId ?? null,
+      project_id: request.projectId ?? null,
+      requester_id: request.requesterId,
+      approved_at: approvedAt.toISOString(),
+      total: this.purchaseEventTotal(groups),
+      groups,
     });
   }
 
@@ -789,7 +918,23 @@ export class RequestsService {
         before: { status: request.status },
         after: { status: 'aguardando_entrega', deliveries: dto.deliveries.map((row) => ({ groupId: row.groupId, orderNumber: row.orderNumber, orderDate: row.orderDate, expectedDeliveryDate: row.expectedDeliveryDate })) },
       });
-      if (first) await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      if (first) {
+        await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+        const groups = this.purchaseEventGroups(updatedFormData).map((group) => {
+          const delivery = deliveries.find((row) => row.groupId === group.group_id);
+          return { ...group, order_number: delivery?.orderNumber || null, order_date: delivery?.orderDate ?? null, expected_delivery_date: delivery?.expectedDeliveryDate ?? null };
+        });
+        await this.outbox.record(tx, 'purchase.order_registered', {
+          request_id: id,
+          code: updated.code,
+          cost_center_id: updated.costCenterId ?? null,
+          project_id: updated.projectId ?? null,
+          requester_id: updated.requesterId,
+          ordered_at: now,
+          total: this.purchaseEventTotal(groups),
+          groups,
+        });
+      }
       return updated;
     });
   }
@@ -841,6 +986,15 @@ export class RequestsService {
         await this.outbox.record(tx, 'request.completed', { request_id: id, code: updated.code });
         await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
       }
+      await this.outbox.record(tx, 'purchase.delivery_received', {
+        request_id: id,
+        code: updated.code,
+        cost_center_id: updated.costCenterId ?? null,
+        project_id: updated.projectId ?? null,
+        received_at: now,
+        all_received: allReceived,
+        groups: this.purchaseEventGroups(formData).filter((group) => groupIds.includes(group.group_id)),
+      });
       return updated;
     });
   }
@@ -886,7 +1040,7 @@ export class RequestsService {
       const stillPending = request.approvals.some((a) => a.stepOrder !== myRow.stepOrder && a.status === 'pendente');
       if (stillPending) return tx.request.findUniqueOrThrow({ where: { id } });
 
-      const categoryVersion = await tx.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId } });
+      const categoryVersion = await tx.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
       return this.finalizeApproval(tx, id, categoryVersion, approverId);
     });
   }
@@ -1134,12 +1288,32 @@ export class RequestsService {
     }
     // Cancelamento como staff (fora do rascunho/devolvida do próprio solicitante) em compra é do Suprimentos.
     if (!(isRequester && requesterOwnsThisStage)) await this.assertPurchaseOperator(request, actorRoles);
+    const cancelsApprovedPurchase = await this.isApprovedPurchase(request);
     return this.prisma.$transaction(async (tx) => {
       const updated = await tx.request.update({ where: { id }, data: { status: 'cancelada' } });
       await this.audit(tx, { aggregateId: id, event: 'request.cancelled', actorId, after: { reason: dto.reason } });
       await this.outbox.record(tx, 'request.status_changed', { request_id: id, code: updated.code, status: updated.status });
+      if (cancelsApprovedPurchase) {
+        await this.outbox.record(tx, 'purchase.cancelled', {
+          request_id: id,
+          code: updated.code,
+          cost_center_id: updated.costCenterId ?? null,
+          project_id: updated.projectId ?? null,
+          cancelled_at: new Date().toISOString(),
+        });
+      }
       return updated;
     });
+  }
+
+  /** Compra que já recebeu a aprovação final (já emitiu `purchase.approved`): aprovada, aguardando
+   * entrega, ou o legado `em_atendimento` com a escolha de fornecedores gravada. */
+  private async isApprovedPurchase(request: { status: RequestStatus; categoryVersionId: string; formData: Prisma.JsonValue }): Promise<boolean> {
+    const formData = request.formData as Record<string, unknown> | null;
+    const approvedStage = ['aprovada', 'aguardando_entrega'].includes(request.status) || (request.status === 'em_atendimento' && Array.isArray(formData?.procurementSelection));
+    if (!approvedStage) return false;
+    const version = await this.prisma.categoryVersion.findUniqueOrThrow({ where: { id: request.categoryVersionId }, include: { category: true } });
+    return !!version.category && isPurchase(version.category);
   }
 
   async addComment(requestId: string, authorId: string, body: string, visibility: 'publico' | 'interno' = 'publico') {
@@ -1695,7 +1869,7 @@ export class RequestsService {
 
   /** Calculado no servidor para a tela não reimplementar a regra: o leitor pode decidir a
    * aprovação pendente da etapa ativa (titular ou delegado ativo, nunca solicitante/beneficiário)?
-   * Em compra só vale a linha `centro_custo` (mesma exigência de `decidePurchase`). */
+   * Em compra só valem as linhas `centro_custo` e `orcamento_cc` (mesma exigência de `decidePurchase`). */
   private async computeViewerApproval(
     request: { status: string; requesterId: string; beneficiaryId: string; sectorId: string; approvals: Array<{ id: string; approverId: string; stepOrder: number; status: string; approvalSource?: string | null; approver?: { id: string; fullName: string } }> },
     collaboratorId: string | null,
@@ -1709,7 +1883,7 @@ export class RequestsService {
     const minStep = Math.min(...pending.map((a) => a.stepOrder));
     const found = await this.resolveDecidableRow(pending.filter((a) => a.stepOrder === minStep), collaboratorId, request.sectorId);
     if (!found) return no;
-    if (purchase && found.row.approvalSource !== 'centro_custo') return no;
+    if (purchase && !PURCHASE_DECISION_SOURCES.includes(found.row.approvalSource ?? '')) return no;
     return found.onBehalfOf && found.row.approver
       ? { canDecideApproval: true, decidingAsDelegateOf: { id: found.row.approver.id, fullName: found.row.approver.fullName } }
       : { canDecideApproval: true };
@@ -1841,7 +2015,12 @@ export class RequestsService {
     });
   }
 
-  private async finalizeApproval(tx: TxClient, id: string, categoryVersion: { slaFirstResponseMinutes: number; slaResolutionMinutes: number }, actorId: string) {
+  private async finalizeApproval(
+    tx: TxClient,
+    id: string,
+    categoryVersion: { slaFirstResponseMinutes: number; slaResolutionMinutes: number; category?: { code: string } | null },
+    actorId: string,
+  ) {
     const now = new Date();
     const holidaySet = await this.loadHolidaySet();
     const slaDueFirstResponseAt = this.addBusinessMinutes(now, categoryVersion.slaFirstResponseMinutes, holidaySet);
@@ -1855,7 +2034,47 @@ export class RequestsService {
     });
     await this.audit(tx, { aggregateId: id, event: 'request.approved', actorId, after: { status: 'aprovada' } });
     await this.outbox.record(tx, 'request.status_changed', { request_id: id, status: 'aprovada' });
+    const financeKind = categoryVersion.category ? FINANCE_REQUEST_CATEGORIES[categoryVersion.category.code] : undefined;
+    if (financeKind) await this.recordFinanceRequestApproved(tx, updated, financeKind, now);
     return updated;
+  }
+
+  /** `finance_request.approved` (reembolso/adiantamento). Valor: campo `valor` do formulário (número,
+   * ou texto com vírgula decimal); sem ele, `estimatedValue`. Sem valor válido o evento não sai
+   * (o Financeiro não tem o que lançar) e fica um aviso no log. */
+  private async recordFinanceRequestApproved(
+    tx: TxClient,
+    request: { id: string; code: string; beneficiaryId: string; costCenterId: string | null; projectId: string | null; formData: Prisma.JsonValue; estimatedValue: Prisma.Decimal | null },
+    kind: 'reembolso' | 'adiantamento',
+    approvedAt: Date,
+  ) {
+    const formData = (request.formData as Record<string, unknown> | null) ?? {};
+    const amount = this.parseMoney(formData.valor) ?? this.parseMoney(request.estimatedValue?.toString());
+    if (!amount) {
+      this.logger.warn(`finance_request.approved não emitido para ${request.code}: sem valor válido no formulário.`);
+      return;
+    }
+    await this.outbox.record(tx, 'finance_request.approved', {
+      request_id: request.id,
+      code: request.code,
+      kind,
+      collaborator_id: request.beneficiaryId,
+      cost_center_id: request.costCenterId ?? null,
+      project_id: request.projectId ?? null,
+      amount,
+      approved_at: approvedAt.toISOString(),
+    });
+  }
+
+  /** Número ou texto (`1234.56`, `1.234,56`, `1234,56`) → string com 2 casas; `null` se inválido ou negativo. */
+  private parseMoney(value: unknown): string | null {
+    let text: string;
+    if (typeof value === 'number') text = String(value);
+    else if (typeof value === 'string') text = value.includes(',') ? value.replace(/\./g, '').replace(',', '.') : value;
+    else return null;
+    text = text.replace(/[^\d.-]/g, '');
+    if (!/^\d+(\.\d+)?$/.test(text)) return null;
+    return new Prisma.Decimal(text).toFixed(2);
   }
 
   private assertFormDataSatisfiesRequiredFields(schema: Prisma.JsonValue, formData: Record<string, unknown> | undefined) {

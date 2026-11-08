@@ -64,6 +64,21 @@ enum ManagementLevel {
   diretor
 }
 
+/// Natureza do centro de custo (docs/integracao-centros-de-custo.md §1). Raízes são `divisao`.
+enum CostCenterKind {
+  divisao
+  administrativo
+  operacional
+  equipe_tecnica
+}
+
+/// Faixa de consumo do orçamento informada pelo Financeiro (§4): ok < 80%, alerta 80–99%, estourado ≥ 100%.
+enum CostCenterBudgetStatus {
+  ok
+  alerta
+  estourado
+}
+
 enum OutboxStatus {
   pending
   delivered
@@ -187,8 +202,17 @@ model CostCenter {
   sector    Sector   @relation(fields: [sectorId], references: [id])
   responsibleCollaboratorId String? @map("responsible_collaborator_id")
   responsibleCollaborator Collaborator? @relation("CostCenterResponsible", fields: [responsibleCollaboratorId], references: [id])
+  kind      CostCenterKind @default(administrativo)
+  /// Sigla legível opcional e única (ex.: `DC-001-JAI`); não substitui o `code` gerado.
+  shortCode String?  @unique @map("short_code")
+  /// Situação do orçamento enviada pelo Financeiro (PUT /integration/cost-centers/:id/budget-status). Só leitura na API pública.
+  budgetStatus   CostCenterBudgetStatus? @map("budget_status")
+  budgetPercent  Decimal?  @map("budget_percent") @db.Decimal(6, 2)
+  budgetYear     Int?      @map("budget_year")
+  budgetStatusAt DateTime? @map("budget_status_at")
   projects  Project[]
   collaborators Collaborator[]
+  collaboratorAllocations CollaboratorCostCenterAllocation[]
   requests  Request[]
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -266,6 +290,7 @@ model Collaborator {
   workSchedule   WorkSchedule? @relation(fields: [workScheduleId], references: [id])
   costCenterId   String?   @map("cost_center_id")
   costCenter     CostCenter? @relation(fields: [costCenterId], references: [id])
+  costCenterAllocations CollaboratorCostCenterAllocation[]
   photoFilename    String? @map("photo_filename")
   photoStoragePath String? @map("photo_storage_path")
   uniformSize      String? @map("uniform_size")
@@ -297,6 +322,24 @@ model Collaborator {
   @@index([workScheduleId])
   @@index([costCenterId])
   @@map("collaborators")
+}
+
+/// Histórico de alocação do colaborador em centro de custo (docs/integracao-centros-de-custo.md §2).
+/// `valid_to` é exclusivo (o último dia é `valid_to - 1`); nulo = vigente. No máximo uma vigente por
+/// colaborador (índice único parcial criado na migração, fora do schema do Prisma).
+model CollaboratorCostCenterAllocation {
+  id             String       @id @default(uuid())
+  collaboratorId String       @map("collaborator_id")
+  collaborator   Collaborator @relation(fields: [collaboratorId], references: [id])
+  costCenterId   String       @map("cost_center_id")
+  costCenter     CostCenter   @relation(fields: [costCenterId], references: [id])
+  validFrom      DateTime     @map("valid_from") @db.Date
+  validTo        DateTime?    @map("valid_to") @db.Date
+  createdAt      DateTime     @default(now()) @map("created_at")
+
+  @@index([collaboratorId, validFrom])
+  @@index([costCenterId])
+  @@map("collaborator_cost_center_allocations")
 }
 
 model TechnicianCertification {

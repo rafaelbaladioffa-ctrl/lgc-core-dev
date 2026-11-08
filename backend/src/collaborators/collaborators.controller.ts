@@ -50,6 +50,12 @@ export class CollaboratorsController {
     return this.collaboratorsService.findOneSafe(id);
   }
 
+  @Get(':id/cost-center-history')
+  @RequirePermissions('collaborator:read')
+  costCenterHistory(@Param('id') id: string) {
+    return this.collaboratorsService.costCenterHistory(id);
+  }
+
   @Get(':id/sensitive')
   @RequirePermissions('collaborator:read_sensitive')
   async findOneSensitive(@Param('id') id: string, @CurrentUser() user: AuthenticatedUser) {

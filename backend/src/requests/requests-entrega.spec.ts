@@ -257,7 +257,10 @@ describe('confirm-receipt', () => {
     expect(typeof a.receivedAt).toBe('string');
     expect(state.formData.procurementDeliveries[1].receivedAt).toBeNull();
     expect(audits()).toEqual(['request.partial_receipt_confirmed']);
-    expect(outbox.record).not.toHaveBeenCalled();
+    // Só o evento do recebimento parcial (sem request.completed/status_changed).
+    expect(outbox.record.mock.calls.map((c: any[]) => c[1])).toEqual(['purchase.delivery_received']);
+    expect(outbox.record.mock.calls[0][2]).toMatchObject({ all_received: false, groups: [expect.objectContaining({ group_id: 'q-a' })] });
+    expect(outbox.record.mock.calls[0][2].groups).toHaveLength(1);
   });
 
   it('último grupo encerra a requisição e emite os eventos', async () => {
@@ -270,7 +273,7 @@ describe('confirm-receipt', () => {
     expect(state.completedAt).toBeInstanceOf(Date);
     expect(state.requesterAcceptedAt).toBeInstanceOf(Date);
     expect(audits()).toEqual(['request.partial_receipt_confirmed', 'request.received']);
-    expect(outbox.record.mock.calls.map((c: any[]) => c[1])).toEqual(['request.completed', 'request.status_changed']);
+    expect(outbox.record.mock.calls.map((c: any[]) => c[1])).toEqual(['purchase.delivery_received', 'request.completed', 'request.status_changed', 'purchase.delivery_received']);
     expect(comments()).toEqual(['Recebimento confirmado (Estoque): Tudo certo']);
   });
 
@@ -284,6 +287,66 @@ describe('confirm-receipt', () => {
   it('em outro status responde 400', async () => {
     const { service } = setup({ status: 'aprovada' });
     await expect(service.confirmReceipt('req-1', REQUESTER, { groupIds: ['q-a'] } as any)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('eventos purchase.* para o Financeiro', () => {
+  it('primeiro pedido emite purchase.order_registered com grupos, preços e dados do pedido', async () => {
+    const { state, outbox, order } = setup();
+    state.costCenterId = 'cc-1';
+    state.projectId = 'proj-1';
+    await order();
+    const call = outbox.record.mock.calls.find((c: any[]) => c[1] === 'purchase.order_registered')!;
+    const payload = call[2];
+    expect(payload).toMatchObject({ request_id: 'req-1', code: 'REQ-000001', cost_center_id: 'cc-1', project_id: 'proj-1', requester_id: REQUESTER, total: '9.00' });
+    expect(typeof payload.ordered_at).toBe('string');
+    expect(payload.approved_at).toBeUndefined();
+    expect(payload.groups).toEqual([
+      {
+        group_id: 'q-a', supplier: 'Forn A', total: '8.00', order_number: 'PC-1', order_date: '2026-11-10', expected_delivery_date: '2026-11-20',
+        items: [
+          { material_id: 'm1', description: 'Cabo UTP', quantity: 3, unit_price: '2.00', total: '6.00' },
+          { material_id: 'm2', description: 'Conector', quantity: 2, unit_price: '1.00', total: '2.00' },
+        ],
+      },
+      {
+        group_id: 'q-b', supplier: 'Forn B', total: '1.00', order_number: null, order_date: '2026-11-10', expected_delivery_date: '2026-11-20',
+        items: [{ material_id: 'm3', description: 'Fita', quantity: 1, unit_price: '1.00', total: '1.00' }],
+      },
+      {
+        // Estoque: consumo de material, fora do total da compra; valor unitário da requisição.
+        group_id: 'estoque', supplier: 'Estoque', total: '1.00', order_number: null, order_date: '2026-11-10', expected_delivery_date: '2026-11-20',
+        items: [{ material_id: 'm4', description: 'Patch panel', quantity: 1, unit_price: '1.00', total: '1.00' }],
+      },
+    ]);
+  });
+
+  it('atualizar a previsão não repete purchase.order_registered', async () => {
+    const { outbox, order } = setup();
+    await order();
+    outbox.record.mockClear();
+    await order({ deliveries: [dates('q-a', { expectedDeliveryDate: '2026-11-25' })] });
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
+
+  it('cancelar compra aprovada emite purchase.cancelled', async () => {
+    const { state, outbox, service } = setup({ status: 'aguardando_entrega' });
+    state.costCenterId = 'cc-1';
+    await service.cancel('req-1', PROCUREMENT, true, { reason: 'Projeto suspenso' } as any, ROLES);
+    expect(state.status).toBe('cancelada');
+    expect(outbox.record).toHaveBeenCalledWith(expect.anything(), 'purchase.cancelled', expect.objectContaining({ request_id: 'req-1', code: 'REQ-000001', cost_center_id: 'cc-1', project_id: null }));
+  });
+
+  it('cancelar compra ainda não aprovada não emite purchase.cancelled', async () => {
+    const { outbox, service } = setup({ status: 'em_atendimento', formData: { purchaseItems } });
+    await service.cancel('req-1', PROCUREMENT, true, { reason: 'Desistiu' } as any, ROLES);
+    expect(outbox.record.mock.calls.map((c: any[]) => c[1])).toEqual(['request.status_changed']);
+  });
+
+  it('cancelar requisição aprovada que não é compra não emite purchase.cancelled', async () => {
+    const { outbox, service } = setup({ status: 'aprovada', kind: 'padrao' });
+    await service.cancel('req-1', PROCUREMENT, true, { reason: 'Desistiu' } as any, []);
+    expect(outbox.record.mock.calls.map((c: any[]) => c[1])).toEqual(['request.status_changed']);
   });
 });
 

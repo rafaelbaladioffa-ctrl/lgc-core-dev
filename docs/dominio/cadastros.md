@@ -105,17 +105,19 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 
 ## 4. Centros de custo
 
-**Campos-chave** (`cost_centers`): `code` (único, gerado), `name`, `sector_id` (obrigatório), `parent_cost_center_id` (opcional), `responsible_collaborator_id` (opcional).
+**Campos-chave** (`cost_centers`): `code` (único, gerado), `name`, `sector_id` (obrigatório), `parent_cost_center_id` (opcional), `responsible_collaborator_id` (opcional), `kind` (`divisao`, `administrativo`, `operacional`, `equipe_tecnica`; padrão `administrativo`; a migração `20261124000000` marcou as raízes como `divisao`), `short_code` (sigla legível opcional e única, ex.: `DC-001-JAI`; maiúsculas, dígitos e hífen, até 30 caracteres; a API normaliza para maiúsculas, vazio limpa; não substitui o `code`). Situação do orçamento informada pelo Financeiro, **só leitura** na API pública: `budget_status` (`ok`/`alerta`/`estourado`), `budget_percent` (0–999), `budget_year`, `budget_status_at` (instante do cálculo). Contrato: [integracao-centros-de-custo.md §1 e §4](../integracao-centros-de-custo.md).
 
-**Regras** ([cost-centers.service.ts](../../backend/src/cost-centers/cost-centers.service.ts)): mesmo esquema de setores, com a sequence `cost_center_root_code_seq` (100, 200…) e `FOR UPDATE` na linha do pai. Sem reparenting. Exclusão bloqueada com `409` se houver projetos, sub-CCs ou outros vínculos. O mesmo risco de colisão após exclusão de irmão se aplica.
+**Regras** ([cost-centers.service.ts](../../backend/src/cost-centers/cost-centers.service.ts)): mesmo esquema de setores, com a sequence `cost_center_root_code_seq` (100, 200…) e `FOR UPDATE` na linha do pai. Sem reparenting. Exclusão bloqueada com `409` se houver projetos, sub-CCs, requisições, histórico de alocação de colaboradores ou outros vínculos. O mesmo risco de colisão após exclusão de irmão se aplica. Sigla repetida → `409` ("Já existe um centro de custo com esta sigla."); formato inválido → `400` (também há `CHECK` no banco).
+
+**Situação do orçamento (Financeiro → Core).** `PUT /api/v1/integration/cost-centers/:id/budget-status` ([cost-centers-integration.controller.ts](../../backend/src/cost-centers/cost-centers-integration.controller.ts)), autenticado pela API key do satélite (`Authorization: Bearer`, mesmo mecanismo da devolução da cotação do projeto) e limitado a 100/min por satélite; só o satélite que assina `cost_center.updated` pode enviar (senão `403`). Corpo `year`, `budget`, `committed`, `realized` (string com até 2 casas; número é aceito e convertido), `percent` (0–999, até 2 casas), `status`, `computed_at` (ISO 8601). Grava `budget_status`, `budget_percent`, `budget_year` e `budget_status_at = computed_at`; os valores em reais não são guardados. Cálculo mais antigo que o gravado (retry fora de ordem) é ignorado com `200` e `applied: false`. Sem usuário, não há `@AuditAction`: o serviço grava `audit_events` (`cost_center.budget_status_received` ou `cost_center.budget_status_ignored`, `source = integration:<satélite>`). Não emite evento de volta. Efeito: compra de CC `estourado` no ano corrente ganha a etapa `orcamento_cc` ([requisicoes-estado-atual.md §6](requisicoes-estado-atual.md#6-compra-de-material-kind--compra_material)).
 
 **Divergência com o planning:** `responsible_collaborator_id` existe no schema, no DTO e no formulário, mas não está no planning §5.6.
 
-**Endpoints:** `POST /cost-centers` (`cost_center:create`), `GET /cost-centers`, `GET /cost-centers/:id` (`cost_center:read`, incluem setor e responsável), `PUT /cost-centers/:id` (`cost_center:update`), `DELETE /cost-centers/:id` (`cost_center:delete`). Auditoria: `create_cost_center`, `update_cost_center`, `delete_cost_center`.
+**Endpoints:** `POST /cost-centers` (`cost_center:create`), `GET /cost-centers`, `GET /cost-centers/:id` (`cost_center:read`, incluem setor, responsável, `kind`, `shortCode` e `budget*`), `PUT /cost-centers/:id` (`cost_center:update`; aceita `kind` e `shortCode`, nunca `budget*`), `DELETE /cost-centers/:id` (`cost_center:delete`). Auditoria: `create_cost_center`, `update_cost_center`, `delete_cost_center`. Satélite: `PUT /integration/cost-centers/:id/budget-status` (acima).
 
-**Eventos de outbox** (desde 2026-11-07, para o rateio do Financeiro): `cost_center.created` e `cost_center.updated`, sempre com o estado completo: `cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`, `active`. A exclusão emite `cost_center.updated` com `active: false`.
+**Eventos de outbox** (desde 2026-11-07, para o rateio do Financeiro): `cost_center.created` e `cost_center.updated`, sempre com o estado completo: `cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`, `kind`, `short_code` (desde 2026-11-08), `active`. A exclusão emite `cost_center.updated` com `active: false`. A situação do orçamento não gera evento.
 
-**Frontend:** `/cost-centers`, `/cost-centers/new`, `/cost-centers/:id/edit`.
+**Frontend:** `/cost-centers` (árvore com código, sigla, tipo, setor e selo do orçamento; KPI de CCs estourados), `/cost-centers/new`, `/cost-centers/:id/edit` (tipo, sigla e, na edição, a situação do orçamento em leitura).
 
 ## 5. Cargos
 
@@ -162,14 +164,20 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 - `GET /collaborators/:id/sensitive` (`collaborator:read_sensitive`) descriptografa e grava `sensitive_data_access_logs` (colaborador, usuário, campos `rg,cpf,ctps,pis`) — log de acesso exigido pela LGPD. Consulta em `GET /sensitive-access-logs` (filtros `collaboratorId`, `actorUserId`, `from`, `to`, paginação até 200).
 - Supervisor: não pode ser o próprio colaborador nem criar ciclo (percorre a cadeia para cima).
 - Organograma: floresta montada a partir de colaboradores `ativo`/`afastado`/`ferias`.
-- Desligamento: `POST /collaborators/:id/offboard` grava `status = desligado` e `offboarded_at = now()` e emite `collaborator.offboarded`. Não desativa o usuário de login vinculado.
+- Desligamento: `POST /collaborators/:id/offboard` grava `status = desligado` e `offboarded_at = now()` e emite `collaborator.offboarded`. Desde 2026-11-08 o `PUT` com `status = desligado` (caminho da tela) tem o mesmo efeito: preenche `offboarded_at` e emite `collaborator.offboarded` além de `collaborator.updated`. Não desativa o usuário de login vinculado.
+- **Alocação em centro de custo com vigência** (desde 2026-11-08, [integracao-centros-de-custo.md §2](../integracao-centros-de-custo.md#2-core-alocação-do-colaborador-no-cc-com-vigência)): tabela `collaborator_cost_center_allocations` (`collaborator_id`, `cost_center_id`, `valid_from`, `valid_to` — datas `DATE`; `valid_to` exclusivo, o último dia é o anterior; nulo = vigente; índice único parcial garante uma vigente por colaborador). `cost_center_id` do colaborador continua sendo o CC atual.
+  - Criação com CC abre a alocação a partir de `admission_date` (ou de hoje em São Paulo).
+  - `PUT` que troca o CC fecha a vigente e abre outra a partir de `costCenterEffectiveFrom` (opcional, `AAAA-MM-DD`; padrão = hoje em São Paulo); data anterior ao início da vigente → `400`. Mesma data do início da vigente fecha a anterior com período vazio. `costCenterId: null` fecha a vigente sem abrir outra. Colaborador desligado: trocar o CC não abre alocação.
+  - Desligamento (`POST /:id/offboard` ou `PUT` com `status = desligado`) fecha a vigente na data do desligamento (São Paulo). Reativar (`desligado` → outro status) abre nova alocação no CC atual a partir de `costCenterEffectiveFrom` ou de hoje.
+  - A migração `20261124000001` criou uma alocação para quem já tinha CC, a partir de `admission_date` (ou `created_at` no dia de São Paulo); desligados ganharam a alocação já fechada em `offboarded_at` (ou `updated_at`).
 - Retenção: **indefinida**. Não há exclusão de colaborador nem rotina de expurgo/anonimização (decisão registrada no planning §4.2 e §7).
 
 **Divergências e lacunas verificadas:**
 
 - `cnh_number`, `phone`, `emergency_contact_phone`, endereço completo e `birth_date` ficam em **texto puro**. O planning também pedia ASO criptografado; `aso_date`/`aso_validity` estão em texto puro.
 - O frontend **não chama** `GET /collaborators/:id/sensitive` (`getSensitive` existe em [api/collaborators.ts](../../frontend/src/api/collaborators.ts), sem uso). Na edição, RG/CPF chegam vazios e só são regravados se o usuário digitar novos valores.
-- O frontend **não chama** `POST /:id/offboard`. A tela de edição oferece `status = desligado` num select e grava via `PUT /collaborators/:id`: nesse caminho `offboarded_at` **não é preenchido** e o evento emitido é `collaborator.updated`, não `collaborator.offboarded`.
+- O frontend **não chama** `POST /:id/offboard`. A tela de edição oferece `status = desligado` num select e grava via `PUT /collaborators/:id` (desde 2026-11-08 com o mesmo efeito do `offboard`, ver Regras).
+- A tela não permite limpar o centro de custo (o select vazio não envia `costCenterId`); a API aceita `costCenterId: null`.
 - No update, `ctps`/`pis` são regravados sempre que vierem no corpo (`!== undefined`), inclusive string vazia — limpar o campo na tela grava a criptografia de `''`.
 - RG com dígito `X` não é digitável: a máscara aceita só dígitos (ver [diretrizes](../diretrizes-desenvolvimento.md#10-backlog-de-padronização-de-campos)).
 
@@ -182,6 +190,7 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 | GET | `/collaborators` | `collaborator:read` | — |
 | GET | `/collaborators/org-chart` | `collaborator:read` | — |
 | GET | `/collaborators/:id` | `collaborator:read` | — |
+| GET | `/collaborators/:id/cost-center-history` | `collaborator:read` | — |
 | GET | `/collaborators/:id/sensitive` | `collaborator:read_sensitive` | log em `sensitive_data_access_logs` |
 | PUT | `/collaborators/:id` | `collaborator:update` | `update_collaborator` |
 | POST | `/collaborators/:id/offboard` | `collaborator:update` | `offboard_collaborator` |
@@ -191,13 +200,14 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 
 | Evento | Quando | Payload |
 |---|---|---|
-| `collaborator.created` | criação | `collaborator_id`, `name`, `sector_id` |
-| `collaborator.updated` | `PUT` | `collaborator_id`, `changed_fields` (chaves do corpo) |
-| `collaborator.offboarded` | `POST /:id/offboard` | `collaborator_id`, `offboarded_at` |
+| `collaborator.created` | criação | estado: `collaborator_id`, `name`, `status`, `sector_id`, `cost_center_id`, `job_title_id`, `job_title_name`, `admission_date` (`AAAA-MM-DD` ou `null`) |
+| `collaborator.updated` | `PUT` | o mesmo estado + `changed_fields` (chaves do corpo) |
+| `collaborator.offboarded` | `POST /:id/offboard`; `PUT` que muda o status para `desligado` | `collaborator_id`, `offboarded_at` |
+| `collaborator.cost_center_changed` | criação com CC, troca de CC, desligamento, reativação com CC | `collaborator_id`, `name`, `job_title_id`, `job_title_name`, `previous_cost_center_id` (ou `null`), `cost_center_id` (`null` no desligamento ou ao limpar), `valid_from` (`AAAA-MM-DD`) |
 
-O planning previa `cost_center_id` e flags de provisionamento no `collaborator.created`; não estão no payload.
+O planning previa flags de provisionamento no `collaborator.created`; não estão no payload.
 
-**Frontend:** `/collaborators` (lista + organograma), `/collaborators/new`, `/collaborators/:id/edit` (formulário em etapas), `/sensitive-access-log`.
+**Frontend:** `/collaborators` (lista + organograma), `/collaborators/new`, `/collaborators/:id/edit` (formulário em etapas; em "Dados funcionais", ao trocar o CC aparece "No novo centro de custo a partir de" e, na edição, o histórico de centros de custo), `/sensitive-access-log`.
 
 ## 8. Certificações técnicas (NR)
 
