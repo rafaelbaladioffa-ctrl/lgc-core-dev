@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import type { OutboxService } from '../integration/outbox.service.js';
+import type { ShipmentLogistics } from './envio-logistica.js';
 
 /**
  * Envio de material para obra (PT-06 do plano projeto aprovado → obra, docs/dominio/requisicoes-estado-atual.md §16).
@@ -61,6 +62,8 @@ export interface ShipmentData {
   warnings: string[];
   /** Quando o `material_request.approved` foi enviado à Logística; nulo antes da aprovação. */
   approvedAt: string | null;
+  /** Situação na Logística, preenchida pelos eventos de entrada (PT-09); ausente até a Logística avisar. */
+  logistics?: ShipmentLogistics;
 }
 
 /** Lê `formData.shipment`; `null` se a requisição não é um envio de material. */

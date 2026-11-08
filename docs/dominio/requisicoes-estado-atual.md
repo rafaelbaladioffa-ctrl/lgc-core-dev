@@ -195,6 +195,7 @@ Gravados via `OutboxService.record` na mesma transação do estado ([outbox.serv
 | `purchase.cancelled` | cancelamento de compra já aprovada | `request_id`, `code`, `cost_center_id`, `project_id`, `cancelled_at` | `cancel` |
 | `material_request.approved` | aprovação do **envio de material para obra** pelo responsável do CC (§16) | `request_id`, `version`, `code`, `project_id`, `cost_center_id`, `requester_id` (`null`), `recipient_id`, `warehouse_code` (`null`), `needed_by`, `destination{site_id, site_code, address, city, state, latitude, longitude}`, `items[{material_code, quantity}]` (contrato em [integracao-core-logistica.md §3.1](../integracao-core-logistica.md#31-envio-de-material-para-obra-material_requestapproved-com-destino)) | `sendShipmentToLogistics` ([envio-material.ts](../../backend/src/requests/envio-material.ts)) |
 | `material_request.cancel_requested` | cancelamento de envio de material **já aprovado** (com `approvedAt`) | `request_id`, `code`, `project_id`, `cost_center_id`, `reason` | `cancelShipmentInLogistics` |
+| `request.completed` + `request.status_changed` (`encerrada`) | `delivery.confirmed` da Logística no envio de material (§16.1) | `request_id`, `code` (+`status`) | `LogisticsFulfillmentHandler` |
 | `finance_request.approved` | aprovação final de `FIN-REEMBOLSO` ou `FIN-ADIANTAMENTO` (`finalizeApproval`) | `request_id`, `code`, `kind` (`reembolso`/`adiantamento`), `collaborator_id` (beneficiário), `cost_center_id`, `project_id`, `amount`, `approved_at` | `recordFinanceRequestApproved` |
 
 `finance_request.approved`: a categoria é reconhecida pelo **código** (`FIN-REEMBOLSO`/`FIN-ADIANTAMENTO`, ambas `kind = padrao`). O valor vem do campo `valor` do formulário (número; texto com vírgula decimal também é aceito) e, na falta dele, de `estimatedValue`; sem nenhum valor válido o evento não é emitido e fica um aviso no log. Lacunas: o formulário não tem projeto nem dados bancários estruturados (o `project_id` é o da requisição, se informado) e a categoria renomeada com outro código deixa de emitir.
@@ -307,10 +308,31 @@ Sem preço por item no `form_data`: o Core só guarda o total estimado (como na 
 - **Aprovar:** `finalizeApproval` (`aprovada`) e, na mesma transação, `material_request.approved` no outbox e status `em_atendimento` (a Logística assume); os relógios de SLA são parados; `approvedAt` é gravado no `form_data.shipment`; `AuditEvent request.shipment_sent_to_logistics`.
 - **Reprovar:** `reprovada`, **nada** vai para a Logística.
 - **Cancelar** (`request:update`): se `shipment.approvedAt` existe, emite `material_request.cancel_requested`; antes da aprovação a Logística nunca recebeu a ordem e nada é emitido.
-- `complete` e `request-information` respondem `400` (a conclusão virá da entrega confirmada pela Logística, PT-09; o solicitante é o sistema).
+- `complete` e `request-information` respondem `400` (a conclusão vem da entrega confirmada pela Logística, §16.1; o solicitante é o sistema).
 
 **Eventos** (contrato completo em [integracao-core-logistica.md §3.1](../integracao-core-logistica.md#31-envio-de-material-para-obra-material_requestapproved-com-destino)): `request.submitted` na aprovação do projeto; `request.status_changed` (`aprovada` e `em_atendimento`); `material_request.approved`; `material_request.cancel_requested`.
 
 **Tela** (`/requests/:id`): faixa **Sem aprovador** (com o botão para o admin), **Avisos**, cartão com site, endereço de entrega, data de necessidade, recebedor, valor estimado, situação (e quando foi enviado à Logística) e link para o projeto, e a tabela de materiais. Aprovar/Reprovar/Cancelar são os botões genéricos; não há "Concluir" nem "Pedir informação". No projeto, a seção **Aprovação do projeto** liga à requisição.
 
-**Não coberto ainda:** acompanhar a Logística (`fulfillment.*`, `shipment.*`, `delivery.*`) e fechar a requisição pela entrega (PT-09); o aviso de material faltante (`AGUARDANDO_ESTOQUE`, PA-11).
+### 16.1 Acompanhamento da Logística (PT-09)
+
+A Logística manda ao Core, por `POST /integration/inbound`, os eventos da ordem de atendimento (formato em [integracao-core-logistica.md §4.1](../integracao-core-logistica.md#41-eventos-da-ordem-de-envio-formato-exato)). O `LogisticsFulfillmentHandler` ([logistics-fulfillment.handler.ts](../../backend/src/integration/inbound/handlers/logistics-fulfillment.handler.ts)) acha a requisição por `axis_request_id` e grava a situação em `form_data.shipment.logistics` ([envio-logistica.ts](../../backend/src/requests/envio-logistica.ts)): `orderCode`, `status` e `statusReason` da ordem, `items[]` (pedido, `reserved` e `shortage` por material), `shipments[]` (romaneio, transportadora, veículo, data de saída), `deliveries[]` (o entregue em cada confirmação), `refusals[]` e `seenEventIds`.
+
+| Evento | Efeito na requisição | Comentário público (autor "Axis (automático)") |
+|---|---|---|
+| `fulfillment.created` | `aprovada → em_atendimento` (normalmente já está); guarda `order_code`, a situação (`RESERVADA`, `RESERVADA_PARCIAL`, **`AGUARDANDO_ESTOQUE`**, …) e a falta por item (PA-11) | "Ordem de atendimento ATD-… criada na Logística…", com as faltas e o aviso de que o Suprimentos abre a compra do que falta |
+| `shipment.dispatched` | `→ aguardando_entrega`; guarda o volume expedido | "Expedido para o site GRU53 — romaneio …, transportadora … (saída em …)" |
+| `delivery.confirmed` | `→ encerrada` com `closed_at`, `completed_at` e `requester_accepted_at` = data da entrega (os mesmos campos do último recebimento da compra); `request.completed` e `request.status_changed` no outbox | "Entrega confirmada no site, recebida por …" |
+| `delivery.partial` | mantém `aguardando_entrega`; soma o entregue por material | "Entrega parcial confirmada…" |
+| `delivery.refused` | não muda o status; guarda o motivo | "Entrega recusada no site: …" |
+
+Cada evento grava também `AuditEvent` (`request.logistics_order_created`, `…_dispatched`, `…_delivery_confirmed|partial|refused`, `source = integration`). **Regras de robustez:**
+
+- *Idempotência:* o id de cada evento fica em `seenEventIds` (últimos 200); repetir um evento não soma o entregue, não comenta e não grava de novo (além da deduplicação da inbox por `(satélite, event_id)`).
+- *Ordem trocada:* a situação só avança por etapa (1 criada, 2 expedida, 3 entregue) e, dentro da mesma etapa, vale o evento de `occurred_at` mais recente. A requisição só anda para frente (`aprovada → em_atendimento → aguardando_entrega → encerrada`); evento atrasado grava os dados e o comentário, mas não reabre uma requisição `encerrada`, `cancelada`, `concluída` ou `reprovada`. `request_version` menor que o guardado é ignorado; maior substitui o estado.
+- *Concorrência:* a requisição é travada (`SELECT … FOR UPDATE`) durante o tratamento, para dois eventos simultâneos não perderem escrita no JSON.
+- *Falhas:* requisição inexistente, requisição que não é envio de material, evento de outro satélite que não a Logística, `axis_request_id`/`status` ausente ou usuário de sistema ausente viram `failed` (500, a Logística reenvia) com mensagem em português.
+
+**Tela:** o detalhe do envio mostra o cartão **Situação na Logística** (ordem, situação, aviso "Falta material no estoque" com a lista de faltas, expedição, entrega e recusa) e, na tabela de materiais, as colunas **Falta no estoque** e **Entregue** (soma de todas as confirmações).
+
+**Fora do escopo (PA-11):** compra automática do que falta. O Suprimentos abre a compra; a Logística não compra.

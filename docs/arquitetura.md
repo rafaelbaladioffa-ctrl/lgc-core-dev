@@ -144,9 +144,15 @@ ou `X-Field-Signature`.
 - *Deduplicação.* Tabela `integration_inbox`, única por `(satellite_id, event_id)`; `event_id` é o do
   corpo (ou o `Idempotency-Key`/`X-Event-Id`; se os dois vierem e divergirem, `400`).
 - *Despacho.* Registro de handlers por `event_type` (`InboundEventHandler`, token
-  `INBOUND_EVENT_HANDLERS`). O handler roda na **mesma transação** que grava a linha da inbox. Hoje o
-  registro está **vazio**: todo evento é guardado como `ignored` e responde `202` (os handlers de
-  negócio entram no PT-09 do plano de projeto aprovado).
+  `INBOUND_EVENT_HANDLERS`). O handler roda na **mesma transação** que grava a linha da inbox.
+  **Handlers ativos (PT-09)**, em `backend/src/integration/inbound/handlers/`: `LogisticsFulfillmentHandler`
+  (`fulfillment.created`, `shipment.dispatched`, `delivery.confirmed`, `delivery.partial`, `delivery.refused`: acompanha a
+  requisição de envio de material, [requisicoes-estado-atual.md §16.1](dominio/requisicoes-estado-atual.md#161-acompanhamento-da-logística-pt-09))
+  e `FieldProjectHandler` (`field.project.created|started|progress|completed`: vínculo, avanço e `em_execucao` do projeto,
+  [cadastros.md §10.4](dominio/cadastros.md#104-obra-no-field-pt-09)). Os dois são idempotentes (repetir um evento não duplica
+  efeito) e tolerantes à ordem trocada (decidem por `status`/`request_version`/datas, nunca pela ordem de chegada); o satélite
+  é conferido (`field.*` só do Field, os da ordem de envio só da Logística) e requisição/projeto inexistente ou payload
+  incompleto viram `failed` com o motivo legível na tela Integrações. Evento de qualquer outro tipo continua `ignored` (`202`).
 - *Resultado.* `processed` → `200`; `ignored` (sem handler) → `202`; repetido já `processed`/`ignored` →
   mesma resposta, sem reprocessar (`duplicate: true`); handler lançou → efeito desfeito, linha `failed`
   com a mensagem e `500` (o satélite reenvia; o reenvio de um `failed` é reprocessado na mesma linha).

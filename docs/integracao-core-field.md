@@ -204,8 +204,8 @@ em `sow_plan.py`.
 
 ## 5. F5 — Field → Core (PT-08)
 
-**Implementado no Field.** O Core recebe em `POST /api/v1/integration/inbound` (PT-02) e passa a tratar os eventos
-com o PT-09 (até lá ficam guardados como `ignored`).
+**Implementado no Field e no Core.** O Core recebe em `POST /api/v1/integration/inbound` (PT-02) e trata os quatro eventos
+com o `FieldProjectHandler` (PT-09, [cadastros.md §10.4](dominio/cadastros.md#104-obra-no-field-pt-09)).
 
 ### 5.1 Outbox e entrega
 
@@ -222,7 +222,7 @@ após `AXIS_OUTBOUND_MAX_ATTEMPTS` (12) falhas o evento vira `dead` (visível no
 - Reenviar o mesmo evento é seguro: o Core deduplica por `(satélite, event_id)`. Sem `AXIS_OUTBOUND_SECRET` ou
   `AXIS_API_URL`, os eventos ficam na fila sem gastar tentativas.
 
-### 5.2 Eventos (contrato fixo; o PT-09 consome)
+### 5.2 Eventos (contrato fixo; o Core consome desde o PT-09)
 
 Todos levam `axis_project_id` (UUID do projeto no Core) e `field_project_id` (id da obra no Field, inteiro).
 

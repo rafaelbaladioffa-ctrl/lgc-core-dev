@@ -55,6 +55,23 @@ export function projectEventPayload(project: ProjectWithCostCenter): Record<stri
   };
 }
 
+/**
+ * Grava a mudança de status do projeto e o `project.status_changed` (com `previous_status`) na transação de quem
+ * chama. Compartilhada pela tela (`ProjectsService.updateStatus`) e pelo Field (`field.project.started` leva o projeto a
+ * `em_execucao`, PA-18): o mesmo evento sai nos dois caminhos. A validação da transição fica com quem chama.
+ */
+export async function changeProjectStatus(
+  tx: Prisma.TransactionClient,
+  outbox: Pick<OutboxService, 'record'>,
+  id: string,
+  previousStatus: ProjectStatus,
+  status: ProjectStatus,
+) {
+  const updated = await tx.project.update({ where: { id }, data: { status }, include: SNAPSHOT_INCLUDE });
+  await outbox.record(tx, 'project.status_changed', { ...projectEventPayload(updated), previous_status: previousStatus });
+  return updated;
+}
+
 @Injectable()
 export class ProjectsService {
   constructor(
@@ -100,6 +117,26 @@ export class ProjectsService {
 
   findAll() {
     return this.prisma.project.findMany({ orderBy: { createdAt: 'desc' } });
+  }
+
+  /**
+   * Avisos de "obra concluída no Field" para o responsável do projeto (PT-09, PA-18): projetos dele ainda abertos
+   * (`aprovado` ou `em_execucao`) cuja obra o Field deu por concluída. Some sozinho quando o projeto é encerrado.
+   */
+  async fieldAlerts(collaboratorId: string | null) {
+    if (!collaboratorId) return [];
+    const works = await this.prisma.projectFieldWork.findMany({
+      where: { completedAt: { not: null }, project: { responsibleCollaboratorId: collaboratorId, status: { in: ['aprovado', 'em_execucao'] } } },
+      select: { completedAt: true, fieldProjectCode: true, project: { select: { id: true, code: true, name: true } } },
+      orderBy: { completedAt: 'desc' },
+    });
+    return works.map((work) => ({
+      projectId: work.project.id,
+      projectCode: work.project.code,
+      projectName: work.project.name,
+      fieldProjectCode: work.fieldProjectCode,
+      completedAt: work.completedAt!.toISOString(),
+    }));
   }
 
   async findOne(id: string) {
@@ -151,14 +188,7 @@ export class ProjectsService {
     if (!allowed.includes(dto.status)) {
       throw new BadRequestException(`Não é possível mudar o projeto de "${project.status}" para "${dto.status}".`);
     }
-    return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.project.update({ where: { id }, data: { status: dto.status }, include: SNAPSHOT_INCLUDE });
-      await this.outbox.record(tx, 'project.status_changed', {
-        ...projectEventPayload(updated),
-        previous_status: project.status,
-      });
-      return updated;
-    });
+    return this.prisma.$transaction((tx) => changeProjectStatus(tx, this.outbox, id, project.status, dto.status));
   }
 
   /**

@@ -141,7 +141,17 @@ export interface ApproveProjectInput {
   clientPoNumber?: string;
 }
 
+/** Obra que o Field deu por concluída num projeto do usuário, aguardando o encerramento (PT-09). */
+export interface ProjectFieldAlert {
+  projectId: string;
+  projectCode: string;
+  projectName: string | null;
+  fieldProjectCode: string | null;
+  completedAt: string;
+}
+
 export const projectsApi = {
+  fieldAlerts: () => api.get<ProjectFieldAlert[]>('/projects/field-alerts').then((r) => r.data),
   list: () => api.get<Project[]>('/projects').then((r) => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then((r) => r.data),
   create: (input: CreateProjectInput) => api.post<Project>('/projects', input).then((r) => r.data),

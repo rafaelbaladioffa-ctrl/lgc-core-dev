@@ -6,6 +6,8 @@ import { translateApiError } from '../utils/apiError';
 import { formatDateTime } from '../utils/formatDate';
 import { formatBRL, formatNumberBR } from '../utils/format';
 import { formatIsoDate } from '../utils/purchaseDeliveries';
+import { deliveredByMaterial, logisticsStatusLabel, logisticsTone, shortageItems } from '../utils/shipmentLogistics';
+import { StatusBadge } from './DataTable';
 
 interface Props {
   request: RequestDetail;
@@ -31,6 +33,10 @@ export function ShipmentDetails({ request, shipment, statusLabel, canAdminReques
   const noApprover = request.status === 'aguardando_aprovacao' && !request.approvals.some((a) => a.status === 'pendente');
   const destination = shipment.destination;
   const place = [destination.city, destination.state].filter(Boolean).join('/');
+  const logistics = shipment.logistics;
+  const delivered = deliveredByMaterial(logistics);
+  const shortages = shortageItems(logistics);
+  const shortageByCode = new Map(shortages.map((item) => [item.materialCode, item.shortage]));
 
   const resolve = async () => {
     setBusy(true);
@@ -107,6 +113,46 @@ export function ShipmentDetails({ request, shipment, statusLabel, canAdminReques
         )}
       </div>
 
+      {logistics && (
+        <div data-testid="logistics-card" style={{ ...CARD, display: 'flex', flexDirection: 'column', gap: 6, borderColor: shortages.length > 0 ? 'var(--warning)' : undefined }}>
+          <strong>Situação na Logística</strong>
+          <div>
+            <span style={LABEL}>Ordem de atendimento:</span> {logistics.orderCode ?? '—'}{' '}
+            <StatusBadge label={logisticsStatusLabel(logistics.status)} tone={logisticsTone(logistics.status)} />
+          </div>
+          {logistics.statusReason && <div style={LABEL}>{logistics.statusReason}</div>}
+          {shortages.length > 0 && (
+            <div role="alert">
+              <span style={{ color: 'var(--warning)', fontWeight: 600 }}>Falta material no estoque.</span> A Logística não compra: o Suprimentos abre a compra do que falta.
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {shortages.map((item) => (
+                  <li key={item.materialCode}>
+                    {item.materialCode}{item.description ? ` — ${item.description}` : ''}: faltam {formatNumberBR(item.shortage, 3)} de {formatNumberBR(item.quantity, 3)} {item.unit ?? ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {logistics.shipments.map((row) => (
+            <div key={row.shipmentId}>
+              <span style={LABEL}>Expedido:</span> {row.dispatchedAt ? formatDateTime(row.dispatchedAt) : '—'}
+              {row.manifest ? ` · romaneio ${row.manifest}` : row.shipmentCode ? ` · remessa ${row.shipmentCode}` : ''}
+              {row.carrier ? ` · ${row.carrier}` : ''}
+            </div>
+          ))}
+          {logistics.deliveredAt && (
+            <div>
+              <span style={LABEL}>Entregue no site:</span> {formatDateTime(logistics.deliveredAt)}
+            </div>
+          )}
+          {logistics.refusals.map((row) => (
+            <div key={row.eventId} style={{ color: 'var(--danger)' }}>
+              Entrega recusada{row.refusedAt ? ` em ${formatDateTime(row.refusedAt)}` : ''}: {row.reason ?? 'motivo não informado'}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div>
         <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Materiais a enviar</div>
         <div style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, overflowX: 'auto' }}>
@@ -117,6 +163,8 @@ export function ShipmentDetails({ request, shipment, statusLabel, canAdminReques
                 <th style={{ padding: 9 }}>Material</th>
                 <th style={{ padding: 9 }}>Unidade</th>
                 <th style={{ padding: 9, textAlign: 'right' }}>Quantidade</th>
+                {logistics && <th style={{ padding: 9, textAlign: 'right' }}>Falta no estoque</th>}
+                {logistics && <th style={{ padding: 9, textAlign: 'right' }}>Entregue</th>}
               </tr>
             </thead>
             <tbody>
@@ -126,6 +174,8 @@ export function ShipmentDetails({ request, shipment, statusLabel, canAdminReques
                   <td style={{ padding: 9, fontWeight: 600 }}>{item.description}</td>
                   <td style={{ padding: 9 }}>{item.unit}</td>
                   <td style={{ padding: 9, textAlign: 'right' }}>{formatNumberBR(item.quantity, 3)}</td>
+                  {logistics && <td style={{ padding: 9, textAlign: 'right' }}>{shortageByCode.has(item.materialCode) ? formatNumberBR(shortageByCode.get(item.materialCode), 3) : '—'}</td>}
+                  {logistics && <td style={{ padding: 9, textAlign: 'right' }}>{formatNumberBR(delivered[item.materialCode] ?? 0, 3)}</td>}
                 </tr>
               ))}
             </tbody>

@@ -288,7 +288,7 @@ Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado
 - `PUT /projects/:id` altera nome, centro de custo, responsável, site e datas previstas.
 - `DELETE /projects/:id` é exclusão física e só vale para projeto em `proposta` sem requisições; nos outros casos responde `409` e o caminho é encerrar o projeto.
 
-**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`; com `aprovado` aceita `acceptedQuoteId` e `clientPoNumber`, §10.3), `GET /projects/:id/acceptance` (`project:read`, aceite e requisição gerada), `DELETE /projects/:id` (`project:delete`, `delete_project`).
+**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`; com `aprovado` aceita `acceptedQuoteId` e `clientPoNumber`, §10.3), `GET /projects/:id/acceptance` (`project:read`, aceite e requisição gerada), `GET /projects/field-alerts` (`project:read`, obras concluídas no Field nos projetos abertos do usuário, §10.4), `DELETE /projects/:id` (`project:delete`, `delete_project`).
 
 **Eventos de outbox.** Todo evento `project.*` leva o estado completo do projeto, para o cache dos satélites (o Financeiro usa nome e centro de custo no orçamento e no rateio — decisão P-07 da especificação de Projetos do Financeiro):
 
@@ -412,6 +412,22 @@ A resposta é o projeto mais `materialRequest` (`{id, code, status}` ou `null`) 
 **Frontend.** Na edição do projeto, a seção **Aprovação do projeto** tem o botão **Aprovar projeto**, que abre o diálogo: site da obra, revisão da cotação aceita (lista as revisões com a quantidade de materiais; com `project:read_documents`), nº e arquivo do PO opcionais e o aviso "Esta cotação não tem materiais" quando for o caso. Trocar o status para "Aprovado" na lista de projetos leva a essa tela com o diálogo aberto. Depois de aprovado, a seção mostra a revisão aceita, o PO, quem aprovou e o link para a requisição gerada, e permite anexar o PO.
 
 **Configuração (backend/.env):** `LOGISTICA_API_URL` (com `/api/v1`) e `LOGISTICA_API_KEY` (a `INTEGRATION_API_KEY` da Logística) para o valor estimado; `SHIPMENT_LEAD_BUSINESS_DAYS` (padrão 5) para a folga da data de necessidade.
+
+### 10.4 Obra no Field (PT-09)
+
+O Field avisa o Core por eventos `field.project.*` ([integracao-core-field.md §5](../integracao-core-field.md#5-f5--field--core-pt-08)); o `FieldProjectHandler` ([field-project.handler.ts](../../backend/src/integration/inbound/handlers/field-project.handler.ts)) guarda o estado em `project_field_works` (uma linha por projeto, criada pelo primeiro evento que chegar, em qualquer ordem). Só horas e percentuais: custo, margem e salário ficam no Financeiro.
+
+| Coluna | Origem |
+|---|---|
+| `field_project_id`, `field_project_code`, `url`, `sow_plan_status` (`generated`, `pending_review`, `failed`, `no_sow`), `tasks_count`, `created_in_field_at` | `field.project.created` |
+| `started_at` | `field.project.started` (a menor data) |
+| `progress_date`, `progress_event_at`, `percent_complete` (0–100), `tasks_total`, `tasks_done`, `real_man_hours`, `planned_man_hours` | `field.project.progress` (último avanço) |
+| `completed_at` | `field.project.completed` (a menor data) |
+
+- **`field.project.started` → `aprovado → em_execucao` (PA-18).** Usa `changeProjectStatus` ([projects.service.ts](../../backend/src/projects/projects.service.ts)), a mesma função da mudança de status da tela: grava o status e o `project.status_changed` (com `previous_status: aprovado`) no outbox na mesma transação, mais um `AuditEvent` `project.status_changed_by_field` e o `AuditLog` `change_project_status` em nome do usuário de sistema "Axis (automático)". Projeto já `em_execucao` ou `encerrado` só ganha a data de início; `proposta` também só registra.
+- **`field.project.progress`:** snapshot de `date` anterior à guardada (ou, no mesmo dia, de `occurred_at` anterior) é ignorado; o percentual é limitado a 0–100; sem `percent_complete` válido, `failed`.
+- **`field.project.completed`:** registra `completed_at` e um `AuditEvent` `project.field_completed`; **não encerra o projeto** (encerrar continua manual). O responsável do projeto é avisado pelo sino do topo ("Obra do projeto … concluída no Field — encerre o projeto"), alimentado por `GET /projects/field-alerts`, que lista os projetos dele ainda `aprovado`/`em_execucao` com obra concluída e some sozinho quando o projeto é encerrado.
+- **Idempotência e ordem:** cada campo só muda para um valor mais novo ou igual (`created` mais antigo não desfaz o mais novo; `started`/`completed` guardam a menor data); o projeto é travado (`FOR UPDATE`) durante o tratamento. Falhas com mensagem em português (`failed`): projeto inexistente, evento de outro satélite que não o Field, `axis_project_id`/`field_project_id` ausente, projeto já ligado a outra obra do Field.
 
 ---
 

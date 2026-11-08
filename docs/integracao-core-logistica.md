@@ -130,7 +130,7 @@ O outbox da Logística envia para `AXIS_EVENTS_URL` o envelope
 `Idempotency-Key`, `X-Event-Id` e `X-Logistica-Signature: sha256=<hmac do corpo>`
 (`outbox-dispatcher.service.ts`). Com `AXIS_EVENTS_URL` vazio, as mensagens ficam `PENDING`.
 Eventos produzidos: `receipt.divergent`, `inventory.variance_detected`, `replenishment.suggested`, `alert.raised`, entre outros, e os
-da ordem de atendimento abaixo, que o Core acompanhará (PT-09).
+da ordem de atendimento abaixo, que o Core acompanha desde o PT-09 (`LogisticsFulfillmentHandler`; os demais tipos continuam `ignored`).
 
 **Receptor no Core** (`POST /api/v1/integration/inbound`, detalhes em
 [arquitetura.md §6](arquitetura.md#6-integração-com-satélites)): valida o HMAC do corpo bruto com o
@@ -176,9 +176,7 @@ Campos comuns do `payload`:
 | `delivery.partial` | `EXPEDIDA` | entregue nesta confirmação | os mesmos, com `pending_packages` maior que zero |
 | `delivery.refused` | `DIVERGENCIA` | o recusado | os mesmos, mais `reason` |
 
-Mapeamento sugerido para o Core (PT-09): `fulfillment.created` → requisição `em_atendimento`, guarda `order_code` e mostra
-`AGUARDANDO_ESTOQUE` e as faltas; `shipment.dispatched` → `aguardando_entrega`; `delivery.confirmed` → encerra; `delivery.partial` → mantém,
-somando os `items` por `shipment_id`; `delivery.refused` → comentário com `reason`. O custo em R$ da entrega vem em
+**Tratamento no Core (PT-09, implementado)**, detalhe em [requisicoes-estado-atual.md §16.1](dominio/requisicoes-estado-atual.md#161-acompanhamento-da-logística-pt-09): `fulfillment.created` → requisição `em_atendimento`, guarda `order_code`, a situação (inclusive `AGUARDANDO_ESTOQUE`, PA-11) e a falta por item (`reserved`/`shortage`); `shipment.dispatched` → `aguardando_entrega` com o comentário "Expedido para o site" (romaneio e transportadora); `delivery.confirmed` → encerra a requisição; `delivery.partial` → mantém, somando os `items` entregues por material; `delivery.refused` → comentário com `reason`. O Core acha a requisição por `axis_request_id`, ignora `request_version` menor que o guardado, não depende da ordem de chegada (decide por `status` e `occurred_at`) e repetir o `event_id` não duplica nada. Requisição inexistente, que não é envio de material, ou evento vindo de outro satélite → `failed` (500; a Logística reenvia). O custo em R$ da entrega vem em
 `stock.movement.posted` (`project_id`, `cost_center_id`) e, no Financeiro, por `consumption-by-cost-center`.
 
 ### 4.2 Consulta de materiais e custo (Core e Financeiro → Logística, por chave)

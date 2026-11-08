@@ -42,6 +42,13 @@ export class ProjectsController {
     return this.projectsService.findAll();
   }
 
+  /** Obras que o Field deu por concluídas nos projetos do usuário e que ainda esperam o encerramento (PT-09). */
+  @Get('field-alerts')
+  @RequirePermissions('project:read')
+  fieldAlerts(@CurrentUser() user: AuthenticatedUser) {
+    return this.projectsService.fieldAlerts(user.collaboratorId);
+  }
+
   @Get(':id')
   @RequirePermissions('project:read')
   findOne(@Param('id') id: string) {

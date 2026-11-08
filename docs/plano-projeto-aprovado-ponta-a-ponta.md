@@ -296,10 +296,15 @@ Depende de PT-03 e do evento `project.approved` (PT-06).
   `field.project.started`, `field.project.progress` (diário), `field.project.completed`.
 - Testes: evento repetido não duplica obra; SOW sem aviso gera tarefas; com aviso para na revisão.
 
-**PT-09 · Core · Handlers de entrada** (PA-11, PA-18)
+**PT-09 · Core · Handlers de entrada** (PA-11, PA-18) — **feito em 2026-11-08**
 Depende de PT-02, PT-04, PT-06, PT-08.
 - Handlers da tabela §4.4; requisição de envio acompanha a Logística; projeto mostra link e avanço da
   obra; `em_execucao` automático.
+- Entregue: `LogisticsFulfillmentHandler` e `FieldProjectHandler` (`backend/src/integration/inbound/handlers/`),
+  tabela `project_field_works` (migração `20261128000000_projeto_obra_field`), situação da Logística em
+  `form_data.shipment.logistics` e cartão "Situação na Logística" na requisição, aviso "obra concluída" no sino do
+  responsável (`GET /projects/field-alerts`). Detalhe: [requisicoes-estado-atual.md §16.1](dominio/requisicoes-estado-atual.md#161-acompanhamento-da-logística-pt-09)
+  e [cadastros.md §10.4](dominio/cadastros.md#104-obra-no-field-pt-09).
 
 **PT-10 · Field + Financeiro · Mão de obra realizada por projeto** (PA-14, §4.5) — mudança de contrato
 Depende de PT-03 e PT-07.
