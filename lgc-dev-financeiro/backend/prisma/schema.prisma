@@ -544,6 +544,8 @@ enum CcEntrySource {
   manual
   /// Comprometido na revisão ganha (receita contratada e custos orçados, PT-07). Não entra no orçamento do CC.
   projeto
+  /// Mão de obra realizada do projeto a partir das horas do Field (PT-10): o custo no CC do projeto e o crédito "mão de obra transferida" no CC de origem do técnico.
+  mao_de_obra
 }
 
 enum CcCategory {
@@ -753,4 +755,34 @@ model CcTeamLog {
   @@index([costCenterAxisId, date])
   @@index([projectAxisId, date])
   @@map("cc_team_logs")
+}
+
+enum FieldLaborStatus {
+  lancado
+  pendente
+}
+
+/// Horas reais do Field por técnico, projeto e dia (PT-10, `GET /api/integration/labor-hours`): o estado vigente da
+/// última importação. Os valores em dinheiro ficam só nos `cc_entries` (par de lançamentos `mao_de_obra`); aqui
+/// ficam as horas (base do painel da equipe), o que ficou pendente e por quê. Reimportar o dia atualiza a linha.
+model FieldLaborDay {
+  id                      String           @id @default(uuid())
+  collaboratorAxisId      String           @map("collaborator_axis_id")
+  projectAxisId           String           @map("project_axis_id")
+  date                    DateTime         @db.Date
+  hours                   Decimal          @db.Decimal(8, 2)
+  /// O Field marcou ajuste de timeline nas horas do dia.
+  adjusted                Boolean          @default(false)
+  status                  FieldLaborStatus
+  /// Motivo da pendência: sem_funcao | sem_custo_funcao | projeto_desconhecido | projeto_sem_cc | sem_cc_origem.
+  pendingReason           String?          @map("pending_reason")
+  projectCostCenterAxisId String?          @map("project_cost_center_axis_id")
+  originCostCenterAxisId  String?          @map("origin_cost_center_axis_id")
+  importedAt              DateTime         @default(now()) @updatedAt @map("imported_at")
+
+  @@unique([collaboratorAxisId, projectAxisId, date])
+  @@index([date])
+  @@index([originCostCenterAxisId, date])
+  @@index([projectAxisId, date])
+  @@map("field_labor_days")
 }

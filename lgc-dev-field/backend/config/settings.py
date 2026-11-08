@@ -314,3 +314,7 @@ AXIS_BACKGROUND_TASKS = os.getenv("AXIS_BACKGROUND_TASKS", "1").lower() not in (
 # Tempo máximo para baixar o PDF da SOW no Core (s) e tamanho máximo aceito (MB).
 AXIS_SOW_DOWNLOAD_TIMEOUT = int(os.getenv("AXIS_SOW_DOWNLOAD_TIMEOUT") or 30)
 AXIS_SOW_MAX_MB = int(os.getenv("AXIS_SOW_MAX_MB") or 25)
+
+# API de horas reais para o Financeiro (`GET /api/integration/labor-hours`, PT-10): o Financeiro envia esta
+# chave em `X-Api-Key`. Vazia = a rota responde 503. Nunca versionar o valor.
+FIELD_INTEGRATION_API_KEY = os.getenv("FIELD_INTEGRATION_API_KEY", "")

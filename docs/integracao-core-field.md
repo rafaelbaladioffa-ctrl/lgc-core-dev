@@ -26,6 +26,7 @@ Decisões do dono do produto em 2026-11-08:
 | Carga inicial e casamento dos cadastros já existentes no Field | Core → Field | **Feito** (F3, `manage.py axis_sync`, §3) |
 | Projeto aprovado no Core vira obra no Field (`project.approved`), com a SOW baixada do Core e o plano de tarefas | Core → Field | **Feito** (F4, PT-08, §4); o Core passa a emitir `project.approved` com o PT-06 |
 | Criação, início, avanço e conclusão da obra (`field.project.*`) | Field → Core | **Feito no Field** (F5, PT-08, §5), pelo outbox do Field e `POST /integration/inbound` (receptor do PT-02); o Core passa a tratar os eventos com o PT-09 |
+| Horas reais por técnico, projeto e dia (mão de obra realizada) | Field → Financeiro | **Feito** (PT-10, §5.1): `GET /api/integration/labor-hours`, puxado pelo Financeiro |
 
 ## 1. Sobreposição de cadastros
 
@@ -134,7 +135,7 @@ mais novo que a consulta prevalece sobre ela.
 ### Variáveis (`lgc-dev-field/.env.example`)
 
 `AXIS_WEBHOOK_SECRET`, `AXIS_WEBHOOK_MAX_AGE_HOURS`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`,
-`AXIS_API_TIMEOUT`; PT-08: `AXIS_OUTBOUND_SECRET`, `AXIS_OUTBOUND_TIMEOUT`, `AXIS_OUTBOUND_MAX_ATTEMPTS`,
+`AXIS_API_TIMEOUT`, `FIELD_INTEGRATION_API_KEY` (chave que o Financeiro envia em `X-Api-Key`, §5.1); PT-08: `AXIS_OUTBOUND_SECRET`, `AXIS_OUTBOUND_TIMEOUT`, `AXIS_OUTBOUND_MAX_ATTEMPTS`,
 `AXIS_OUTBOUND_IMMEDIATE`, `AXIS_BACKGROUND_TASKS`, `AXIS_SOW_DOWNLOAD_TIMEOUT`, `AXIS_SOW_MAX_MB`. No Core, o satélite Field
 precisa ter o segredo HMAC igual a `AXIS_OUTBOUND_SECRET` e assinar `project.approved` (apontando o webhook para o Field). No Core, o satélite precisa assinar os eventos da tabela acima e apontar o webhook para
 `<url do Field>/api/v1/webhooks/axis`; depois, o botão **Integrações → Reenviar cadastros** reenvia
@@ -256,6 +257,31 @@ docker compose exec -T field-backend python manage.py axis_sow_plan          # a
 ```bash
 docker compose exec -T field-backend python manage.py axis_progress_snapshot # 1x por dia, no fim do expediente
 ```
+
+### 5.1 Horas reais para o Financeiro (PT-10)
+
+Não passa pelo Core: o Financeiro consulta o Field direto (mesmo padrão do consumo da Logística).
+
+`GET /api/integration/labor-hours?from=AAAA-MM-DD&to=AAAA-MM-DD` com o cabeçalho `X-Api-Key`
+(`FIELD_INTEGRATION_API_KEY`; sem a variável a rota responde `503`, chave errada `401`, período inválido ou
+acima de 62 dias `400`). Resposta: lista de
+`{ axis_project_id, axis_collaborator_id, date, hours, adjusted }`.
+
+- **Fonte:** a mesma do HH do projeto (regra 1): o `actual_hours` de cada despacho (`ProjectTaskAssignment`),
+  que já desconta as pausas. Tarefa com apontamento completo mas sem horas por técnico (dado histórico)
+  segue o mesmo fallback do `real_man_hours`: cada técnico vinculado recebe as horas de relógio da tarefa.
+- **Dia:** São Paulo. Despacho que atravessa a meia-noite reparte as horas pelos dias na proporção do tempo
+  de execução de cada um, com arredondamento a 2 casas que preserva o total do despacho.
+- **Fora:** tarefa sem técnico vinculado (regra 8), horas da planilha do supervisor (`ProjectHourEntry`,
+  regra 9) e despacho ainda aberto (sem término).
+- **`adjusted`:** `true` quando algum despacho do dia (técnico × projeto) teve ajuste de timeline.
+- **`hours`:** string decimal com 2 casas; uma linha por (projeto, técnico, dia).
+- **Vínculo:** só entram projetos com `axis_project_id` e colaboradores com `axis_collaborator_id`. O que
+  ficou de fora por falta de vínculo é somado por motivo (`projeto_sem_vinculo`, `colaborador_sem_vinculo`)
+  no log do Field (`WARNING`) e no cabeçalho de resposta `X-Unlinked-Hours`, não na lista.
+
+Contrato e tratamento no Financeiro: [integracao-centros-de-custo.md](integracao-centros-de-custo.md).
+Sem migração nova.
 
 ## 6. Migração da produção
 

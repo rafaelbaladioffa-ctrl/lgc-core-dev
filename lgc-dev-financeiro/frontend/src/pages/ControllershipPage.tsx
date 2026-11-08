@@ -10,6 +10,7 @@ import {
   formatMonth,
   generatePayroll,
   getJobTitleMaps,
+  importFieldLabor,
   importLogistics,
   listAdvances,
   listCostCenters,
@@ -18,8 +19,11 @@ import {
   saveJobTitleMap,
   saveOverheadRule,
   settleAdvance,
+  today,
+  validateDayRange,
   validateMonth,
   type Advance,
+  type FieldLaborImportResult,
   type CcSummary,
   type LogisticsImportResult,
   type OverheadDriver,
@@ -43,6 +47,7 @@ export function ControllershipPage() {
       </PageHeader>
       {ccs.error && <ErrorAlert message={ccs.error} onRetry={ccs.reload} />}
       <Closing />
+      <FieldLabor />
       <OverheadRules centers={centers} centersLoading={ccs.loading} />
       <JobTitles />
       <Advances centers={centers} />
@@ -140,6 +145,101 @@ function Closing() {
           <p>
             {logistics.created} lançamentos novos · {logistics.replaced} substituídos · {logistics.unchanged} sem alteração.
           </p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ================================================================ Mão de obra (horas do Field)
+
+function FieldLabor() {
+  const [from, setFrom] = useState(`${currentMonth()}-01`);
+  const [to, setTo] = useState(today());
+  const [error, setError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<FieldLaborImportResult | null>(null);
+
+  async function run(e: FormEvent) {
+    e.preventDefault();
+    const err = validateDayRange(from, to);
+    setError(err);
+    if (err) return;
+    setBusy(true);
+    setFailure(null);
+    try {
+      setResult(await importFieldLabor(from, to));
+    } catch (ex) {
+      setFailure(messageOf(ex, 'Não foi possível importar as horas do Field.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h2>Mão de obra dos projetos (horas do Field)</h2>
+      <p className="muted section-hint">
+        Horas reais dos técnicos × custo hora médio da função. Cada dia vira um custo no centro de custo do projeto e um crédito de mão de obra transferida no centro de origem do técnico. A rotina
+        diária faz isso sozinha; use o botão para um período específico (até 62 dias). Reimportar compara com o que já foi lançado: o que mudou é estornado e lançado outra vez.
+      </p>
+      <form className="inline-form" onSubmit={run} noValidate>
+        <Field label="De" required error={error ?? undefined}>
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} aria-invalid={!!error} />
+        </Field>
+        <Field label="Até" required>
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} aria-invalid={!!error} />
+        </Field>
+        <div className="form-actions">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? 'Importando…' : 'Importar horas do Field'}
+          </button>
+        </div>
+      </form>
+      {failure && <ErrorAlert message={failure} />}
+      {result && (
+        <div className="cc-subsection">
+          <h3>
+            Horas do Field de {formatDate(result.from)} a {formatDate(result.to)}
+          </h3>
+          <p>
+            {result.launchedHours} h lançadas de {result.hours} h · {result.created} lançamentos novos · {result.replaced} substituídos · {result.unchanged} sem alteração.
+          </p>
+          {result.invalidRows > 0 && (
+            <p className="alert alert-warning" role="status">
+              {result.invalidRows} linha(s) do Field fora do contrato foram ignoradas.
+            </p>
+          )}
+          {result.pending.length > 0 && (
+            <>
+              <p className="alert alert-warning" role="status">
+                {result.pending.length} {result.pending.length === 1 ? 'pendência' : 'pendências'}: horas que não viraram lançamento. Corrija (por exemplo, em "Cargos × funções") e importe de novo.
+              </p>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Colaborador</th>
+                    <th>Projeto</th>
+                    <th>Motivo</th>
+                    <th>Dias</th>
+                    <th>Horas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {result.pending.map((p) => (
+                    <tr key={`${p.collaboratorId}-${p.projectId}-${p.reason}`}>
+                      <td>{p.collaboratorName ?? p.collaboratorId}</td>
+                      <td>{p.projectCode ?? p.projectId}</td>
+                      <td>{p.reasonLabel}</td>
+                      <td>{p.days}</td>
+                      <td>{p.hours}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </div>
       )}
     </section>

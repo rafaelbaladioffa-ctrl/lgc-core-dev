@@ -6,6 +6,8 @@ import {
   AdvancesQuery,
   BudgetDto,
   CreateEntryDto,
+  FieldLaborImportDto,
+  FieldLaborPendingQuery,
   JobTitleMapDto,
   OverheadRuleDto,
   PeriodQuery,
@@ -15,7 +17,9 @@ import {
   SettleAdvanceDto,
   TeamLogDto,
 } from './cost-centers.dto.js';
+import { todaySaoPaulo } from './cc-engine.js';
 import { CostCentersService } from './cost-centers.service.js';
+import { FieldLaborService } from './field-labor.service.js';
 import { TeamsService } from './teams.service.js';
 
 const READ = ['cost_center:read', 'cost_center:read_own'];
@@ -26,6 +30,7 @@ export class CostCentersController {
   constructor(
     private readonly costCenters: CostCentersService,
     private readonly teams: TeamsService,
+    private readonly fieldLabor: FieldLaborService,
   ) {}
 
   @Get('cost-centers')
@@ -47,6 +52,23 @@ export class CostCentersController {
   @RequirePermissions('cost_center:write')
   importLogistics(@CurrentUser() user: AuthenticatedUser, @Param('month') month: string) {
     return this.costCenters.importLogistics(user, month);
+  }
+
+  /** Mão de obra realizada: horas reais do Field × custo hora da função (PT-10). Botão manual por período. */
+  @Post('field-labor/import')
+  @HttpCode(200)
+  @RequirePermissions('cost_center:write')
+  importFieldLabor(@CurrentUser() user: AuthenticatedUser, @Body() dto: FieldLaborImportDto) {
+    return this.fieldLabor.import(dto.from, dto.to, user.userId);
+  }
+
+  /** Dias do Field que não viraram lançamento (colaborador sem função mapeada, projeto sem CC…). */
+  @Get('field-labor/pending')
+  @RequirePermissions('cost_center:write')
+  fieldLaborPending(@Query() q: FieldLaborPendingQuery) {
+    const to = q.to ?? todaySaoPaulo();
+    const from = q.from ?? `${to.slice(0, 7)}-01`;
+    return this.fieldLabor.pending(from, to);
   }
 
   @Get('cost-centers/:id')

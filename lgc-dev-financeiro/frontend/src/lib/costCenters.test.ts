@@ -18,6 +18,7 @@ import {
   SOURCE_LABEL,
   sumDecimals,
   toScaled,
+  validateDayRange,
   validateMonth,
   validatePeriod,
   validateTeamLog,
@@ -31,6 +32,7 @@ describe('rótulos dos centros de custo', () => {
     expect(COST_CATEGORIES.every((c) => CATEGORY_LABEL[c])).toBe(true);
     expect(ACTIVITY_LABEL.manutencao).toBe('Manutenção');
     expect(SOURCE_LABEL.logistica).toBe('Logística');
+    expect(SOURCE_LABEL.mao_de_obra).toBe('Mão de obra (Field)');
     expect(DRIVER_LABEL.headcount).toBe('Pessoas-dia alocadas');
     expect(FUNNEL_LABEL.recebida_parcial).toBe('Recebida em parte');
   });
@@ -152,5 +154,17 @@ describe('diário da equipe', () => {
   it('atividade fora de projeto não exige projeto', () => {
     const r = validateTeamLog({ ...base, activity: 'ocioso', projectId: '', producedQuantity: '', producedUnit: '' });
     expect(r.ok && r.body.projectId).toBe(undefined);
+  });
+});
+
+describe('período da importação das horas do Field', () => {
+  const now = new Date('2026-11-08T15:00:00Z');
+  it('aceita até 62 dias e recusa invertido, longo demais ou futuro', () => {
+    expect(validateDayRange('2026-11-01', '2026-11-07', now)).toBeNull();
+    expect(validateDayRange('2026-09-07', '2026-11-07', now)).toBeNull(); // 62 dias
+    expect(validateDayRange('2026-09-06', '2026-11-07', now)).toMatch(/62 dias/);
+    expect(validateDayRange('2026-11-07', '2026-11-01', now)).toMatch(/depois do fim/);
+    expect(validateDayRange('2026-11-01', '2026-11-09', now)).toMatch(/futuro/);
+    expect(validateDayRange('', '2026-11-01', now)).toMatch(/Informe/);
   });
 });

@@ -120,3 +120,27 @@ O Core só emite `cost_center.*`, `collaborator.*` e `site.*` quando o cadastro 
 Os eventos vão a todos os satélites inscritos em cada tipo. Quem recebe trata como atualização, e reenviar de novo não duplica nada: o Financeiro substitui a alocação aberta que começa na mesma data. O histórico de alocações já encerradas não é reenviado.
 
 Resposta: `{ "costCenters": n, "collaborators": n, "allocations": n, "sites": n }`.
+
+## 7. Field → Financeiro: horas reais por técnico e projeto
+
+Mão de obra realizada do projeto (PT-10, PA-14). Mesmo padrão do consumo da Logística (§5): o Financeiro **puxa** do Field, por API key; não passa pelo Core nem pelo outbox. Valores como no resto do documento: `hours` string decimal com 2 casas, datas `AAAA-MM-DD` (São Paulo).
+
+`GET /api/integration/labor-hours?from=AAAA-MM-DD&to=AAAA-MM-DD` no Field, com o cabeçalho `X-Api-Key` (variável `FIELD_INTEGRATION_API_KEY` no Field; no Financeiro, `FIELD_API_URL`, que termina em `/api`, e `FIELD_API_KEY`). Sem a chave configurada a rota responde `503`; chave errada, `401`; datas inválidas ou período acima de 62 dias, `400`.
+
+```json
+[
+  { "axis_project_id": "<uuid>", "axis_collaborator_id": "<uuid>", "date": "2026-11-04", "hours": "7.50", "adjusted": false }
+]
+```
+
+- **Uma linha por (projeto, colaborador, dia)**, `from` e `to` inclusivos. Só projetos com `axis_project_id` e colaboradores com `axis_collaborator_id` (os cadastros que o Core mandou ao Field e que foram casados); o que ficou fora por falta de vínculo é somado por motivo no log do Field e no cabeçalho `X-Unlinked-Hours`, não na lista.
+- **Fonte:** o HH real do Field (regra 1: soma das horas reais de cada técnico, descontando pausas; `actual_hours` de cada despacho). Tarefa sem técnico vinculado não conta (regra 8); horas da planilha do supervisor ficam de fora (regra 9); despacho ainda aberto não conta. Despacho que atravessa a meia-noite reparte as horas pelos dias de São Paulo.
+- **`adjusted`:** `true` quando algum despacho do dia teve ajuste de timeline (superusuário). O dia pode reaparecer com outro total depois de um ajuste; o Financeiro reimporta e corrige (abaixo).
+
+**No Financeiro** ([centros de custo §2.2](../lgc-dev-financeiro/docs/centros-de-custo-especificacao.md#22-mão-de-obra-realizada-por-projeto-horas-do-field-pt-10-pa-14)):
+
+- Rotina diária às 04:00 (São Paulo, mesmo agendador do §5): do primeiro dia do mês corrente até ontem; e botão **Importar horas do Field** (Controladoria) por período de até 62 dias.
+- Custo = horas × **custo hora médio da função** do colaborador (cargo do Core → função → parâmetros vigentes). Nunca o salário individual; nenhum valor de custo trafega entre os sistemas.
+- Cada dia vira um **par de lançamentos** `realizado`/`folha`: custo no CC do projeto (com o projeto) e crédito negativo "mão de obra transferida" no CC de origem do colaborador no dia (alocação com vigência, §2). Mesmo CC: o par se anula no total do CC, mas o projeto mostra a mão de obra.
+- **Idempotente** por (colaborador, projeto, dia); reimportar com horas diferentes estorna o par anterior e lança o novo (livro append-only).
+- Sem função mapeada (ou sem custo hora da função, projeto sem CC, colaborador sem CC de origem): não lança e mostra a pendência.

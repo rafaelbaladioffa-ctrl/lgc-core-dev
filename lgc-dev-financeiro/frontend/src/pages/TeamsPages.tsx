@@ -391,6 +391,10 @@ function Indicators({ t }: { t: TeamPanel }) {
       <Kpi label="Horas em projeto" value={formatNumber(t.projectHours)} />
       <Kpi label="Utilização" value={formatPercent(t.utilization)} hint="horas em projeto ÷ disponíveis" />
       <Kpi label="Horas ociosas" value={formatNumber(t.idleHours)} />
+      <Kpi label="Horas em projetos (Field)" value={formatNumber(t.fieldLabor.projectHours)} hint="horas reais dos técnicos nas obras" />
+      <Kpi label="Horas ociosas (Field)" value={formatNumber(t.fieldLabor.idleHours)} hint="disponíveis − horas em projetos do Field" />
+      <Kpi label="Mão de obra transferida aos projetos" value={formatBRL(t.fieldLabor.transferredCost)} hint="já fora do custo da folha da equipe nos centros de custo" />
+      {t.fieldLabor.pendingDays > 0 && <Kpi label="Dias do Field pendentes" value={t.fieldLabor.pendingDays} hint={`${formatNumber(t.fieldLabor.pendingHours)} h sem lançamento (veja a Controladoria)`} tone="warning" />}
       <Kpi label="Custo da ociosidade" value={formatBRL(t.idleCost)} tone={Number(t.idleCost) > 0 ? 'warning' : undefined} />
       <Kpi label="Custo direto" value={formatBRL(t.directCost)} />
       <Kpi label="Custo por hora disponível" value={formatBRL(t.costPerAvailableHour)} />

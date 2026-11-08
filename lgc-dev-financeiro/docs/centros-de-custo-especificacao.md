@@ -33,6 +33,7 @@ técnicas (CC do tipo `equipe_tecnica`, ex.: `DC-001-JAI`). Contratos com o Core
 | `finance_request.approved` `adiantamento` | webhook | adiantamento em aberto + `comprometido`/`despesas_campo`; a prestação de contas (tela) baixa o comprometido e lança o gasto comprovado como `realizado` |
 | Folha da competência | botão "Gerar folha" | `realizado`/`folha` por CC: custo mensal da função × dias alocados ÷ dias do mês (§4) |
 | Consumo da Logística | rotina diária (03:30, São Paulo) e botão "Importar da Logística" | `realizado`/`material` por CC e projeto (valor das saídas da competência). A rotina importa o **mês anterior e o corrente**; é idempotente por competência e por (CC, projeto) e o botão faz a mesma importação (§2.1) |
+| Horas reais do Field | rotina diária (04:00, São Paulo) e botão "Importar horas do Field" (Controladoria) | **par** `realizado`/`folha`, origem `mao_de_obra`: custo no CC do projeto (com o projeto) e crédito negativo no CC de origem do técnico (§2.2) |
 | Revisão ganha do projeto | `project.approved` do Core ou "Cliente aceitou" (Projetos) | `comprometido`, origem `projeto`, com o projeto: receita (`faturamento`, valor contratado) e custos orçados por categoria (`folha`, `material`, `frota`, `servicos`, `despesas_campo`, `outros`); `source_ref = ganho:<revisão>:<linha>`. Uma vez por revisão (§5.1) |
 | Manual | tela do CC | qualquer categoria; `faturamento` é a receita (nota emitida) |
 
@@ -49,6 +50,46 @@ então o botão e a rotina nunca correm juntos nem duplicam. Valor igual não la
 o mês gera estorno + novo lançamento (por isso o livro cresce em pares enquanto o mês muda). Falha de uma
 competência (Logística fora do ar, sem `LOGISTICA_API_KEY`) é registrada no log e não derruba a outra nem o
 agendador; o ator gravado é `sistema:logistica`.
+
+### 2.2 Mão de obra realizada por projeto: horas do Field (PT-10, PA-14)
+
+Antes, a folha caía inteira no CC do colaborador (§4) e a mão de obra realizada do projeto era zero. Agora o
+Financeiro puxa as **horas reais por técnico, projeto e dia** do Field (`GET /api/integration/labor-hours`, ver
+[integração §7](../../docs/integracao-centros-de-custo.md#7-field--financeiro-horas-reais-por-técnico-e-projeto)) e
+lança, para cada (colaborador, projeto, dia), um **par de lançamentos** `realizado`/`folha`, origem `mao_de_obra`:
+
+| Lançamento | CC | Projeto | Valor | `source_ref` |
+|---|---|---|---|---|
+| **Custo** | CC do projeto | o projeto | + horas × custo hora médio da função | `mao_obra:<dia>:<projeto>:<colaborador>:custo` |
+| **Crédito "mão de obra transferida"** | CC de origem do colaborador no dia (alocação com vigência) | — | o mesmo valor, **negativo** | `mao_obra:<dia>:<projeto>:<colaborador>:credito` |
+
+- **Custo hora = o custo hora médio da função** (parâmetros vigentes na data; a mesma conta do módulo Projetos e
+  da folha), via cargo do Core → função (`job_title_maps`). **Nunca o salário individual.**
+- **Escolha do crédito (decisão documentada):** custo **negativo** na categoria `folha` do CC de origem, e não uma
+  categoria nova. Assim a folha líquida do CC de origem (folha − transferido) fecha sem mexer nas categorias do
+  orçamento nem na migração dos enums de categoria. O crédito não leva o projeto (senão o resultado do projeto
+  se anularia); o que o distingue é a origem `mao_de_obra` e o `source_ref` terminando em `:credito`.
+- **Mesmo CC nos dois lados** (o projeto roda no CC da equipe): o par se anula no total do CC, mas o resultado do
+  projeto passa a mostrar a mão de obra. As horas que o técnico não gastou em projetos ficam como ociosidade no CC
+  da equipe (a folha dele continua inteira lá, menos o que foi transferido).
+- **Competência** = primeiro dia do mês do dia trabalhado. O orçamento anual do CC passa a refletir o
+  transferido: o CC de origem consome menos, o CC do projeto consome mais (quando são diferentes).
+- **Idempotente por (colaborador, projeto, dia)** e append-only, como o resto do livro: valor, CC ou projeto
+  iguais → nada é lançado; hora diferente (o Field ajustou a timeline e o dia reapareceu com outro total) →
+  estorno do par anterior + par novo; dia que sumiu do Field no período importado → estorno do par. Só se mexe em
+  dias dentro do período pedido. Trava de transação (`pg_advisory_xact_lock`): botão e rotina não correm juntos.
+- **Pendências (nunca lança errado, nunca some):** o dia **não gera lançamento** e aparece na Controladoria
+  (resultado da importação e `GET /field-labor/pending`) e no painel da equipe, com o motivo:
+  `sem_funcao` (cargo sem função mapeada), `sem_custo_funcao` (função sem custo hora nos parâmetros),
+  `projeto_desconhecido` (projeto fora do cache do Core), `projeto_sem_cc` (projeto sem centro de custo) e
+  `sem_cc_origem` (colaborador sem alocação no dia). Corrigido o cadastro, a próxima importação lança o dia.
+- **Horas guardadas** em `field_labor_days` (um registro por colaborador × projeto × dia: horas, se houve ajuste de
+  timeline, situação lançado/pendente, CCs): é a base das horas em projeto × ociosas do painel. Os valores em
+  dinheiro ficam só nos `cc_entries`.
+- **Rotina diária** (04:00 São Paulo, `SCHEDULER_ENABLED=true`, em uma instância, depois da Logística): do primeiro
+  dia do mês corrente até ontem (na virada do mês, só ontem). Falha do Field (fora do ar, sem `FIELD_API_KEY`) vai
+  para o log e não derruba o agendador; ator gravado: `sistema:field`. O botão pede período de até 62 dias (o
+  limite do Field).
 
 ## 3. Rateio do overhead
 
@@ -108,7 +149,11 @@ Indicadores do período (dias úteis de segunda a sexta, até hoje):
 | Horas disponíveis | Σ dias úteis × pessoas alocadas no dia × horas por dia (parâmetros vigentes; 8 se faltar) |
 | Utilização | horas em `projeto` ÷ horas disponíveis |
 | Horas ociosas | disponíveis − horas lançadas fora de `ocioso` (mínimo 0) |
-| Custo direto | custo realizado do CC da equipe (folha, despesas de campo, frota, material…) |
+| Custo direto | custo realizado do CC da equipe (folha, despesas de campo, frota, material…). **Não desconta** a mão de obra transferida aos projetos (§2.2): é o custo da equipe, contra o qual se mede a receita atribuída |
+| Horas em projetos (Field) | horas reais dos técnicos da equipe (CC de origem no dia) em projetos, vindas do Field (§2.2); só dias lançados |
+| Horas ociosas (Field) | disponíveis − horas em projetos do Field (mínimo 0). Convive com as horas ociosas do diário manual, que seguem como estavam |
+| Mão de obra transferida | soma dos créditos `mao_de_obra` no CC no período |
+| Dias do Field pendentes | dias de técnicos da equipe que não viraram lançamento (função sem mapeamento etc.), com as horas |
 | Custo por hora disponível / produtiva | custo direto ÷ horas disponíveis / ÷ horas em projeto |
 | Custo hora cotado | média do custo hora das funções dos alocados (parâmetros vigentes), ponderada por pessoas-dia |
 | Custo da ociosidade | horas ociosas × custo por hora disponível |
@@ -159,6 +204,8 @@ Valores em reais como string com 2 casas; percentuais como fração string com 4
 | `GET /job-title-maps` | write | `{ maps, unmapped, roles }` |
 | `PUT /job-title-maps/:jobTitleId` | write | `{ jobTitleName, roleKey }` |
 | `POST /cost-centers/payroll/:month` | write | `{ month, created, replaced, unchanged, unmapped: [{ collaboratorId, name, jobTitleName }] }` |
+| `POST /field-labor/import` | write | corpo `{ from, to }` (AAAA-MM-DD, até 62 dias) → `{ from, to, hours, launchedHours, created, replaced, unchanged, invalidRows, pending: [{ collaboratorId, collaboratorName, projectId, projectCode, reason, reasonLabel, days, hours }] }` (a rotina diária chama a mesma importação, §2.2) |
+| `GET /field-labor/pending?from&to` | write | pendências vigentes (último estado importado), mesmo formato de `pending` |
 | `POST /cost-centers/logistics-import/:month` | write | `{ month, created, replaced, unchanged, withoutCostCenter }` (a rotina diária chama a mesma importação, §2.1) |
 | `GET /advances?status=aberto\|prestado` | read ou read_own | `Advance[]` |
 | `POST /advances/:id/settle` | write | `{ spentAmount, notes? }` → `Advance` |
@@ -230,12 +277,12 @@ type Purchase = { id: string; requestId: string; code: string; costCenterId: str
 4. **Equipes técnicas** (`#/equipes`): comparativo das equipes; **Painel da equipe**
    (`#/equipes/:id`): indicadores do §6 e o diário da equipe.
 5. **Controladoria** (`#/controladoria`): regras de rateio, cargos × funções, gerar folha, importar
-   consumo da Logística, adiantamentos em aberto.
+   consumo da Logística, importar horas do Field (período, com as pendências), adiantamentos em aberto.
 
 ## 10. Fora desta entrega
 
 - Contas a pagar: quando existir, o título pago substitui o realizado da compra (hoje o realizado é o
   recebimento).
-- Horas reais do Field por projeto e o par de lançamentos de mão de obra (PT-10): até lá o realizado de
-  mão de obra do projeto é zero e a folha inteira cai só no CC do colaborador.
+- Mão de obra por projeto pelo plano de horas (e não pelas horas reais do Field), custo por salário individual
+  e crédito em categoria própria: fora de propósito (§2.2).
 - Frota com cadastro de veículos; certificações NR como custo.
