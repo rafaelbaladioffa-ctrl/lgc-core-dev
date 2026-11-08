@@ -1,0 +1,127 @@
+{% load static %}
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  /* Formato vertical: pensado para a prévia do WhatsApp no celular. */
+  body { width: 900px; margin: 0; padding: 20px 20px 30px; color: #132331; background: #f8fbfc; font-family: Arial, sans-serif; }
+  .sheet { border: 1px solid #d6e0e6; border-radius: 10px; background: linear-gradient(115deg, #fff 0%, #f5fafc 100%); overflow: hidden; }
+  .header { min-height: 120px; padding: 20px 24px; display: flex; align-items: center; gap: 20px; border-bottom: 4px solid #ff4b12; }
+  .logo { width: 170px; max-height: 70px; object-fit: contain; object-position: left center; padding-right: 18px; border-right: 1px solid #b8c6cf; }
+  .headline { flex: 1; font-size: 36px; font-weight: 900; line-height: .97; letter-spacing: -.04em; }
+  .headline span { display: block; color: #ff4b12; }
+  .date { min-width: 180px; padding: 15px 14px; border-radius: 10px; background: #edf3f6; font-size: 20px; font-weight: 800; text-align: center; }
+  .date::before { content: "▣"; margin-right: 9px; font-size: 20px; }
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); margin: 16px 16px; padding: 12px 0; border-radius: 10px; background: linear-gradient(90deg, #f3f8fa, #edf4f7); }
+  .summary-item { min-height: 76px; padding: 8px 15px; border-right: 1px solid #ccd9e0; display: flex; align-items: center; gap: 10px; }
+  .summary-item:last-child { border: 0; }
+  .summary-icon { font-size: 32px; color: #152f3d; }
+  .summary-label { display: block; color: #4f6070; font-size: 15px; }
+  .summary-value { display: block; font-size: 34px; font-weight: 900; line-height: .9; }
+  .green { color: #087833; } .red { color: #f02919; } .orange { color: #ff4b12; }
+  .projects { padding: 0 14px 14px; }
+  .card { margin-top: 14px; padding: 18px 18px 16px; border: 1px solid #d7e3e8; border-radius: 9px; background: #fff; box-shadow: 0 2px 5px rgba(20, 53, 72, .04); }
+  .project-head { display: flex; align-items: center; gap: 12px; }
+  .project-icon { font-size: 40px; color: #ff4b12; }
+  .project-name { flex: 1; font-size: 27px; font-weight: 900; line-height: 1.1; }
+  .eyebrow { color: #536474; font-size: 17px; margin-bottom: 4px; }
+  .progress-wrap { width: 300px; padding-left: 16px; border-left: 1px solid #d7e3e8; }
+  .progress-label { color: #536474; font-size: 17px; }
+  .progress-line { display: flex; align-items: center; gap: 14px; }
+  .progress-track { height: 16px; flex: 1; overflow: hidden; border-radius: 99px; background: #e2eaf0; }
+  .progress-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ff7a16, #ff4b12); }
+  .progress-number { color: #ff4b12; font-size: 34px; font-weight: 900; }
+  .details { display: grid; grid-template-columns: repeat(2, 1fr); margin-top: 18px; border-top: 1px solid #d7e3e8; border-bottom: 1px solid #d7e3e8; }
+  .detail { min-height: 78px; padding: 13px 15px; border-right: 1px solid #d7e3e8; border-bottom: 1px solid #d7e3e8; }
+  .detail:nth-child(2n) { border-right: 0; }
+  .detail:nth-last-child(-n+2) { border-bottom: 0; }
+  .detail-label, .tile-label { display: block; color: #536474; font-size: 17px; }
+  .detail-value { display: block; margin-top: 5px; font-size: 22px; font-weight: 800; }
+  .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 15px; }
+  .tile { min-height: 86px; padding: 13px 15px; border: 1px solid #d7e3e8; border-radius: 7px; background: linear-gradient(135deg, #f8fbfc, #eff5f7); }
+  .tile-value { display: block; margin-top: 5px; font-size: 22px; font-weight: 900; }
+  .risk { display: flex; gap: 13px; margin-top: 14px; padding: 13px 15px; border: 1px solid #d7e3e8; border-radius: 7px; background: #f7fafb; font-size: 18px; }
+  .risk strong { white-space: nowrap; color: #536474; }
+  .empty { padding: 46px; text-align: center; color: #536474; font-size: 22px; }
+  .footer { padding: 6px 0 14px; text-align: center; color: #718290; font-size: 13px; }
+
+  /* Com muitos projetos, o WhatsApp limita a altura da prévia. Dois cartões
+     por linha deixam a imagem próxima de quadrada e legível sem ampliar. */
+  .many-projects { width: 780px; padding: 14px 14px 20px; }
+  .many-projects .header { min-height: 92px; padding: 15px 18px; gap: 14px; }
+  .many-projects .logo { width: 135px; max-height: 52px; padding-right: 12px; }
+  .many-projects .headline { font-size: 29px; }
+  .many-projects .date { min-width: 145px; padding: 11px 8px; font-size: 16px; }
+  .many-projects .date::before { margin-right: 5px; font-size: 16px; }
+  .many-projects .summary { margin: 10px 10px; padding: 8px 0; }
+  .many-projects .summary-item { min-height: 56px; padding: 5px 9px; gap: 6px; }
+  .many-projects .summary-icon { font-size: 23px; }
+  .many-projects .summary-label { font-size: 11px; }
+  .many-projects .summary-value { font-size: 26px; }
+  .many-projects .projects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 0 10px 10px; }
+  .many-projects .card { margin-top: 0; padding: 12px; }
+  .many-projects .project-head { flex-wrap: wrap; gap: 7px; }
+  .many-projects .project-icon { font-size: 27px; }
+  .many-projects .project-name { min-width: 0; font-size: 18px; }
+  .many-projects .eyebrow { font-size: 12px; margin-bottom: 2px; }
+  .many-projects .progress-wrap { width: 100%; padding: 8px 0 0; border: 0; border-top: 1px solid #d7e3e8; }
+  .many-projects .progress-label { font-size: 12px; }
+  .many-projects .progress-track { height: 11px; }
+  .many-projects .progress-number { font-size: 25px; }
+  .many-projects .details { margin-top: 9px; }
+  .many-projects .detail { min-height: 53px; padding: 8px 9px; }
+  .many-projects .detail-label, .many-projects .tile-label { font-size: 11px; }
+  .many-projects .detail-value { margin-top: 3px; font-size: 14px; }
+  .many-projects .tiles { gap: 6px; margin-top: 8px; }
+  .many-projects .tile { min-height: 53px; padding: 8px 9px; }
+  .many-projects .tile-value { margin-top: 3px; font-size: 14px; }
+  .many-projects .risk { gap: 6px; margin-top: 8px; padding: 8px 9px; font-size: 11px; line-height: 1.25; }
+  .many-projects .risk strong { white-space: normal; }
+  .many-projects .footer { font-size: 10px; }
+</style>
+</head>
+<body{% if project_count > 3 %} class="many-projects"{% endif %}>
+  <main class="sheet">
+    <header class="header">
+      <img class="logo" src="{% static 'core/img/consultimer-logo-light.png' %}" alt="Consultimer Group">
+      <div class="headline">ATUALIZAÇÃO <span>DE PROJETOS</span></div>
+      <div class="date">{{ date_label }}</div>
+    </header>
+
+    <section class="summary">
+      <div class="summary-item"><span class="summary-icon">▤</span><div><span class="summary-label">Projetos</span><span class="summary-value">{{ project_count }}</span></div></div>
+      <div class="summary-item"><span class="summary-icon">▶</span><div><span class="summary-label">Em andamento</span><span class="summary-value green">{{ project_count }}</span></div></div>
+      <div class="summary-item"><span class="summary-icon">⚠</span><div><span class="summary-label">Com bloqueio</span><span class="summary-value red">{{ blocked_count }}</span></div></div>
+      <div class="summary-item"><span class="summary-icon">▥</span><div><span class="summary-label">Avanço médio</span><span class="summary-value orange">{{ average_progress }}%</span></div></div>
+    </section>
+
+    <section class="projects">
+      {% for p in projects %}
+      <article class="card">
+        <div class="project-head">
+          <div class="project-icon">▤</div>
+          <div class="project-name"><div class="eyebrow">Projeto</div>{{ p.project }}</div>
+          <div class="progress-wrap"><div class="progress-label">Avanço atual</div><div class="progress-line"><div class="progress-track"><div class="progress-fill" style="width: {{ p.completion_percent }}%;"></div></div><span class="progress-number">{{ p.completion_percent }}%</span></div></div>
+        </div>
+        <div class="details">
+          <div class="detail"><span class="detail-label">PO</span><span class="detail-value">{{ p.po|default:"Não informada" }}</span></div>
+          <div class="detail"><span class="detail-label">Site</span><span class="detail-value">{{ p.site|default:"Não informado" }}</span></div>
+          <div class="detail"><span class="detail-label">Responsável CSTR</span><span class="detail-value">{{ p.responsible_cstr|default:"Não informado" }}</span></div>
+          <div class="detail"><span class="detail-label">Responsável A100</span><span class="detail-value">{{ p.responsible_client|default:"Não informado" }}</span></div>
+        </div>
+        <div class="tiles">
+          <div class="tile"><span class="tile-label">Avanço no dia</span><span class="tile-value">{{ p.delta_label }}</span></div>
+          <div class="tile"><span class="tile-label">Status</span><span class="tile-value green">Em andamento</span></div>
+          <div class="tile"><span class="tile-label">Certificação</span><span class="tile-value {% if p.is_certified %}green{% else %}orange{% endif %}">{{ p.certification_label }}</span></div>
+          <div class="tile"><span class="tile-label">Projeto finalizado</span><span class="tile-value {% if p.project_finished %}green{% else %}red{% endif %}">{% if p.project_finished %}Sim{% else %}Não{% endif %}</span></div>
+        </div>
+        <div class="risk"><strong>⚠ Riscos / Bloqueios</strong><span>{{ p.risks_label }}</span></div>
+      </article>
+      {% empty %}<div class="empty">Nenhum projeto em andamento para esta data.</div>{% endfor %}
+    </section>
+  </main>
+  <div class="footer">ERP Consultimer · resumo gerado automaticamente</div>
+</body>
+</html>

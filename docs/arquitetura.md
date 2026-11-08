@@ -9,7 +9,7 @@ Visão técnica do Core e da relação com os satélites. Atualizado em 2026-11-
 
 O Axis é o **ponto único de verdade** da LGC para usuários, colaboradores, estrutura organizacional,
 clientes, projetos e requisições internas. Satélites especializados (Logística em operação; Financeiro
-em construção, só o esqueleto F0; Projetos/Field e Pessoas planejados) **nunca acessam o banco do Core**: integram por API REST versionada
+em construção, só o esqueleto F0; Field — projetos e campo — incorporado em 2026-11-08 sem integração ainda; Pessoas planejado) **nunca acessam o banco do Core**: integram por API REST versionada
 (`/api/v1`) e por eventos (outbox + webhook). Cada satélite tem seu próprio banco.
 
 | Premissa | Decisão |
@@ -149,5 +149,6 @@ seed a cada partida. Procedimentos: [operacao.md](operacao.md).
 | A7 | Motor BPM removido em 02/11/2026 para reescrita organizada (checkpoint `629044d`) | Commit `98dfce5` |
 | A8 | Logística mantida como subpasta deste repositório (monorepo informal) | Estado atual; ver [avaliacao §5](avaliacao-2026-11-07.md#5-estrutura-do-repositório) |
 | A9 | Financeiro como subpasta `lgc-dev-financeiro/`, banco próprio; primeiro módulo Projetos (orçamento e resultado, decisão de 2026-11-07), depois contas a pagar; aceita só o access token do Core (sem sessão própria) | Dono do produto, 2026-11-07; [especificação](../lgc-dev-financeiro/docs/especificacao.md) |
+| A10 | Field (antigo ERP CSTR) como subpasta `lgc-dev-field/`, **mantido em Django** + React, banco próprio; Core é a fonte da verdade de usuários, colaboradores, clientes e projetos | Dono do produto, 2026-11-08; [integracao-core-field.md](integracao-core-field.md) |
 
 Decisões de negócio: [dominio/decisoes-negocio.md](dominio/decisoes-negocio.md).

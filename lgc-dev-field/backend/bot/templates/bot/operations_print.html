@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: 1220px;
+    background: #eef1f4;
+    font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    padding: 20px;
+    color: #172033;
+  }
+  .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+  .title { font-size: 18px; font-weight: 800; }
+  .subtitle { font-size: 11px; color: #8993a0; margin-top: 2px; }
+
+  /* ---- stat row ---- */
+  .stat-row { display: flex; gap: 12px; align-items: stretch; margin-bottom: 14px; }
+  .stat-grid { flex: 1; display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; }
+  .stat-card {
+    background: #fff; border: 1px solid #d7dde2; border-radius: 6px;
+    padding: 10px 12px 12px; display: flex; align-items: flex-start; justify-content: space-between;
+  }
+  .stat-label { font-size: 9px; color: #8993a0; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
+  .stat-value { font-size: 19px; font-weight: 800; margin-top: 5px; }
+  .stat-icon { width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .progress-card {
+    width: 140px; flex-shrink: 0; background: #fff; border: 1px solid #d7dde2; border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  }
+  .progress-ring {
+    width: 56px; height: 56px; border-radius: 50%;
+    background: conic-gradient(#f16023 {{ stats.progress_pct }}%, #eef1f4 0);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .progress-ring-inner {
+    width: 42px; height: 42px; border-radius: 50%; background: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 800;
+  }
+  .progress-label { font-size: 9.5px; font-weight: 700; color: #8993a0; text-transform: uppercase; letter-spacing: 0.03em; }
+
+  /* ---- collapsed Técnicos / Pool headers ---- */
+  .collapsed-row { display: flex; gap: 12px; margin-bottom: 14px; }
+  .collapsed-card {
+    flex: 1; background: #fff; border: 1px solid #d7dde2; border-radius: 6px;
+    padding: 11px 14px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .collapsed-title { font-size: 13px; font-weight: 700; }
+  .collapsed-hint { font-size: 10.5px; color: #8993a0; }
+
+  /* ---- timeline layout ---- */
+  .tod-layout { display: flex; gap: 14px; align-items: stretch; }
+  .tod-tech-panel { flex: 1; min-width: 0; background: #fff; border: 1px solid #d7dde2; border-radius: 6px; overflow: hidden; }
+  .tod-side-panel { width: 300px; flex-shrink: 0; background: #fff; border: 1px solid #d7dde2; border-radius: 6px; display: flex; flex-direction: column; }
+
+  .tod-panel-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px 8px; border-bottom: 1px solid #d7dde2; position: relative; }
+  .tod-tech-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.02em; }
+  .tod-ruler { position: relative; flex: 1; margin-left: 190px; height: 16px; }
+  .tod-ruler-tick { position: absolute; font-size: 9px; color: #8993a0; transform: translateX(-50%); }
+
+  .tod-row { display: flex; border-bottom: 1px solid #eef1f4; padding: 8px 0; }
+  .tod-row-info { width: 190px; flex-shrink: 0; padding: 0 12px; }
+  .tod-row-name-line { display: flex; align-items: center; gap: 8px; }
+  .tod-row-avatar {
+    width: 26px; height: 26px; border-radius: 50%; background: #eef1f4; color: #172033;
+    display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700;
+    position: relative; flex-shrink: 0;
+  }
+  .tod-row-avatar-dot { position: absolute; bottom: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; border: 2px solid #fff; }
+  .tod-row-name { font-size: 11.5px; font-weight: 700; }
+  .tod-status-badge { display: inline-block; font-size: 9px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-top: 2px; }
+  .tod-row-sites { font-size: 9.5px; color: #8993a0; margin-top: 3px; }
+  .tod-row-stats { font-size: 9.5px; color: #8993a0; margin-top: 1px; }
+  .tod-track { position: relative; flex: 1; }
+  .tod-bar { position: absolute; border-radius: 5px; display: flex; align-items: center; padding: 0 6px; overflow: hidden; }
+  .tod-bar-label { font-size: 9px; font-weight: 700; color: #172033; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .tod-empty-row { flex: 1; display: flex; align-items: center; font-size: 10.5px; color: #8993a0; padding-left: 8px; }
+
+  /* ---- side panel ---- */
+  .tod-side-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-bottom: 1px solid #d7dde2; }
+  .tod-side-title { font-size: 12.5px; font-weight: 700; }
+  .tod-side-body { padding: 12px 14px; flex: 1; }
+  .tod-tech-group { margin-bottom: 12px; }
+  .tod-tech-group-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .tod-tech-group-name { font-size: 11.5px; font-weight: 700; }
+  .tod-count-badge { font-size: 9.5px; font-weight: 700; background: #fff1e9; color: #f16023; border-radius: 999px; padding: 1px 7px; }
+  .tod-activity-card { border: 1px solid #d7dde2; border-radius: 6px; padding: 7px 9px; margin-bottom: 6px; }
+  .tod-activity-name { font-size: 10.5px; font-weight: 600; }
+  .tod-activity-project { font-size: 9.5px; color: #8993a0; margin-top: 1px; }
+  .tod-others-row { display: flex; justify-content: space-between; align-items: center; border: 1px solid #d7dde2; border-radius: 6px; padding: 8px 10px; font-size: 10.5px; color: #5b6b78; font-weight: 600; }
+  .tod-viewall-link { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; border-top: 1px solid #d7dde2; font-size: 10.5px; font-weight: 700; color: #2563eb; }
+  .empty-hint { color: #8993a0; font-size: 11px; padding: 10px 2px; }
+
+  .legend-row { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 14px; border-top: 1px solid #d7dde2; }
+  .legend-item { display: flex; align-items: center; gap: 5px; font-size: 9.5px; color: #5b6b78; }
+  .legend-swatch { width: 9px; height: 9px; border-radius: 2px; }
+
+  .footer { text-align: center; font-size: 10px; color: #8993a0; margin-top: 10px; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="title">Operação do Dia</div>
+      <div class="subtitle">{{ now_label }}</div>
+    </div>
+  </div>
+
+  <div class="stat-row">
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div><div class="stat-label">Atividades Planejadas</div><div class="stat-value">{{ stats.planned }}</div></div>
+        <div class="stat-icon" style="background:#fff1e9;color:#f16023;">&#128203;</div>
+      </div>
+      <div class="stat-card">
+        <div><div class="stat-label">Em Execução</div><div class="stat-value">{{ stats.active }}</div></div>
+        <div class="stat-icon" style="background:#eff4ff;color:#2563eb;">&#9654;</div>
+      </div>
+      <div class="stat-card">
+        <div><div class="stat-label">Concluídas</div><div class="stat-value">{{ stats.completed }}</div></div>
+        <div class="stat-icon" style="background:#e9f9ef;color:#16a34a;">&#10003;</div>
+      </div>
+      <div class="stat-card">
+        <div><div class="stat-label">Pendentes</div><div class="stat-value">{{ stats.pending }}</div></div>
+        <div class="stat-icon" style="background:#eef1f4;color:#5b6b78;">&#8987;</div>
+      </div>
+      <div class="stat-card">
+        <div><div class="stat-label">Técnicos no Site</div><div class="stat-value">{{ stats.technicians_on_site }}</div></div>
+        <div class="stat-icon" style="background:#e2f4f1;color:#0f766e;">&#128101;</div>
+      </div>
+      <div class="stat-card">
+        <div><div class="stat-label">Técnicos Ausentes</div><div class="stat-value">{{ stats.technicians_absent }}</div></div>
+        <div class="stat-icon" style="background:#fdeaea;color:#dc2626;">&#8856;</div>
+      </div>
+    </div>
+    <div class="progress-card">
+      <div class="progress-ring"><div class="progress-ring-inner">{{ stats.progress_pct }}%</div></div>
+      <div class="progress-label">Progresso do Dia</div>
+    </div>
+  </div>
+
+  <div class="collapsed-row">
+    <div class="collapsed-card">
+      <div class="collapsed-title">Técnicos</div>
+      <div class="collapsed-hint">{{ tech_rows|length }} no site hoje</div>
+    </div>
+    <div class="collapsed-card">
+      <div class="collapsed-title">Pool de Atividades do Dia</div>
+      <div class="collapsed-hint">{{ pool|length }} pendentes</div>
+    </div>
+  </div>
+
+  <div class="tod-layout">
+    <div class="tod-tech-panel">
+      <div class="tod-panel-head">
+        <div class="tod-tech-title">Técnicos ({{ tech_rows|length }})</div>
+        <div class="tod-ruler">
+          {% for m in hour_marks %}
+          <span class="tod-ruler-tick" style="left:{{ m.left }}%;">{{ m.hour }}:00</span>
+          {% endfor %}
+        </div>
+      </div>
+      {% for row in tech_rows %}
+      <div class="tod-row" style="min-height:{{ row.height|add:36 }}px;">
+        <div class="tod-row-info">
+          <div class="tod-row-name-line">
+            <div class="tod-row-avatar">{{ row.initials }}
+              <span class="tod-row-avatar-dot" style="background:{{ row.status_color }};"></span>
+            </div>
+            <div style="min-width:0;flex:1;">
+              <div class="tod-row-name">{{ row.tech.name }}</div>
+              <span class="tod-status-badge" style="background:{{ row.status_color }}29;color:{{ row.status_color }};">
+                {% if row.current_task_name %}Em execução{% else %}{{ row.tech.presence_status_display }}{% endif %}
+              </span>
+            </div>
+          </div>
+          <div class="tod-row-sites">{{ row.tech.site_name }}</div>
+        </div>
+        {% if row.bars %}
+        <div class="tod-track">
+          {% for bar in row.bars %}
+          <div class="tod-bar" style="left:{{ bar.left }}%;width:{{ bar.width }}%;top:{{ bar.top }}px;height:{{ bar.height }}px;background:{{ bar.color }};">
+            <span class="tod-bar-label">{{ bar.label }}</span>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="tod-empty-row">{{ row.tech.presence_status_display }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% if not tech_rows %}<div class="empty-hint">Nenhum técnico vinculado a este site.</div>{% endif %}
+
+      <div class="legend-row">
+        <div class="legend-item"><span class="legend-swatch" style="background:#5b9bff;"></span>Concluída</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#fbbf24;"></span>Em execução</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#34d399;"></span>Disponível</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#f16023;"></span>Pausa</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#a78bfa;"></span>Horário de Almoço</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#5b9bff;"></span>Particular</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#f87171;"></span>Sem Acesso ao Site</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#f16023;"></span>Aguardando Liberações</div>
+        <div class="legend-item"><span class="legend-swatch" style="background:#d7dde2;"></span>Não iniciado / Fim de Expediente</div>
+      </div>
+    </div>
+
+    <div class="tod-side-panel">
+      <div class="tod-side-head">
+        <div class="tod-side-title">Próximas atividades / Operações</div>
+      </div>
+      <div class="tod-side-body">
+        {% for g in side_groups %}
+        <div class="tod-tech-group">
+          <div class="tod-tech-group-head">
+            <div class="tod-tech-group-name">{{ g.tech.name }}</div>
+            <span class="tod-count-badge">{{ g.count }}</span>
+          </div>
+          {% for item in g.items %}
+          <div class="tod-activity-card">
+            <div class="tod-activity-name">{{ item.task_name }}</div>
+            <div class="tod-activity-project">{{ item.project_name }}</div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endfor %}
+        {% if other_count > 0 %}
+        <div class="tod-others-row">
+          <span>Outros técnicos ({{ other_count }})</span>
+        </div>
+        {% endif %}
+        {% if not side_groups %}<div class="empty-hint">Nenhuma atividade pendente na fila.</div>{% endif %}
+      </div>
+      <div class="tod-viewall-link">Ver todas as atividades do dia &#8594;</div>
+    </div>
+  </div>
+
+  <div class="footer">ERP Consultimer · gerado automaticamente</div>
+</body>
+</html>

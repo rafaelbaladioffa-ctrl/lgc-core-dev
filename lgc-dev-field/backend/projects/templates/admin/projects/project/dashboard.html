@@ -1,0 +1,166 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'projects/css/dashboard.css' %}">
+    <script src="{% static 'projects/js/dashboard-tabs.js' %}" defer></script>
+{% endblock %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <header class="dashboard__header">
+        <div>
+            <a href="{% url 'admin:projects_project_changelist' %}" style="color:#94a3b8;display:inline-block;font-size:.8rem;margin-bottom:.65rem;">← Projetos</a>
+            <h1>Dashboard</h1>
+            <p>Performance de Projetos e Performance Técnica.</p>
+        </div>
+        <form method="get" class="dashboard__filters">
+            <div class="dashboard__filter-field">
+                <label for="dash-date-from">De</label>
+                <input type="date" id="dash-date-from" name="date_from" value="{{ filters.date_from }}">
+            </div>
+            <div class="dashboard__filter-field">
+                <label for="dash-date-to">Até</label>
+                <input type="date" id="dash-date-to" name="date_to" value="{{ filters.date_to }}">
+            </div>
+            <div class="dashboard__filter-field">
+                <label for="dash-company">Empresa</label>
+                <select id="dash-company" name="company">
+                    <option value="">Todas</option>
+                    {% for company in companies %}
+                        <option value="{{ company.pk }}" {% if filters.company == company.pk|stringformat:"s" %}selected{% endif %}>{{ company }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit">Filtrar</button>
+            {% if filters.date_from or filters.date_to or filters.company %}
+                <a href="{% url 'admin:projects_dashboardproxy_changelist' %}">Limpar filtros</a>
+            {% endif %}
+        </form>
+    </header>
+
+    <nav class="dashboard__tabs" role="tablist" aria-label="Visões do Dashboard">
+        {% if can_view_projects %}
+            <a href="#projetos" role="tab" data-dashboard-tab="projetos" aria-selected="true">Performance de Projetos</a>
+        {% endif %}
+        {% if can_view_technical %}
+            <a href="#tecnica" role="tab" data-dashboard-tab="tecnica" aria-selected="false">Performance Técnica</a>
+        {% endif %}
+    </nav>
+
+    {% if can_view_projects %}
+    <section class="dashboard__content dashboard__panel" data-dashboard-panel="projetos" role="tabpanel">
+        <div class="dashboard__cards">
+            <article class="dashboard__card"><span>Total de Projetos</span><strong>{{ projects_data.summary.total_projects }}</strong></article>
+            <article class="dashboard__card"><span>Projetos Atrasados</span><strong class="{% if projects_data.summary.overdue_projects %}warn{% endif %}">{{ projects_data.summary.overdue_projects }}</strong></article>
+            <article class="dashboard__card"><span>Progresso Médio</span><strong>{{ projects_data.summary.avg_progress_percent }}%</strong></article>
+            <article class="dashboard__card"><span>Horas Trabalhadas</span><strong>{{ projects_data.summary.total_worked_hours_display }}</strong></article>
+            <article class="dashboard__card"><span>Total de Links</span><strong>{{ projects_data.summary.total_links }}</strong></article>
+        </div>
+
+        <div class="dashboard__section">
+            <h2>Projetos por Status</h2>
+            <div class="dashboard__table-wrap">
+                <table>
+                    <thead><tr><th>Status</th><th>Quantidade</th></tr></thead>
+                    <tbody>
+                        {% for row in projects_data.by_status %}
+                        <tr>
+                            <td><span class="dashboard__status-pill dashboard__status-pill--{{ row.status }}">{{ row.status_display }}</span></td>
+                            <td>{{ row.count }}</td>
+                        </tr>
+                        {% empty %}<tr><td colspan="2">Nenhum projeto no filtro selecionado.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dashboard__section">
+            <h2>Top 10 Projetos por Horas Trabalhadas</h2>
+            <div class="dashboard__table-wrap">
+                <table>
+                    <thead><tr><th>#</th><th>Projeto</th><th>Cliente</th><th>Status</th><th>Progresso</th><th>Horas</th></tr></thead>
+                    <tbody>
+                        {% for row in projects_data.top_projects_by_hours %}
+                        <tr>
+                            <td class="dashboard__rank">{{ forloop.counter }}</td>
+                            <td>{{ row.code }} — {{ row.name }}</td>
+                            <td>{{ row.client|default:"—" }}</td>
+                            <td><span class="dashboard__status-pill dashboard__status-pill--{{ row.status }}">{{ row.status_display }}</span></td>
+                            <td>{{ row.progress_percent }}%</td>
+                            <td>{{ row.worked_hours_display }}</td>
+                        </tr>
+                        {% empty %}<tr><td colspan="6">Nenhum projeto no filtro selecionado.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="dashboard__section">
+            <h2>Todos os Projetos ({{ projects_data.projects|length }})</h2>
+            <div class="dashboard__table-wrap">
+                <table>
+                    <thead><tr><th>Projeto</th><th>Empresa</th><th>Cliente</th><th>Status</th><th>Tarefas</th><th>Progresso</th><th>Horas</th><th>Links</th><th>Prazo</th></tr></thead>
+                    <tbody>
+                        {% for row in projects_data.projects %}
+                        <tr>
+                            <td>{{ row.code }} — {{ row.name }}</td>
+                            <td>{{ row.company|default:"—" }}</td>
+                            <td>{{ row.client|default:"—" }}</td>
+                            <td><span class="dashboard__status-pill dashboard__status-pill--{{ row.status }}">{{ row.status_display }}</span></td>
+                            <td>{{ row.completed_tasks }}/{{ row.total_tasks }}</td>
+                            <td>
+                                <div class="dashboard__progress-track"><i style="width: {{ row.progress_percent }}%"></i></div>
+                            </td>
+                            <td>{{ row.worked_hours_display }}</td>
+                            <td>{{ row.link_count }}</td>
+                            <td class="{% if row.is_overdue %}dashboard__overdue{% endif %}">{{ row.planned_end|date:"d/m/Y"|default:"—" }}</td>
+                        </tr>
+                        {% empty %}<tr><td colspan="9">Nenhum projeto no filtro selecionado.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+
+    {% if can_view_technical %}
+    <section class="dashboard__content dashboard__panel" data-dashboard-panel="tecnica" role="tabpanel" {% if can_view_projects %}hidden{% endif %}>
+        <div class="dashboard__cards">
+            <article class="dashboard__card"><span>Colaboradores</span><strong>{{ technical_data.summary.total_collaborators }}</strong></article>
+            <article class="dashboard__card"><span>Tarefas Concluídas</span><strong>{{ technical_data.summary.total_tasks_completed }}</strong></article>
+            <article class="dashboard__card"><span>Horas Trabalhadas</span><strong>{{ technical_data.summary.total_hours_worked_display }}</strong></article>
+            <article class="dashboard__card"><span>Links Executados</span><strong>{{ technical_data.summary.total_links_executed }}</strong></article>
+        </div>
+
+        <div class="dashboard__section">
+            <h2>Ranking por Horas Trabalhadas</h2>
+            <p style="color:#94a3b8;font-size:.8rem;margin-top:-.5rem;">
+                "Links executados" soma os Links dos Rack Positions vinculados às tarefas concluídas de cada colaborador.
+            </p>
+            <div class="dashboard__table-wrap">
+                <table>
+                    <thead><tr><th>#</th><th>Colaborador</th><th>Cargo</th><th>Empresa</th><th>Tarefas</th><th>Horas</th><th>Links</th></tr></thead>
+                    <tbody>
+                        {% for row in technical_data.collaborators %}
+                        <tr>
+                            <td class="dashboard__rank">{{ forloop.counter }}</td>
+                            <td>{{ row.name }}</td>
+                            <td>{{ row.job_title|default:"—" }}</td>
+                            <td>{{ row.company|default:"—" }}</td>
+                            <td>{{ row.tasks_completed }}/{{ row.tasks_total }}</td>
+                            <td>{{ row.hours_worked_display }}</td>
+                            <td>{{ row.links_executed }}</td>
+                        </tr>
+                        {% empty %}<tr><td colspan="7">Nenhum colaborador ativo no filtro selecionado.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

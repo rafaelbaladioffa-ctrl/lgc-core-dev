@@ -1,0 +1,15 @@
+{
+  "name": "Axis Field",
+  "short_name": "Axis Field",
+  "description": "Minhas Tarefas e gestão de obras de cabeamento estruturado.",
+  "start_url": "/minhas-tarefas",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f5f7fa",
+  "theme_color": "#1a2030",
+  "icons": [
+    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/favicon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

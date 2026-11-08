@@ -1,0 +1,889 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: ERP CSTR - Django Unfold pt_BR\n"
+"Language: pt_BR\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+msgid "Select record"
+msgstr "Selecionar registro"
+
+msgid "Select action"
+msgstr "Selecionar ação"
+
+msgid "Select action to run"
+msgstr "Selecione a ação a executar"
+
+msgid "Collapse"
+msgstr "Recolher"
+
+msgid "Name"
+msgstr "Nome"
+
+msgid "Value"
+msgstr "Valor"
+
+msgid "Default"
+msgstr "Padrão"
+
+msgid "Code"
+msgstr "Código"
+
+msgid "Current file"
+msgstr "Arquivo atual"
+
+msgid "From"
+msgstr "De"
+
+msgid "To"
+msgstr "Até"
+
+msgid "Date from"
+msgstr "Data inicial"
+
+msgid "Date to"
+msgstr "Data final"
+
+msgid "Not enough data."
+msgstr "Dados insuficientes."
+
+msgid "Add new item"
+msgstr "Adicionar novo item"
+
+msgid "Paragraph"
+msgstr "Parágrafo"
+
+msgid "Underlined"
+msgstr "Sublinhado"
+
+msgid "Bold"
+msgstr "Negrito"
+
+msgid "Italic"
+msgstr "Itálico"
+
+msgid "Strike"
+msgstr "Tachado"
+
+msgid "Link"
+msgstr "Link"
+
+msgid "Heading"
+msgstr "Título"
+
+msgid "Quote"
+msgstr "Citação"
+
+msgid "Unordered list"
+msgstr "Lista não ordenada"
+
+msgid "Ordered list"
+msgstr "Lista ordenada"
+
+msgid "Indent increase"
+msgstr "Aumentar recuo"
+
+msgid "Indent decrease"
+msgstr "Diminuir recuo"
+
+msgid "Undo"
+msgstr "Desfazer"
+
+msgid "Redo"
+msgstr "Refazer"
+
+msgid "Enter an URL"
+msgstr "Informe uma URL"
+
+msgid "Unlink"
+msgstr "Remover link"
+
+msgid "Object permissions"
+msgstr "Permissões do objeto"
+
+msgid "Object"
+msgstr "Objeto"
+
+msgid "Group"
+msgstr "Grupo"
+
+msgid "Group permissions"
+msgstr "Permissões do grupo"
+
+msgid "Edit"
+msgstr "Editar"
+
+msgid "Manage group"
+msgstr "Gerenciar grupo"
+
+msgid "User permissions"
+msgstr "Permissões do usuário"
+
+msgid "Manage user"
+msgstr "Gerenciar usuário"
+
+msgid "Select format"
+msgstr "Selecionar formato"
+
+msgid "Export"
+msgstr "Exportar"
+
+msgid "Import"
+msgstr "Importar"
+
+#, python-format
+msgid ""
+"\n"
+"                    Export %(len)s selected item.\n"
+"                "
+msgid_plural ""
+"\n"
+"                    Export %(len)s selected items.\n"
+"                "
+msgstr[0] ""
+"\n"
+"                    Exportar %(len)s item selecionado.\n"
+"                "
+msgstr[1] ""
+"\n"
+"                    Exportar %(len)s itens selecionados.\n"
+"                "
+
+msgid "This exporter will export the following fields"
+msgstr "Esta exportação incluirá os seguintes campos"
+
+msgid "Submit"
+msgstr "Enviar"
+
+msgid ""
+"Below is a preview of data to be imported. If you are satisfied with the "
+"results, click 'Confirm import'"
+msgstr ""
+"Abaixo está uma prévia dos dados que serão importados. Se estiver tudo "
+"correto, clique em 'Confirmar importação'."
+
+msgid "Confirm import"
+msgstr "Confirmar importação"
+
+msgid "Line number"
+msgstr "Número da linha"
+
+msgid "View traceback"
+msgstr "Ver detalhes do erro"
+
+msgid "New"
+msgstr "Novo"
+
+msgid "Skipped"
+msgstr "Ignorado"
+
+msgid "Update"
+msgstr "Atualizar"
+
+msgid "Some rows failed to validate"
+msgstr "Algumas linhas não passaram na validação"
+
+msgid ""
+"Please correct these errors in your data where possible, then reupload it "
+"using the form above."
+msgstr ""
+"Corrija os erros nos dados, quando possível, e envie novamente usando o "
+"formulário acima."
+
+msgid "Row"
+msgstr "Linha"
+
+msgid "Non field specific"
+msgstr "Erro geral"
+
+msgid "This exporter will export the following fields: "
+msgstr "A exportação incluirá os seguintes campos: "
+
+msgid "This importer will import the following fields: "
+msgstr "A importação incluirá os seguintes campos: "
+
+msgid ""
+"Choose a date from the list below to revert to a previous version of this "
+"object"
+msgstr ""
+"Escolha uma data abaixo para restaurar uma versão anterior deste objeto"
+
+msgid "This object doesn't have a change history."
+msgstr "Este objeto não possui histórico de alterações."
+
+msgid ""
+"Press the 'Revert' button below to revert to this version of the object."
+msgstr "Clique em 'Restaurar' abaixo para voltar a esta versão do objeto."
+
+msgid "Press the 'Change History' button below to edit the history."
+msgstr "Clique em 'Histórico de Alterações' abaixo para editar o histórico."
+
+msgid "Comment"
+msgstr "Comentário"
+
+msgid "Changed by"
+msgstr "Alterado por"
+
+msgid "Change reason"
+msgstr "Motivo da alteração"
+
+msgid "Changes"
+msgstr "Alterações"
+
+msgid "Revert"
+msgstr "Restaurar"
+
+msgid "Change History"
+msgstr "Histórico de Alterações"
+
+msgid "Dataset not found. No action performed."
+msgstr "Conjunto de dados não encontrado. Nenhuma ação foi executada."
+
+msgid "Select value"
+msgstr "Selecione um valor"
+
+msgid "You can not create nested object without parent"
+msgstr "Não é possível criar um objeto interno sem um objeto principal"
+
+msgid "Run"
+msgstr "Executar"
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr "Após criar o usuário, será possível editar outras opções."
+
+msgid "Expand row"
+msgstr "Expandir linha"
+
+msgid "Welcome back to"
+msgstr "Bem-vindo novamente ao"
+
+msgid "Forgotten your password or username?"
+msgstr "Esqueceu sua senha ou nome de usuário?"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Você saiu da administração com sucesso"
+
+msgid "No data"
+msgstr "Sem dados"
+
+msgid "More actions"
+msgstr "Mais ações"
+
+msgid "All applications"
+msgstr "Todas as aplicações"
+
+msgid "True"
+msgstr "Sim"
+
+msgid "False"
+msgstr "Não"
+
+msgid "Apply Filters"
+msgstr "Aplicar filtros"
+
+msgid "Select all rows"
+msgstr "Selecionar todas as linhas"
+
+msgid "No recent searches"
+msgstr "Nenhuma pesquisa recente"
+
+msgid "No results matching your query"
+msgstr "Nenhum resultado corresponde à sua pesquisa"
+
+msgid "Loading more results..."
+msgstr "Carregando mais resultados..."
+
+#, python-format
+msgid ""
+"\n"
+"                Found %(counter)s result in %(time)s seconds\n"
+"            "
+msgid_plural ""
+"\n"
+"                Found %(counter)s results in %(time)s seconds\n"
+"            "
+msgstr[0] ""
+"\n"
+"                %(counter)s resultado encontrado em %(time)s segundos\n"
+"            "
+msgstr[1] ""
+"\n"
+"                %(counter)s resultados encontrados em %(time)s segundos\n"
+"            "
+
+msgid "Cancel"
+msgstr "Cancelar"
+
+msgid "Record picture"
+msgstr "Imagem do registro"
+
+msgid "This item will be deleted."
+msgstr "Este item será excluído."
+
+msgid "Click to cancel"
+msgstr "Clique para cancelar"
+
+msgid "Image preview"
+msgstr "Prévia da imagem"
+
+msgid "Click to download"
+msgstr "Clique para baixar"
+
+msgid "Go back"
+msgstr "Voltar"
+
+msgid "Previous"
+msgstr "Anterior"
+
+msgid "Next"
+msgstr "Próximo"
+
+msgid "Search apps and models..."
+msgstr "Pesquisar aplicações e cadastros..."
+
+msgid "General"
+msgstr "Geral"
+
+msgid "Light"
+msgstr "Claro"
+
+msgid "Dark"
+msgstr "Escuro"
+
+msgid "System"
+msgstr "Sistema"
+
+msgid "Return to site"
+msgstr "Voltar ao site"
+
+msgid "Choose file to upload"
+msgstr "Escolher arquivo para enviar"
+
+msgid "Toggle password visibility"
+msgstr "Mostrar ou ocultar senha"
+
+msgid "Add row"
+msgstr "Adicionar linha"
+
+msgid "Welcome"
+msgstr "Bem-vindo"
+
+msgid "Date"
+msgstr "Data"
+
+msgid "Select currency"
+msgstr "Selecionar moeda"
+
+msgid "Type to search"
+msgstr "Digite para pesquisar"
+
+msgid "No results found"
+msgstr "Nenhum resultado encontrado"
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+"Nenhum resultado foi encontrado. Adicione um novo item ou limpe os filtros."
+
+msgid "Reset filters"
+msgstr "Limpar filtros"
+
+#, python-brace-format
+msgid ""
+"Field <strong class=\"font-semibold\">{field_name}</strong> is not an "
+"autocomplete field. Please add it to the `autocomplete_fields` list."
+msgstr ""
+"O campo <strong class=\"font-semibold\">{field_name}</strong> não possui "
+"preenchimento automático. Adicione-o à lista `autocomplete_fields`."
+
+msgid ""
+"Raw passwords are not stored, so there is no way to see this user’s "
+"password, but you can change the password using <a href=\"{}\" class=\"text-"
+"primary-600 dark:text-primary-500\">this form</a>."
+msgstr ""
+"Senhas não são armazenadas em formato legível, portanto não é possível "
+"visualizar a senha deste usuário. Você pode alterá-la usando <a href=\"{}\" "
+"class=\"text-primary-600 dark:text-primary-500\">este formulário</a>."
+
+#: translation_sources/unfold/contrib/inlines/admin.py:111
+msgid "and"
+msgstr "e"
+
+#: translation_sources/unfold/contrib/filters/forms.py:291
+#: translation_sources/unfold/contrib/filters/forms.py:307
+#: translation_sources/unfold/widgets.py:589
+#: translation_sources/unfold/widgets.py:634
+msgid "Time"
+msgstr "Hora"
+
+#: translation_sources/unfold/contrib/import_export/templates/admin/import_export/import_preview.html:28
+#: translation_sources/unfold/templates/admin/submit_line.html:62
+msgid "Delete"
+msgstr "Remover"
+
+#: translation_sources/unfold/templates/unfold/helpers/app_list_default.html:42
+#: translation_sources/unfold/templates/unfold/helpers/edit_inline/inline_links.html:7
+msgid "Change"
+msgstr "Modificar"
+
+#: translation_sources/unfold/templates/unfold/helpers/boolean.html:4
+msgid "Unknown"
+msgstr "Desconhecido"
+
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:80
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:88
+msgid "Yes"
+msgstr "Sim"
+
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:81
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:89
+msgid "No"
+msgstr "Não"
+
+#: translation_sources/unfold/templates/unfold/helpers/site_icon.html:7
+#: translation_sources/unfold/templates/unfold/helpers/site_icon.html:9
+#: translation_sources/unfold/templates/unfold/helpers/site_icon.html:11
+#: translation_sources/unfold/templates/unfold/helpers/site_logo.html:5
+#: translation_sources/unfold/templates/unfold/helpers/site_logo.html:7
+#: translation_sources/unfold/templates/unfold/helpers/site_logo.html:9
+msgid "Home"
+msgstr "Início"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_filter_button.html:5
+msgid "Filters"
+msgstr "Filtros"
+
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:18
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:57
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:70
+#: translation_sources/unfold/contrib/filters/admin/dropdown_filters.py:23
+#: translation_sources/unfold/contrib/filters/admin/mixins.py:47
+msgid "All"
+msgstr "Todos"
+
+#: translation_sources/unfold/templates/unfold/helpers/edit_inline/tabular_delete.html:4
+msgid "Remove"
+msgstr "Remover"
+
+#: translation_sources/unfold/contrib/simple_history/templates/simple_history/object_history_list.html:73
+msgid "None"
+msgstr "Nenhum"
+
+#: translation_sources/unfold/mixins/dataset_model_admin.py:56
+msgid ""
+"Items must be selected in order to perform actions on them. No items have "
+"been changed."
+msgstr ""
+"Os itens devem ser selecionados em ordem a fim de executar ações sobre eles. "
+"Nenhum item foi modificado."
+
+#. Translators: Model verbose name and instance
+#. representation, suitable to be an item in a
+#. list.
+#: translation_sources/unfold/contrib/inlines/admin.py:102
+#, python-format
+msgid "%(class_name)s %(instance)s"
+msgstr "%(class_name)s %(instance)s"
+
+#: translation_sources/unfold/contrib/inlines/admin.py:114
+#, python-format
+msgid ""
+"Deleting %(class_name)s %(instance)s would require deleting the following "
+"protected related objects: %(related_objects)s"
+msgstr ""
+"Remover o %(class_name)s %(instance)s exigiria remover os seguintes objetos "
+"protegidos relacionados: %(related_objects)s"
+
+#: translation_sources/unfold/templates/admin/app_index.html:5
+#: translation_sources/unfold/templates/admin/base_site.html:3
+#: translation_sources/unfold/templates/admin/index.html:5
+#: translation_sources/unfold/templates/admin/login.html:15
+#: translation_sources/unfold/templates/unfold/layouts/base.html:7
+msgid "Django site admin"
+msgstr "Site de administração do Django"
+
+#: translation_sources/unfold/templates/unfold/helpers/site_branding.html:3
+#: translation_sources/unfold/templates/unfold/helpers/site_branding.html:6
+msgid "Django administration"
+msgstr "Administração do Django"
+
+#: translation_sources/unfold/templates/admin/login.html:47
+msgid "Log in"
+msgstr "Acessar"
+
+#: translation_sources/unfold/templates/admin/actions.html:23
+#: translation_sources/unfold/templates/admin/dataset_actions.html:46
+msgid "Run the selected action"
+msgstr "Executar ação selecionada"
+
+#: translation_sources/unfold/templates/admin/actions.html:44
+#: translation_sources/unfold/templates/admin/dataset_actions.html:17
+msgid "Click here to select the objects across all pages"
+msgstr "Clique aqui para selecionar os objetos de todas as páginas"
+
+#: translation_sources/unfold/templates/admin/actions.html:45
+#: translation_sources/unfold/templates/admin/dataset_actions.html:18
+#, python-format
+msgid "Select all %(total_count)s %(module_name)s"
+msgstr "Selecionar todos %(total_count)s %(module_name)s"
+
+#: translation_sources/unfold/templates/admin/actions.html:51
+#: translation_sources/unfold/templates/admin/dataset_actions.html:24
+msgid "Clear selection"
+msgstr "Limpar seleção"
+
+#: translation_sources/unfold/templates/admin/app_list.html:12
+#: translation_sources/unfold/templates/unfold/helpers/app_list_default.html:9
+#, python-format
+msgid "Models in the %(name)s application"
+msgstr "Modelos na aplicação %(name)s"
+
+#: translation_sources/unfold/templates/unfold/helpers/app_list_default.html:31
+msgid "Add"
+msgstr "Adicionar"
+
+#: translation_sources/unfold/templates/unfold/helpers/app_list_default.html:38
+#: translation_sources/unfold/templates/unfold/helpers/edit_inline/inline_links.html:17
+msgid "View"
+msgstr "Visualizar"
+
+#: translation_sources/unfold/templates/admin/app_list.html:48
+#: translation_sources/unfold/templates/unfold/helpers/app_list.html:55
+#: translation_sources/unfold/templates/unfold/helpers/app_list_default.html:59
+msgid "You don’t have permission to view or edit anything."
+msgstr "Você não tem permissão para ver ou editar nada."
+
+#: translation_sources/unfold/templates/admin/auth/user/change_password.html:30
+#: translation_sources/unfold/templates/registration/password_change_form.html:32
+#: translation_sources/unfold/templates/unfold/helpers/account_links.html:18
+msgid "Change password"
+msgstr "Alterar senha"
+
+#: translation_sources/unfold/templates/unfold/helpers/messages/errornote.html:5
+msgid "Please correct the error below."
+msgid_plural "Please correct the errors below."
+msgstr[0] "Por favor corrija o erro abaixo."
+msgstr[1] "Por favor corrija os erros abaixo."
+msgstr[2] "Por favor corrija os erros abaixo."
+
+#: translation_sources/unfold/templates/admin/auth/user/change_password.html:20
+#, python-format
+msgid "Enter a new password for the user <strong>%(username)s</strong>."
+msgstr "Informe uma nova senha para o usuário <strong>%(username)s</strong>."
+
+#: translation_sources/unfold/templates/unfold/helpers/account_links.html:5
+msgid "View site"
+msgstr "Ver o site"
+
+#: translation_sources/unfold/templates/unfold/helpers/account_links.html:28
+msgid "Log out"
+msgstr "Encerrar sessão"
+
+#: translation_sources/unfold/templates/unfold/helpers/add_link.html:5
+#: translation_sources/unfold/templates/unfold/helpers/add_link.html:8
+#: translation_sources/unfold/templates/unfold/helpers/empty_results.html:4
+#, python-format
+msgid "Add %(name)s"
+msgstr "Adicionar %(name)s"
+
+#: translation_sources/unfold/templates/admin/change_form_object_tools.html:6
+msgid "History"
+msgstr "Histórico"
+
+#: translation_sources/unfold/templates/admin/change_form_object_tools.html:12
+msgid "View on site"
+msgstr "Ver no site"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_filter_actions.html:16
+msgid "Hide counts"
+msgstr "Esconder contagem"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_filter_actions.html:20
+msgid "Show counts"
+msgstr "Mostrar contagem"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_filter_actions.html:27
+msgid "Clear all filters"
+msgstr "Limpar todos os filtros"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_headers.html:49
+msgid "Remove from sorting"
+msgstr "Remover da ordenação"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_headers.html:55
+#, python-format
+msgid "Sorting priority: %(priority_number)s"
+msgstr "Prioridade da ordenação: %(priority_number)s"
+
+#: translation_sources/unfold/templates/unfold/helpers/change_list_headers.html:41
+msgid "Toggle sorting"
+msgstr "Alternar ordenção"
+
+#: translation_sources/unfold/templates/admin/delete_confirmation.html:16
+#, python-format
+msgid ""
+"Deleting the %(object_name)s '%(escaped_object)s' would result in deleting "
+"related objects, but your account doesn't have permission to delete the "
+"following types of objects:"
+msgstr ""
+"A remoção de '%(object_name)s' %(escaped_object)s pode resultar na remoção "
+"de objetos relacionados, mas sua conta não tem a permissão para remoção dos "
+"seguintes tipos de objetos:"
+
+#: translation_sources/unfold/templates/admin/delete_confirmation.html:32
+#, python-format
+msgid ""
+"Deleting the %(object_name)s '%(escaped_object)s' would require deleting the "
+"following protected related objects:"
+msgstr ""
+"Remover o %(object_name)s  ' %(escaped_object)s ' exigiria remover os "
+"seguintes objetos protegidos relacionados:"
+
+#: translation_sources/unfold/templates/admin/delete_confirmation.html:48
+#, python-format
+msgid ""
+"Are you sure you want to delete the %(object_name)s \"%(escaped_object)s\"? "
+"All of the following related items will be deleted:"
+msgstr ""
+"Você tem certeza que quer remover %(object_name)s \"%(escaped_object)s\"? "
+"Todos os seguintes itens relacionados serão removidos:"
+
+#: translation_sources/unfold/templates/admin/delete_confirmation.html:55
+#: translation_sources/unfold/templates/admin/delete_selected_confirmation.html:49
+msgid "Objects"
+msgstr "Objetos"
+
+#: translation_sources/unfold/templates/unfold/helpers/delete_submit_line.html:9
+msgid "Yes, I’m sure"
+msgstr "Sim, eu tenho certeza"
+
+#: translation_sources/unfold/templates/unfold/helpers/delete_submit_line.html:5
+msgid "No, take me back"
+msgstr "Não, me leve de volta"
+
+#: translation_sources/unfold/templates/admin/delete_selected_confirmation.html:15
+#, python-format
+msgid ""
+"Deleting the selected %(objects_name)s would result in deleting related "
+"objects, but your account doesn't have permission to delete the following "
+"types of objects:"
+msgstr ""
+"Remover o %(objects_name)s selecionado pode resultar na remoção de objetos "
+"relacionados, mas sua conta não tem permissão para remover os seguintes "
+"tipos de objetos:"
+
+#: translation_sources/unfold/templates/admin/delete_selected_confirmation.html:28
+#, python-format
+msgid ""
+"Deleting the selected %(objects_name)s would require deleting the following "
+"protected related objects:"
+msgstr ""
+"Remover o %(objects_name)s selecionado exigiria remover os seguintes objetos "
+"relacionados protegidos:"
+
+#: translation_sources/unfold/templates/admin/delete_selected_confirmation.html:42
+#, python-format
+msgid ""
+"Are you sure you want to delete the selected %(objects_name)s? All of the "
+"following objects and their related items will be deleted:"
+msgstr ""
+"Tem certeza de que deseja remover o %(objects_name)s selecionado? Todos os "
+"seguintes objetos e seus itens relacionados serão removidos:"
+
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:38
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:95
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:123
+#: translation_sources/unfold/contrib/filters/admin/choice_filters.py:151
+#: translation_sources/unfold/contrib/filters/admin/dropdown_filters.py:39
+#: translation_sources/unfold/contrib/filters/admin/dropdown_filters.py:93
+#: translation_sources/unfold/contrib/filters/admin/dropdown_filters.py:142
+#: translation_sources/unfold/contrib/filters/admin/mixins.py:70
+#: translation_sources/unfold/contrib/filters/admin/mixins.py:171
+#: translation_sources/unfold/contrib/filters/admin/text_filters.py:28
+#: translation_sources/unfold/contrib/filters/admin/text_filters.py:57
+#: translation_sources/unfold/contrib/filters/templates/unfold/filters/filters_date_range.html:5
+#: translation_sources/unfold/contrib/filters/templates/unfold/filters/filters_datetime_range.html:5
+#: translation_sources/unfold/contrib/filters/templates/unfold/filters/filters_numeric_range.html:5
+#: translation_sources/unfold/contrib/filters/templates/unfold/filters/filters_numeric_single.html:5
+#: translation_sources/unfold/contrib/filters/templates/unfold/filters/filters_numeric_slider.html:7
+#: translation_sources/unfold/templates/admin/filter.html:11
+#: translation_sources/unfold/templates/admin/filter.html:32
+#, python-format
+msgid " By %(filter_title)s "
+msgstr "Por %(filter_title)s "
+
+#: translation_sources/unfold/templates/admin/includes/object_delete_summary.html:5
+msgid "Summary"
+msgstr "Resumo"
+
+#: translation_sources/unfold/templates/unfold/helpers/history.html:9
+msgid "Recent actions"
+msgstr "Ações recentes"
+
+#: translation_sources/unfold/templates/unfold/helpers/history.html:28
+msgid "Unknown content"
+msgstr "Conteúdo desconhecido"
+
+#: translation_sources/unfold/templates/admin/login.html:26
+#, python-format
+msgid ""
+"You are authenticated as %(username)s, but are not authorized to access this "
+"page. Would you like to login to a different account?"
+msgstr ""
+"Você está autenticado como %(username)s, mas não está autorizado a acessar "
+"esta página. Você gostaria de realizar login com uma conta diferente?"
+
+#: translation_sources/unfold/templates/unfold/helpers/search.html:41
+msgid "Filter navigation items"
+msgstr "Filtrar itens de navegação"
+
+#: translation_sources/unfold/contrib/simple_history/templates/simple_history/object_history_list.html:19
+#: translation_sources/unfold/contrib/simple_history/templates/simple_history/object_history_list.html:55
+#: translation_sources/unfold/templates/admin/object_history.html:10
+#: translation_sources/unfold/templates/admin/object_history.html:26
+msgid "Date/time"
+msgstr "Data/hora"
+
+#: translation_sources/unfold/contrib/guardian/templates/admin/guardian/model/obj_perms_manage_user.html:17
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/group_form.html:33
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/user_form.html:15
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/user_form.html:33
+#: translation_sources/unfold/templates/admin/object_history.html:14
+#: translation_sources/unfold/templates/admin/object_history.html:30
+msgid "User"
+msgstr "Usuário"
+
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/group_form.html:25
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/group_form.html:49
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/user_form.html:25
+#: translation_sources/unfold/contrib/guardian/templates/unfold/guardian/user_form.html:49
+#: translation_sources/unfold/templates/admin/object_history.html:18
+#: translation_sources/unfold/templates/admin/object_history.html:34
+msgid "Action"
+msgstr "Ação"
+
+#: translation_sources/unfold/contrib/simple_history/templates/simple_history/object_history.html:27
+#: translation_sources/unfold/templates/admin/object_history.html:57
+msgid "entry"
+msgid_plural "entries"
+msgstr[0] "entrada"
+msgstr[1] "entradas"
+msgstr[2] "entradas"
+
+#: translation_sources/unfold/templates/admin/object_history.html:60
+msgid ""
+"This object doesn’t have a change history. It probably wasn’t added via this "
+"admin site."
+msgstr ""
+"Este objeto não tem histórico de alterações. Provavelmente não adicionado "
+"por este site de administração."
+
+#: translation_sources/unfold/templates/admin/pagination.html:12
+#: translation_sources/unfold/templates/unfold/helpers/welcomemsg.html:25
+msgid "Show all"
+msgstr "Mostrar tudo"
+
+#: translation_sources/unfold/contrib/constance/templates/admin/constance/change_list.html:44
+#: translation_sources/unfold/contrib/guardian/templates/admin/guardian/model/obj_perms_manage_group.html:24
+#: translation_sources/unfold/contrib/guardian/templates/admin/guardian/model/obj_perms_manage_user.html:25
+#: translation_sources/unfold/templates/admin/pagination.html:19
+#: translation_sources/unfold/templates/admin/submit_line.html:9
+msgid "Save"
+msgstr "Salvar"
+
+#: translation_sources/unfold/templates/unfold/helpers/welcomemsg.html:25
+#, python-format
+msgid "%(counter)s result"
+msgid_plural "%(counter)s results"
+msgstr[0] "%(counter)s resultado"
+msgstr[1] "%(counter)s resultados"
+msgstr[2] "%(counter)s resultados"
+
+#: translation_sources/unfold/templates/unfold/helpers/welcomemsg.html:25
+#, python-format
+msgid "%(full_result_count)s total"
+msgstr "%(full_result_count)s total"
+
+#: translation_sources/unfold/templates/admin/submit_line.html:43
+msgid "Save as new"
+msgstr "Salvar como novo"
+
+#: translation_sources/unfold/templates/admin/submit_line.html:37
+msgid "Save and add another"
+msgstr "Salvar e adicionar outro(a)"
+
+#: translation_sources/unfold/templates/admin/submit_line.html:28
+msgid "Save and continue editing"
+msgstr "Salvar e continuar editando"
+
+#: translation_sources/unfold/templates/admin/submit_line.html:30
+msgid "Save and view"
+msgstr "Salvar e visualizar"
+
+#: translation_sources/unfold/contrib/simple_history/templates/simple_history/submit_line.html:19
+#: translation_sources/unfold/templates/admin/submit_line.html:53
+msgid "Close"
+msgstr "Fechar"
+
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:28
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:29
+#, python-format
+msgid "Change selected %(model)s"
+msgstr "Alterar %(model)s selecionado"
+
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:34
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:35
+#, python-format
+msgid "Add another %(model)s"
+msgstr "Adicionar outro %(model)s"
+
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:46
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:47
+#, python-format
+msgid "Delete selected %(model)s"
+msgstr "Remover %(model)s selecionado"
+
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:40
+#: translation_sources/unfold/templates/unfold/widgets/related_widget_wrapper.html:41
+#, python-format
+msgid "View selected %(model)s"
+msgstr "Visualizar %(model)s selecionados"
+
+#: translation_sources/unfold/templates/registration/logged_out.html:18
+msgid "Thanks for spending some quality time with the web site today."
+msgstr "Obrigado por passar algum tempo de qualidade com o site hoje."
+
+#: translation_sources/unfold/templates/registration/logged_out.html:23
+msgid "Log in again"
+msgstr "Acessar novamente"
+
+#: translation_sources/unfold/templates/registration/password_change_done.html:8
+msgid "Your password was changed."
+msgstr "Sua senha foi alterada."
+
+#: translation_sources/unfold/templates/registration/password_change_form.html:19
+msgid ""
+"Please enter your old password, for security’s sake, and then enter your new "
+"password twice so we can verify you typed it in correctly."
+msgstr ""
+"Informe sua senha antiga por favor, por motivos de segurança, e então "
+"informe sua nova senha duas vezes para que possamos verificar se você "
+"digitou tudo corretamente."
+
+#: translation_sources/unfold/templatetags/unfold_list.py:123
+msgid "Select all objects on this page for an action"
+msgstr "Selecione todos os objetos nessa página para uma ação"
+
+#: translation_sources/unfold/contrib/constance/templates/admin/constance/includes/results_list.html:71
+#, fuzzy
+#| msgid "Reset filters"
+msgid "Reset to default"
+msgstr "Limpar filtros"
+
+#: translation_sources/unfold/templates/unfold/helpers/command_history.html:7
+#, fuzzy
+#| msgid "Type to search"
+msgid "Recent searches"
+msgstr "Digite para pesquisar"

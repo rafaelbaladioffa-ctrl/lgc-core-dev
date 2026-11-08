@@ -1,0 +1,60 @@
+{% load i18n %}
+
+{# Override do admin/app_list.html do Unfold: adiciona colapso por módulo #}
+{# (Alpine.js x-show), fechado por padrão exceto o módulo da página atual — #}
+{# o tema original sempre renderiza todos os grupos abertos, o que fica #}
+{# ruim de navegar com muitos apps registrados. #}
+
+{% if app_list %}
+    <div id="nav-sidebar-apps" class="h-0 grow overflow-auto" data-simplebar>
+        {% for app in app_list %}
+            {% if app.models and not app.hidden %}
+                <div class="app-{{ app.app_label }} module{% if app.app_url in request.path %} current-app{% endif %}"
+                     x-data="{navigationOpen: {% if app.app_url in request.path %}true{% else %}false{% endif %}}">
+                    <ol class="px-6">
+                        <li>
+                            {% if app.name %}
+                                <h2 class="font-semibold flex flex-row group items-center mb-1 mt-4 select-none text-font-important-light text-sm truncate cursor-pointer hover:text-primary-600 dark:text-font-important-dark dark:hover:text-primary-500"
+                                    x-on:click="navigationOpen = !navigationOpen"
+                                    title="{% blocktranslate with name=app.name %}Models in the {{ name }} application{% endblocktranslate %}">
+                                    <span class="truncate">{{ app.name }}</span>
+                                    <span class="material-symbols-outlined ml-auto transition-transform group-hover:text-primary-600 dark:group-hover:text-primary-500" x-bind:class="{'rotate-90': navigationOpen}">
+                                        chevron_right
+                                    </span>
+                                </h2>
+                            {% endif %}
+
+                            <ol class="flex flex-col gap-0.5" x-show="navigationOpen" x-cloak>
+                                {% for model in app.models %}
+                                    {% if not model.hidden %}
+                                        <li class="model-{{ model.object_name|lower }}{% if model.admin_url in request.path|urlencode %} current-model{% endif %}">
+                                            {% if model.header %}
+                                                <h3 class="font-medium my-2 text-base-900 text-sm dark:text-base-200">
+                                                    {{ model.header }}
+                                                </h3>
+                                            {% endif %}
+
+                                            {% if model.admin_url %}
+                                                <a href="{{ model.admin_url }}" id="link-{{ app.app_label }}-{{ model.object_name|lower }}"
+                                                   class="flex items-center h-[38px] -mx-3 px-3 rounded-default truncate hover:text-primary-600 dark:hover:text-primary-500 {% if model.admin_url in request.path|urlencode %}bg-base-100 font-semibold text-primary-600 dark:bg-white/[.06] dark:text-primary-500 active{% endif %}">
+                                                    {{ model.name }}
+                                                </a>
+                                            {% else %}
+                                                {{ model.name }}
+                                            {% endif %}
+                                        </li>
+                                    {% endif %}
+                                {% endfor %}
+                            </ol>
+                        </li>
+                    </ol>
+                </div>
+            {% endif %}
+        {% endfor %}
+    </div>
+{% else %}
+    <p>
+        {% trans "You don’t have permission to view or edit anything." as error_message %}
+        {% include "unfold/helpers/messages/error.html" with error=error_message %}
+    </p>
+{% endif %}

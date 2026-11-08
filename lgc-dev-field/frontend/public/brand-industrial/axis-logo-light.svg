@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 144" role="img" aria-label="AXIS ERP + SGI">
+  <g transform="translate(12 12)">
+    <path fill="#0E1114" d="M18 104 62 12h20l-42 92H18Z"/>
+    <path fill="#3A424A" d="m72 46 36 58H83L54 57c-5-8-14-8-18 0l-7 15 14 0 11-24 21-2Z"/>
+    <path fill="#14B8A6" d="m36 78 69-32 10 22-68 31c-12 5-17-10-11-21Z"/>
+  </g>
+  <text x="142" y="70" fill="#1A1F24" font-family="Inter,Segoe UI,sans-serif" font-size="62" font-weight="750" letter-spacing="-3">AXIS</text>
+  <text x="146" y="102" fill="#66707A" font-family="Inter,Segoe UI,sans-serif" font-size="16" font-weight="600" letter-spacing="5">ERP + SGI</text>
+</svg>

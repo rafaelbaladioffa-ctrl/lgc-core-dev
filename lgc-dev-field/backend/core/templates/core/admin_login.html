@@ -1,0 +1,40 @@
+{% extends "admin/login.html" %}
+
+{% block extrahead %}
+  {{ block.super }}
+  <script>
+    (function () {
+      var KEY = "erp_admin_saved_username";
+      document.addEventListener("DOMContentLoaded", function () {
+        var userField = document.getElementById("id_username");
+        var passwordField = document.getElementById("id_password");
+        if (!userField || !passwordField) return;
+        var form = userField.closest("form");
+        if (!form) return;
+
+        var saved = localStorage.getItem(KEY);
+        if (saved) userField.value = saved;
+
+        var wrapper = document.createElement("div");
+        wrapper.style.margin = "8px 0 16px";
+        wrapper.style.fontSize = "13px";
+        wrapper.innerHTML =
+          '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;">' +
+          '<input type="checkbox" id="erp-remember-username"' + (saved ? " checked" : "") + "> " +
+          "Salvar meu usuário</label>";
+
+        var passwordRow = passwordField.closest(".form-row") || passwordField.parentElement;
+        passwordRow.parentNode.insertBefore(wrapper, passwordRow.nextSibling);
+
+        form.addEventListener("submit", function () {
+          var remember = document.getElementById("erp-remember-username");
+          if (remember && remember.checked) {
+            localStorage.setItem(KEY, userField.value);
+          } else {
+            localStorage.removeItem(KEY);
+          }
+        });
+      });
+    })();
+  </script>
+{% endblock %}

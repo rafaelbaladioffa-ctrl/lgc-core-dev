@@ -1,0 +1,91 @@
+.field-import_tasks_from_project_type {
+    min-height: 0 !important;
+    padding-bottom: 0.25rem !important;
+    padding-top: 0.25rem !important;
+}
+
+.field-import_tasks_from_project_type > .flex {
+    align-items: center;
+    flex-direction: row !important;
+    gap: 0.75rem;
+    padding-bottom: 0 !important;
+    padding-top: 0 !important;
+}
+
+.field-import_tasks_from_project_type > .flex > div:first-child {
+    min-width: auto !important;
+    width: auto !important;
+}
+
+.field-import_tasks_from_project_type > .flex > .grow {
+    flex-grow: 0;
+}
+
+.field-bulk_tasks .select2-container,
+.field-bulk_collaborators .select2-container {
+    width: 100% !important;
+}
+
+.field-bulk_tasks select.select2-hidden-accessible,
+.field-bulk_collaborators select.select2-hidden-accessible {
+    display: none !important;
+}
+
+.field-bulk_tasks .select2-selection,
+.field-bulk_collaborators .select2-selection {
+    min-height: 38px;
+}
+
+#project_tasks-data .field-planned_start .datetime,
+#project_tasks-data .field-planned_end .datetime {
+    gap: 0.35rem !important;
+    flex-direction: column !important;
+    min-width: 125px;
+}
+
+#project_tasks-data .field-planned_start .datetime > div,
+#project_tasks-data .field-planned_end .datetime > div {
+    flex-basis: auto !important;
+}
+
+#project_tasks-data .field-planned_start .datetime div,
+#project_tasks-data .field-planned_end .datetime div {
+    min-width: 0 !important;
+}
+
+#project_tasks-data .field-planned_start .vDateField,
+#project_tasks-data .field-planned_end .vDateField {
+    min-width: 125px !important;
+    width: 125px !important;
+}
+
+#project_tasks-data .field-planned_start .vTimeField,
+#project_tasks-data .field-planned_end .vTimeField {
+    min-width: 125px !important;
+    width: 125px !important;
+}
+
+#project_tasks-data .field-task {
+    min-width: 285px;
+    width: 285px;
+}
+
+#project_tasks-data .field-task .select2-container {
+    min-width: 270px !important;
+    width: 270px !important;
+}
+
+#project_tasks-data .field-collaborators {
+    min-width: 225px;
+    width: 225px;
+}
+
+#project_tasks-data .field-collaborators .select2-container {
+    min-width: 210px !important;
+    width: 210px !important;
+}
+
+#project_tasks-data .field-status {
+    min-width: 105px;
+    width: 105px;
+}

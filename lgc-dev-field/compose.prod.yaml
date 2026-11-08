@@ -1,0 +1,10 @@
+services:
+  field-backend:
+    command: ["sh", "-c", "gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers 3 --threads 4 --worker-class gthread --timeout 60"]
+
+  field-frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile.prod
+      args:
+        VITE_API_URL: ${FRONTEND_API_URL:-http://localhost:8000/api}

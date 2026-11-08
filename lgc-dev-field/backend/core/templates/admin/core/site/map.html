@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }} | ERP CSTR</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: -apple-system, "Manrope", Arial, sans-serif; }
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            background: #172033; color: #fff; padding: 14px 20px; position: relative; z-index: 10;
+        }
+        header a { color: #fff; text-decoration: none; font-size: 14px; opacity: 0.85; }
+        header a:hover { opacity: 1; }
+        header h1 { font-size: 16px; margin: 0; font-weight: 700; }
+        header .brand { color: #F16023; font-weight: 700; }
+        #map { position: absolute; top: 52px; left: 0; right: 0; bottom: 0; transition: right 0.2s ease; }
+        #empty {
+            position: absolute; top: 52px; left: 0; right: 0; bottom: 0;
+            display: flex; align-items: center; justify-content: center;
+            color: #526174; font-size: 14px; flex-direction: column; gap: 8px;
+        }
+        .badge {
+            background: #FFF3EC; color: #F16023; border-radius: 999px;
+            padding: 2px 10px; font-size: 12px; font-weight: 700;
+        }
+        .project-count-pill {
+            background: #F16023; color: #fff; border-radius: 999px;
+            padding: 1px 8px; font-size: 11px; font-weight: 700; margin-left: 6px;
+        }
+        .site-pin { position: relative; width: 30px; height: 30px; }
+        .site-pin .pin-circle {
+            width: 30px; height: 30px; border-radius: 50%; background: #172033;
+            border: 3px solid #fff; box-shadow: 0 1px 5px rgba(0,0,0,0.35);
+        }
+        .site-pin.has-projects .pin-circle { background: #F16023; }
+        .site-pin .pin-count {
+            position: absolute; top: -7px; right: -7px; min-width: 19px; height: 19px;
+            border-radius: 999px; background: #172033; color: #fff; border: 2px solid #fff;
+            font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center;
+            padding: 0 3px;
+        }
+        .site-pin.has-projects .pin-count { background: #F16023; }
+        #sidebar {
+            position: absolute; top: 52px; bottom: 0; right: -360px; width: 360px;
+            background: #fff; border-left: 1px solid #DDE3EA; box-shadow: -4px 0 12px rgba(0,0,0,0.06);
+            transition: right 0.2s ease; overflow-y: auto; z-index: 5;
+        }
+        #sidebar.open { right: 0; }
+        #sidebar .sidebar-header {
+            padding: 16px 18px; border-bottom: 1px solid #DDE3EA;
+            display: flex; justify-content: space-between; align-items: flex-start;
+        }
+        #sidebar .sidebar-header h2 { font-size: 15px; color: #172033; margin: 0 0 4px; }
+        #sidebar .sidebar-header p { font-size: 12px; color: #526174; margin: 0; }
+        #sidebar .close-btn {
+            background: none; border: none; cursor: pointer; font-size: 18px; color: #526174; line-height: 1;
+        }
+        #sidebar .project-item {
+            display: block; padding: 12px 18px; border-bottom: 1px solid #F0F2F5; text-decoration: none;
+        }
+        #sidebar .project-item:hover { background: #F7F9FB; }
+        #sidebar .project-item .code { font-size: 11px; color: #F16023; font-weight: 700; }
+        #sidebar .project-item .name { font-size: 13.5px; color: #172033; font-weight: 600; margin: 2px 0; }
+        #sidebar .project-item .client { font-size: 12px; color: #526174; }
+        #sidebar .empty-projects { padding: 18px; font-size: 13px; color: #526174; }
+    </style>
+</head>
+<body>
+    <header>
+        <div style="display:flex; align-items:center; gap:16px;">
+            <a href="{% url 'admin:core_site_changelist' %}">&larr; Voltar para Sites</a>
+            <h1><span class="brand">ERP CSTR</span> — {{ title }}</h1>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <span class="badge">{{ points_count }} site(s) no mapa</span>
+            {% if without_coords %}
+                <span class="badge" style="background:#FEF3C7; color:#B45309;">{{ without_coords }} sem coordenadas</span>
+            {% endif %}
+        </div>
+    </header>
+
+    {% if points_count %}
+        <div id="map"></div>
+        <div id="sidebar">
+            <div class="sidebar-header">
+                <div>
+                    <h2 id="sidebar-title">Projetos</h2>
+                    <p id="sidebar-subtitle"></p>
+                </div>
+                <button class="close-btn" onclick="closeSidebar()">&times;</button>
+            </div>
+            <div id="sidebar-list"></div>
+        </div>
+    {% else %}
+        <div id="empty">
+            <p>Nenhum site ativo com coordenadas encontradas ainda.</p>
+            <p>Salve um Site com endereço preenchido para que ele seja geocodificado automaticamente.</p>
+        </div>
+    {% endif %}
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const points = {{ points_json|safe }};
+
+        function openSidebar(point) {
+            document.getElementById("sidebar-title").textContent = point.name;
+            document.getElementById("sidebar-subtitle").textContent =
+                point.projects.length + " projeto(s) ativo(s) neste site";
+
+            const list = document.getElementById("sidebar-list");
+            list.innerHTML = "";
+            if (point.projects.length === 0) {
+                list.innerHTML = '<div class="empty-projects">Nenhum projeto ativo neste site no momento.</div>';
+            } else {
+                point.projects.forEach((project) => {
+                    const item = document.createElement("a");
+                    item.className = "project-item";
+                    item.href = project.url;
+                    item.innerHTML =
+                        '<div class="code">' + project.code + '</div>' +
+                        '<div class="name">' + project.name + '</div>' +
+                        (project.client ? '<div class="client">' + project.client + '</div>' : '');
+                    list.appendChild(item);
+                });
+            }
+
+            document.getElementById("sidebar").classList.add("open");
+            document.getElementById("map").style.right = "360px";
+            setTimeout(() => map.invalidateSize(), 210);
+        }
+
+        function closeSidebar() {
+            document.getElementById("sidebar").classList.remove("open");
+            document.getElementById("map").style.right = "0";
+            setTimeout(() => map.invalidateSize(), 210);
+        }
+
+        let map;
+        if (points.length) {
+            map = L.map("map");
+            L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+                attribution: "Tiles &copy; Esri",
+                maxZoom: 19,
+            }).addTo(map);
+
+            const markers = points.map((point) => {
+                const count = point.projects.length;
+                const icon = L.divIcon({
+                    className: "",
+                    html:
+                        '<div class="site-pin' + (count > 0 ? " has-projects" : "") + '">' +
+                        '<div class="pin-circle"></div>' +
+                        '<div class="pin-count">' + count + "</div>" +
+                        "</div>",
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15],
+                    popupAnchor: [0, -18],
+                });
+                const marker = L.marker([point.lat, point.lng], { icon }).addTo(map);
+                const countLabel = count + " projeto(s) ativo(s)";
+                marker.bindPopup(
+                    "<strong>" + point.name + "</strong>" +
+                    '<span class="project-count-pill">' + countLabel + "</span><br/>" +
+                    (point.client ? point.client + "<br/>" : "") +
+                    (point.address || "")
+                );
+                marker.on("click", () => openSidebar(point));
+                return marker;
+            });
+
+            const group = L.featureGroup(markers);
+            map.fitBounds(group.getBounds().pad(0.2));
+            if (points.length === 1) {
+                map.setZoom(14);
+            }
+        }
+    </script>
+</body>
+</html>
