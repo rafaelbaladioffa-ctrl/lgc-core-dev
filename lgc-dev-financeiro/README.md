@@ -10,8 +10,9 @@ Satélite do Axis Core, mantido como subpasta deste repositório, como a Logíst
 > **Estado em 2026-11-07:** entrega F0 (esqueleto). Health, `/me`, SSO com o access token do Core,
 > RBAC local, auditoria append-only, receptor de webhook do Core com cache de mestres, outbox e
 > frontend com login e tela inicial. Módulo Projetos: **PJ1 entregue** (parâmetros de orçamento
-> versionados com custo hora da equipe, catálogo de materiais e destinos, perfis do módulo). Próximo:
-> PJ2 (orçamento do projeto); contas a pagar (F1–F6) vem depois de Projetos.
+> versionados com custo hora da equipe, catálogo de materiais e destinos, perfis do módulo) e **PJ2
+> entregue** (orçamento do projeto com revisões, resultado, preço mínimo e preço da meta). Próximo: PJ3
+> (fluxo da proposta); contas a pagar (F1–F6) vem depois de Projetos.
 >
 > **Primeiro uso do PJ1:** conceda `CONTROLADORIA` a quem mantém os custos, crie o rascunho em
 > Parâmetros (já vem com as referências legais de encargos e impostos), preencha ISS, veículo, meta e
@@ -62,6 +63,10 @@ no build e inclua o domínio do Financeiro em `CORS_ALLOWED_ORIGINS` do Core.
 | `POST /parameter-sets` (novo rascunho), `PATCH /parameter-sets/:id`, `POST /parameter-sets/:id/publish` | `budget_params:write` |
 | `GET /budget-materials`, `/budget-destinations` (e `/:id`; `?includeInactive=true`) | `budget_params:read` (custo real do material só com `budget:read_cost`) |
 | `POST`, `PATCH /budget-materials`, `/budget-destinations` | `budget_params:write` |
+| `GET /projects`, `/projects/:axisProjectId`, `POST /projects/sync` (lê o Core com o seu token) | `budget:read` |
+| `POST /budgets` (orçamento + R1), `POST /budgets/:id/revisions` | `budget:write` |
+| `GET /revisions/:id`, `POST /revisions/:id/simulate` | `budget:read` (custo, impostos e lucro só com `budget:read_cost`) |
+| `PATCH /revisions/:id`, `POST /revisions/:id/use-current-parameters`, `/discard` | `budget:write` |
 
 Perfis do módulo Projetos: `ORCAMENTISTA`, `GESTOR_COMERCIAL`, `GESTOR_PROJETO`, `CONTROLADORIA`
 ([especificação §9](docs/projetos-especificacao.md#9-permissões-e-perfis)). Rode `npx prisma db seed`

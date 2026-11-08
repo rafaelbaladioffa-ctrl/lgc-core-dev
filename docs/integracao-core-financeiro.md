@@ -15,6 +15,7 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 | Webhook de compra, reembolso e adiantamento | Core → Financeiro | **Contratos novos; o Core ainda não emite** |
 | Eventos de pagamento | Financeiro → Core | Outbox pronto; **o Core não tem receptor** |
 | API de consulta por API key | Financeiro → Core | Disponível no Core; o Financeiro ainda não usa |
+| Consulta de projetos e clientes com o token do usuário (`GET /projects`, `GET /clients` do Core) | Financeiro → Core | Usada pelo botão "Atualizar do Axis Core" do módulo Projetos (PJ2); respeita `project:read`/`client:read` de quem clicou. URL em `AXIS_API_URL` |
 
 ## 1. Identidade
 

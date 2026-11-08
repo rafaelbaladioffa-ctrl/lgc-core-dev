@@ -361,7 +361,7 @@ P-03.
 | `client_profiles` | perfil de cliente versionado (constantes AWS §7, tabela tipo de cabo → linha do bid) |
 | `budget_materials`, `budget_destinations` | catálogos (§4.3) |
 | `project_budgets` | `axis_project_id`, `model` (`generico`/`aws_sow`), `client_profile_id?`, título |
-| `budget_revisions` | número, status, `parameter_set_id`, entradas escalares, totais calculados em colunas (receita, impostos, diretos, indiretos, lucro, lucro sobre custo), `result_snapshot` JSON, criado/submetido/aprovado por e em, motivo |
+| `budget_revisions` | número, status, `parameter_set_id`, entradas (`inputs` JSON validado pelo DTO: equipe, material com preço e custo copiados do catálogo, deslocamento, plataforma, hospedagem, alimentação, custos extras), resultado (`result` JSON) e totais em colunas (receita, impostos, diretos, indiretos, lucro, lucro sobre o custo), criado/alterado por e em |
 | `budget_revision_team`, `budget_revision_items` | equipe e itens de material/custo da revisão, com valores copiados do catálogo |
 | `budget_revision_sow` | dados lidos da SOW, correções e justificativas dos indicadores |
 | `budget_revision_cables` | linhas de cabo (§7.2) |
@@ -409,8 +409,8 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
 ## 13. Integração
 
 - **Projetos e clientes**: cache alimentado por `project.created/status_changed` e
-  `client.created/updated` (já funcionam). Carga inicial pela API de consulta do Core (§2.5 da
-  [especificação](especificacao.md)).
+  `client.created/updated` (já funcionam) e pelo botão "Atualizar do Axis Core", que lê `GET /projects`
+  e `GET /clients` do Core com o token de quem clicou (PJ2).
 - O evento `project.created` não traz nome nem centro de custo; o centro de custo será necessário
   para rateio. Ver P-07.
 - Feriados para "cabe na janela": consulta ao calendário do Core; se o Core não expuser, só dias
@@ -441,7 +441,7 @@ de custo; outros modelos de cliente além do AWS.
 | # | Entrega | Estado |
 |---|---|---|
 | PJ1 | Parâmetros versionados, funções e custo hora (§6.1), catálogos de material e destinos, permissões e perfis; testes do cálculo com valores fictícios | **feito** (2026-11-07): ver nota abaixo |
-| PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | pendente |
+| PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
 | PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | pendente |
 | PJ4 | Modelo `aws_sow`: perfil de cliente, importação da SOW, horas-meta, indicadores, valores do bid | pendente |
 | PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
@@ -463,6 +463,26 @@ de custo; outros modelos de cliente além do AWS.
   repositório; os testes versionados usam valores fictícios.
 - Telas: `#/parametros` (lista, rascunho, publicação, custo hora com composição), `#/materiais`,
   `#/destinos`. Perfis de cliente (`client_profiles`, §7) ficam para a PJ4.
+
+**Notas da PJ2.**
+- Migração `20261108130000_pj2_orcamentos`: `project_budgets` (um por projeto e modelo) e
+  `budget_revisions`. As tabelas de linhas previstas em §10 (`budget_revision_team`, `…_items`)
+  viraram o JSON `inputs`, validado pelo DTO; os totais ficam em colunas para listar. Um rascunho por
+  orçamento (índice parcial); gatilho impede alterar entradas, parâmetros ou resultado fora de
+  rascunho e apagar revisão.
+- Motor (`budgets/budget-engine.ts`) segue §6.2–§6.7; cada linha é arredondada em 2 casas e os
+  totais somam as linhas. Cenário de referência conferido à mão com as fórmulas da planilha.
+  Frete da plataforma só entra quando há dias de plataforma (a planilha somava sempre).
+- Nova revisão copia a última não descartada e passa a usar os parâmetros vigentes; o rascunho pode
+  trocar para o vigente ("Usar PAR-…"). Rascunho pode ser descartado (fica no histórico).
+- Projetos e clientes: além do webhook, o botão **"Atualizar do Axis Core"** (`POST /projects/sync`)
+  lê `GET /projects` e `GET /clients` do Core com o token de quem clicou (respeita `project:read` e
+  `client:read` dessa pessoa); registro mais antigo não sobrescreve o mais novo. URL em `AXIS_API_URL`.
+- Sem `budget:read_cost` a API devolve só a parte cobrada (receita, linhas sem custo) e esconde o custo
+  real do material; ao salvar, esse custo vem da revisão anterior ou do catálogo.
+- Telas: `#/projetos` (lista com orçamento e lucro sobre o custo), `#/projetos/:id` (revisões),
+  `#/revisoes/:id` (editor com resultado recalculado pelo servidor enquanto se digita).
+- Não verificado ainda: uso na tela com login real (feito só por testes e chamadas sem sessão).
 
 ## 17. Decisões pendentes
 

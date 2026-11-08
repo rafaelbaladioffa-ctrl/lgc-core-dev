@@ -214,7 +214,8 @@ model ParameterSet {
   publishedBy String?   @map("published_by")
   publishedAt DateTime? @map("published_at")
 
-  roles ParameterSetRole[]
+  roles     ParameterSetRole[]
+  revisions BudgetRevision[]
 
   @@index([status])
   @@map("parameter_sets")
@@ -277,4 +278,70 @@ model BudgetDestination {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   @@map("budget_destinations")
+}
+
+// ---------------------------------------------------------------------------
+// PJ2 — orçamento do projeto (projetos-especificacao §3, §5, §6 e §10).
+// ---------------------------------------------------------------------------
+
+enum BudgetModel {
+  generico
+  aws_sow
+}
+
+enum BudgetRevisionStatus {
+  rascunho
+  em_aprovacao
+  enviada
+  ganha
+  perdida
+  substituida
+  descartada
+}
+
+/// Orçamento de um projeto do Core (um por projeto e modelo).
+model ProjectBudget {
+  id            String      @id @default(uuid())
+  axisProjectId String      @map("axis_project_id")
+  projectCode   String      @map("project_code") // cópia do código do Core no momento da criação
+  model         BudgetModel @default(generico)
+  title         String
+  createdBy     String      @map("created_by")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  revisions BudgetRevision[]
+
+  @@unique([axisProjectId, model])
+  @@map("project_budgets")
+}
+
+/// Revisão numerada do orçamento. Entradas em JSON (validadas pelo DTO); totais em colunas para listar.
+model BudgetRevision {
+  id             String               @id @default(uuid())
+  budgetId       String               @map("budget_id")
+  number         Int
+  status         BudgetRevisionStatus @default(rascunho)
+  parameterSetId String               @map("parameter_set_id")
+  inputs         Json
+  result         Json?
+  revenue        Decimal?             @db.Decimal(14, 2)
+  taxes          Decimal?             @db.Decimal(14, 2)
+  directCost     Decimal?             @map("direct_cost") @db.Decimal(14, 2)
+  indirectCost   Decimal?             @map("indirect_cost") @db.Decimal(14, 2)
+  profit         Decimal?             @db.Decimal(14, 2)
+  profitOnCost   Decimal?             @map("profit_on_cost") @db.Decimal(9, 4)
+  computedAt     DateTime?            @map("computed_at")
+  notes          String?
+  createdBy      String               @map("created_by")
+  createdAt      DateTime             @default(now()) @map("created_at")
+  updatedBy      String               @map("updated_by")
+  updatedAt      DateTime             @updatedAt @map("updated_at")
+
+  budget       ProjectBudget @relation(fields: [budgetId], references: [id])
+  parameterSet ParameterSet  @relation(fields: [parameterSetId], references: [id])
+
+  @@unique([budgetId, number])
+  @@index([status])
+  @@map("budget_revisions")
 }

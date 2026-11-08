@@ -15,6 +15,7 @@ import { CorrelationMiddleware } from './audit/correlation.middleware.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
 import { BudgetParamsModule } from './budget-params/budget-params.module.js';
+import { BudgetsModule } from './budgets/budgets.module.js';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { BudgetParamsModule } from './budget-params/budget-params.module.js';
     AuthModule,
     IntegrationModule,
     BudgetParamsModule,
+    BudgetsModule,
   ],
   controllers: [HealthController],
   providers: [

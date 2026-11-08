@@ -280,3 +280,101 @@ a.btn {
     width: 100%;
   }
 }
+
+/* --- Orçamento (PJ2) --- */
+.card-pad {
+  padding: var(--space-4) var(--space-5) 0;
+}
+
+.section-hint {
+  margin: calc(-1 * var(--space-2)) 0 var(--space-3);
+  font-size: var(--text-xs);
+}
+
+.revision-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.revision-form {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.revision-form:disabled input,
+.revision-form:disabled select,
+.revision-form:disabled textarea {
+  background: var(--surface-secondary);
+  color: var(--foreground);
+}
+
+.revision-result {
+  position: sticky;
+  top: var(--space-4);
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.result-row span:last-child {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.result-row.strong {
+  font-weight: 700;
+}
+
+.result-row.sub {
+  font-size: var(--text-xs);
+  color: var(--foreground-muted);
+  padding-left: var(--space-3);
+}
+
+.table .negative {
+  color: var(--danger);
+}
+
+.warnings {
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--warning);
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font: inherit;
+  resize: vertical;
+}
+
+.toolbar select {
+  height: var(--control-height);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font: inherit;
+  max-width: 100%;
+}
+
+@media (max-width: 1024px) {
+  .revision-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .revision-result {
+    position: static;
+  }
+}

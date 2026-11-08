@@ -5,6 +5,8 @@ import { matchRoute, useHashPath } from './lib/router';
 import { ParameterSetsPage } from './pages/ParameterSetsPage';
 import { ParameterSetPage } from './pages/ParameterSetPage';
 import { DestinationFormPage, DestinationsPage, MaterialFormPage, MaterialsPage } from './pages/CatalogPages';
+import { ProjectPage, ProjectsPage } from './pages/ProjectsPages';
+import { RevisionPage } from './pages/RevisionPage';
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
@@ -70,12 +72,13 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
 }
 
 const NEXT_STEPS = [
-  { title: 'Orçamento do projeto', detail: 'Equipe, material, deslocamento e outros custos; receita, impostos, lucro sobre o custo e preço da meta.' },
+  { title: 'Fluxo da proposta', detail: 'Enviar para aprovação, aprovar o envio, marcar ganha ou perdida.' },
   { title: 'Proposta do cliente AWS', detail: 'Leitura da SOW, horas-meta, indicadores e valores do Bid Template.' },
   { title: 'Realizado', detail: 'Apontamento da obra e custos lançados; cotado × realizado.' },
 ];
 
 const NAV = [
+  { path: '/projetos', label: 'Projetos', permission: 'budget:read' },
   { path: '/parametros', label: 'Parâmetros', permission: 'budget_params:read' },
   { path: '/materiais', label: 'Materiais', permission: 'budget_params:read' },
   { path: '/destinos', label: 'Destinos', permission: 'budget_params:read' },
@@ -147,7 +150,13 @@ function Routes({ path, me, can }: { path: string; me: Me; can: (p: string) => b
   const read = can('budget_params:read');
   const write = can('budget_params:write');
   const cost = can('budget:read_cost');
+  const budgetRead = can('budget:read');
+  const budgetWrite = can('budget:write');
   let m: Record<string, string> | null;
+
+  if (matchRoute('/projetos', path)) return budgetRead ? <ProjectsPage canWrite={budgetWrite} canSeeCost={cost} /> : <NoAccess />;
+  if ((m = matchRoute('/projetos/:id', path))) return budgetRead ? <ProjectPage key={m.id} id={m.id} canWrite={budgetWrite} canSeeCost={cost} /> : <NoAccess />;
+  if ((m = matchRoute('/revisoes/:id', path))) return budgetRead ? <RevisionPage key={m.id} id={m.id} canWrite={budgetWrite} /> : <NoAccess />;
 
   if (matchRoute('/parametros', path)) return read ? <ParameterSetsPage canWrite={write} /> : <NoAccess />;
   if ((m = matchRoute('/parametros/:id', path))) return read ? <ParameterSetPage key={m.id} id={m.id} canWrite={write} /> : <NoAccess />;
