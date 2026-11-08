@@ -9,6 +9,9 @@ import { costCentersApi, type CostCenter } from '../api/costCenters';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
+import { translateApiError } from '../utils/apiError';
+import { runBulkDelete } from '../utils/bulkDelete';
+import { formatIsoDate } from '../utils/purchaseDeliveries';
 
 const STATUS_TONE: Record<ProjectStatus, 'default' | 'success' | 'warning' | 'danger'> = {
   proposta: 'default',
@@ -31,16 +34,17 @@ export function ProjectsPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [collaborators, setCollaborators] = useState<CollaboratorSafe[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = () =>
-    Promise.all([projectsApi.list(), clientsApi.list(), costCentersApi.list(), collaboratorsApi.list()]).then(
-      ([p, c, cc, col]) => {
+    Promise.all([projectsApi.list(), clientsApi.list(), costCentersApi.list(), collaboratorsApi.list()])
+      .then(([p, c, cc, col]) => {
         setProjects(p);
         setClients(c);
         setCostCenters(cc);
         setCollaborators(col);
-      },
-    );
+      })
+      .catch((err) => setError(translateApiError(err, 'Erro ao carregar projetos.')));
 
   useEffect(() => {
     void refresh();
@@ -50,11 +54,44 @@ export function ProjectsPage() {
   const costCenterName = (id: string) => costCenters.find((c) => c.id === id)?.name ?? '—';
   const collaboratorName = (id: string) => collaborators.find((c) => c.id === id)?.fullName ?? '—';
 
+  const changeStatus = async (project: Project, status: ProjectStatus) => {
+    setError(null);
+    try {
+      await projectsApi.updateStatus(project.id, status);
+    } catch (err) {
+      setError(translateApiError(err, 'Erro ao mudar o status do projeto.'));
+    }
+    await refresh();
+  };
+
   const columns: ColumnDef<Project>[] = [
-    { key: 'code', header: 'Código', render: (p) => p.code, filterable: true, width: '120px' },
+    { key: 'code', header: 'Código', render: (p) => p.code, filterable: true, width: '160px' },
+    {
+      key: 'name',
+      header: 'Nome',
+      render: (p) =>
+        hasPermission('project:update') ? (
+          <button
+            onClick={() => navigate(`/projects/${p.id}/edit`)}
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', textAlign: 'left' }}
+          >
+            {p.name ?? 'Sem nome — editar'}
+          </button>
+        ) : (
+          (p.name ?? '—')
+        ),
+      filterable: true,
+      filterValue: (p) => p.name ?? '',
+    },
     { key: 'client', header: 'Cliente', render: (p) => clientName(p.clientId), filterable: true, filterValue: (p) => clientName(p.clientId) },
     { key: 'costCenter', header: 'Centro de custo', render: (p) => costCenterName(p.costCenterId) },
     { key: 'responsible', header: 'Responsável', render: (p) => collaboratorName(p.responsibleCollaboratorId) },
+    {
+      key: 'prazo',
+      header: 'Prazo previsto',
+      render: (p) =>
+        p.plannedStartDate || p.plannedEndDate ? `${formatIsoDate(p.plannedStartDate)} a ${formatIsoDate(p.plannedEndDate)}` : '—',
+    },
     {
       key: 'status',
       header: 'Status',
@@ -62,10 +99,7 @@ export function ProjectsPage() {
         hasPermission('project:update') ? (
           <select
             value={p.status}
-            onChange={async (e) => {
-              await projectsApi.updateStatus(p.id, e.target.value as ProjectStatus);
-              await refresh();
-            }}
+            onChange={(e) => void changeStatus(p, e.target.value as ProjectStatus)}
             style={{ fontSize: 12, padding: '3px 6px' }}
           >
             {Object.entries(STATUS_LABEL).map(([value, label]) => (
@@ -82,10 +116,29 @@ export function ProjectsPage() {
     },
   ];
 
+  if (hasPermission('project:delete')) {
+    columns.push({
+      key: 'actions',
+      header: '',
+      width: '90px',
+      render: (p) =>
+        p.status === 'proposta' ? (
+          <button
+            onClick={async () => setError(await runBulkDelete([p], (r) => projectsApi.remove(r.id), refresh))}
+            title="Só propostas sem requisições podem ser excluídas; depois disso, encerre o projeto."
+            style={{ fontSize: 12, padding: '3px 8px', border: '1px solid var(--border)', borderRadius: 6, background: 'var(--danger-soft)', color: 'var(--danger)' }}
+          >
+            Excluir
+          </button>
+        ) : null,
+    });
+  }
+
   const kpiCounts = projects.reduce<Record<string, number>>((acc, p) => {
     acc[p.status] = (acc[p.status] ?? 0) + 1;
     return acc;
   }, {});
+  const withoutName = projects.filter((p) => !p.name).length;
 
   return (
     <AppLayout breadcrumb={['Axis', 'Projetos']}>
@@ -94,7 +147,10 @@ export function ProjectsPage() {
         <KpiCard label="Em execução" value={kpiCounts.em_execucao ?? 0} tone="success" />
         <KpiCard label="Propostas" value={kpiCounts.proposta ?? 0} />
         <KpiCard label="Encerrados" value={kpiCounts.encerrado ?? 0} tone="danger" />
+        {withoutName > 0 && <KpiCard label="Sem nome" value={withoutName} tone="warning" />}
       </KpiRow>
+
+      {error && <p style={{ color: 'var(--danger)', fontSize: 13, marginBottom: 10 }}>{error}</p>}
 
       <div style={{ marginBottom: 12 }}>
         <button

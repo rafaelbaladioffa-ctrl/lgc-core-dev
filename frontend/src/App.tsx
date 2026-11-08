@@ -270,6 +270,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/projects/:id/edit"
+        element={
+          <PrivateRoute permission="project:update">
+            <ProjectFormPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
         path="/projects/dashboard"
         element={
           <PrivateRoute permission="project:read">

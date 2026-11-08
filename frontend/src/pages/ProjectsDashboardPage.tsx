@@ -89,7 +89,7 @@ export function ProjectsDashboardPage() {
           <tbody>
             {projects.map((p) => (
               <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '8px 14px' }}>{p.code}</td>
+                <td style={{ padding: '8px 14px' }}>{p.name ? `${p.code} — ${p.name}` : p.code}</td>
                 <td style={{ padding: '8px 14px' }}>{clientName(p.clientId)}</td>
                 <td style={{ padding: '8px 14px' }}>{costCenterName(p.costCenterId)}</td>
                 <td style={{ padding: '8px 14px' }}>{STATUS_LABELS[p.status]}</td>

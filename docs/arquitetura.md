@@ -109,7 +109,8 @@ satélites assinantes com envelope `{event_id, event_type, occurred_at, payload}
 satélite deduplica por `event_id`.
 
 Eventos emitidos hoje: `client.created|updated`, `collaborator.created|updated|offboarded`,
-`project.created|status_changed`, `request.submitted|status_changed|completed`,
+`project.created|updated|status_changed|deleted`, `cost_center.created|updated`,
+`request.submitted|status_changed|completed`,
 `sla.warning|breached`. **Não** são emitidos: `user.*`, `material_request.*`, `purchase_order.*`.
 
 **Consulta síncrona (satélite → Core).** `GET /api/v1/integration/{collaborators,users,clients,projects,sectors,cost-centers}`

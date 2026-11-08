@@ -343,6 +343,10 @@ model Client {
 model Project {
   id                        String   @id @default(uuid())
   code                      String   @unique
+  /// Obrigatório na API para criar e editar; projetos anteriores a 2026-11 podem estar sem nome.
+  name                      String?
+  plannedStartDate          DateTime? @map("planned_start_date") @db.Date
+  plannedEndDate            DateTime? @map("planned_end_date") @db.Date
   clientId                  String   @map("client_id")
   client                    Client   @relation(fields: [clientId], references: [id])
   costCenterId               String   @map("cost_center_id")

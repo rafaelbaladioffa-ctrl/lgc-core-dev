@@ -65,7 +65,7 @@ Resumo: 39 rotas; nenhuma com teste de tela; 6 com tratamento de erro completo; 
 3. **`/projects/dashboard` só via botão** em `/projects`.
 4. **Busca da topbar sem lógica:** o `<input placeholder="Buscar no Axis...">` do `AppLayout` não tem `onChange` nem ação.
 5. **Submenu morto:** `AppLayout` tem lógica para `children` de item de menu sob `/requests`, mas nenhum item de `NAV_ITEMS` define `children`.
-6. **Sem edição de projeto:** não existe `/projects/:id/edit`; o backend tem `PUT /projects/:id` e `DELETE /projects/:id` sem tela.
+6. ~~**Sem edição de projeto**~~ — resolvido em 2026-11-07: `/projects/:id/edit` e exclusão de propostas na lista.
 7. **Sem edição de satélite:** só `/integrations/new`; não há rota para editar/desativar satélite.
 8. **Certificações sem tela própria:** só são criadas dentro do formulário de colaborador; editar/excluir não existe na UI.
 9. **Notificação de certificação leva a rota que o usuário pode não ter:** o dropdown aparece para quem tem `certification:read` (ex.: `tecnico`) e navega para `/collaborators/:id/edit`, que exige `collaborator:update` — o usuário é jogado para `/dashboard` sem explicação.
