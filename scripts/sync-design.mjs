@@ -12,6 +12,9 @@ const satelites = ['lgc-dev-logistica/frontend', 'lgc-dev-financeiro/frontend'];
 const estilos = ['axis-tokens.css', 'axis-shell.css'];
 const icones = ['favicon-192.png', 'favicon-512.png', 'apple-touch-icon.png'];
 
+// Arquivos de texto (CSS, SVG) são comparados em LF: com core.autocrlf o Git pode gravá-los com CRLF no Windows.
+const lf = (buf) => Buffer.from(buf.toString('utf8').replaceAll('\r\n', '\n'), 'utf8');
+
 // Lista de { destino, conteudo (Buffer) } esperada.
 const esperados = [];
 for (const sat of satelites) {
@@ -24,7 +27,7 @@ for (const sat of satelites) {
   }
   const marca = join(origem, 'public/brand-industrial');
   for (const arq of readdirSync(marca).filter((f) => f.endsWith('.svg'))) {
-    esperados.push({ destino: join(base, 'public/brand-industrial', arq), conteudo: readFileSync(join(marca, arq)) });
+    esperados.push({ destino: join(base, 'public/brand-industrial', arq), conteudo: lf(readFileSync(join(marca, arq))) });
   }
   for (const arq of icones) {
     const fonte = join(origem, 'public', arq);
@@ -37,7 +40,7 @@ const rel = (p) => p.slice(raiz.length + 1).replaceAll(String.fromCharCode(92), 
 const divergentes = [];
 for (const { destino, conteudo } of esperados) {
   const lido = existsSync(destino) ? readFileSync(destino) : null;
-  const atual = lido && destino.endsWith('.css') ? Buffer.from(lido.toString('utf8').replaceAll('\r\n', '\n'), 'utf8') : lido;
+  const atual = lido && /\.(css|svg)$/.test(destino) ? lf(lido) : lido;
   if (atual && atual.equals(conteudo)) continue;
   divergentes.push(`${atual ? 'divergente' : 'ausente'}: ${rel(destino)}`);
   if (!checar) {
