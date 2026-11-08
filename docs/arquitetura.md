@@ -128,7 +128,32 @@ Financeiro devolve a cotação do projeto (Bid e equipe orçada), só para o sat
 `POST /integration/satellites/:id/test-webhook`; `POST /integration/satellites/:id/launch` gera URL
 com `?axisToken=` (JWT de 90 s); `GET /integration/outbox` para acompanhamento.
 
-**Entrada (satélite → Core).** Não existe endpoint de recebimento de eventos de satélite.
+**Entrada (satélite → Core).** `POST /api/v1/integration/inbound`, sem JWT
+(`backend/src/integration/inbound`). O satélite configura `AXIS_EVENTS_URL` com essa URL e
+`AXIS_OUTBOUND_SECRET` com o segredo HMAC que o Core devolveu **uma única vez** em
+`POST /integration/satellites`; o outbox dele envia o envelope
+`{event_id, event_type, occurred_at, correlation_id, source, payload}` com `Idempotency-Key` e a
+assinatura `sha256=<hmac-sha256 do corpo bruto>` em `X-Logistica-Signature`, `X-Financeiro-Signature`
+ou `X-Field-Signature`.
+- *Autenticação.* O Core refaz o HMAC do corpo bruto (`rawBody`) com o segredo de cada satélite ativo e
+  compara em tempo constante (`timingSafeEqual`); quem reproduz a assinatura é o satélite
+  identificado. Os outbox atuais **não** mandam a API key; se vier `Authorization: Bearer <api_key>`, a
+  chave tem que ser válida e a assinatura é conferida só contra o segredo daquele satélite. Assinatura
+  ausente, malformada ou errada, satélite inativo ou API key inválida → `401`. Sem
+  `AXIS_OUTBOUND_SECRET` o satélite não assina e o Core recusa: o segredo passa a ser obrigatório.
+- *Deduplicação.* Tabela `integration_inbox`, única por `(satellite_id, event_id)`; `event_id` é o do
+  corpo (ou o `Idempotency-Key`/`X-Event-Id`; se os dois vierem e divergirem, `400`).
+- *Despacho.* Registro de handlers por `event_type` (`InboundEventHandler`, token
+  `INBOUND_EVENT_HANDLERS`). O handler roda na **mesma transação** que grava a linha da inbox. Hoje o
+  registro está **vazio**: todo evento é guardado como `ignored` e responde `202` (os handlers de
+  negócio entram no PT-09 do plano de projeto aprovado).
+- *Resultado.* `processed` → `200`; `ignored` (sem handler) → `202`; repetido já `processed`/`ignored` →
+  mesma resposta, sem reprocessar (`duplicate: true`); handler lançou → efeito desfeito, linha `failed`
+  com a mensagem e `500` (o satélite reenvia; o reenvio de um `failed` é reprocessado na mesma linha).
+- *Consulta.* `GET /integration/inbox` (filtros `satelliteId`, `status`, `eventType`, paginado) e
+  `GET /integration/inbox/:id` (com o payload), ambos com `integration:read`; a tela Integrações tem a
+  aba "Mensagens recebidas".
+- *Limites.* 600 mensagens por minuto por satélite; corpo até 50 MB (o mesmo `body-parser` do resto).
 
 ## 7. Implantação
 

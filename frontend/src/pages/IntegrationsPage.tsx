@@ -9,7 +9,8 @@ import { outboxApi, type OutboxEvent, type OutboxEventDetail, type OutboxStatus 
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { formatDateTime } from '../utils/formatDate';
-import { translateApiError } from '../utils/apiError';
+import { extractApiMessages, translateApiError } from '../utils/apiError';
+import { InboundMessagesPanel } from '../components/InboundMessagesPanel';
 import '../styles/integrations.css';
 
 const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = { pending: 'Pendente', delivered: 'Entregue', failed: 'Falhou' };
@@ -19,10 +20,17 @@ const OUTBOX_STATUS_TONE: Record<OutboxStatus, 'default' | 'success' | 'warning'
   failed: 'danger',
 };
 
+const TABS = [
+  { key: 'satellites', label: 'Satélites' },
+  { key: 'outbox', label: 'Eventos (Outbox)' },
+  { key: 'inbox', label: 'Mensagens recebidas' },
+] as const;
+
 export function IntegrationsPage() {
   const { hasPermission } = useAuth();
   const navigate = useNavigate();
-  const [tab, setTab] = useState<'satellites' | 'outbox'>('satellites');
+  const [tab, setTab] = useState<'satellites' | 'outbox' | 'inbox'>('satellites');
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [satellites, setSatellites] = useState<Satellite[]>([]);
   const [events, setEvents] = useState<OutboxEvent[]>([]);
   const [statusFilter, setStatusFilter] = useState<OutboxStatus | ''>('');
@@ -46,7 +54,10 @@ export function IntegrationsPage() {
   };
 
   useEffect(() => {
-    void integrationApi.list().then(setSatellites);
+    integrationApi
+      .list()
+      .then(setSatellites)
+      .catch((err) => setLoadError(extractApiMessages(err, 'Não foi possível carregar os satélites.')[0]));
   }, []);
 
   // Abre a aba ANTES do fetch (gesto do usuário síncrono) pra não ser bloqueado como pop-up —
@@ -67,7 +78,13 @@ export function IntegrationsPage() {
 
   useEffect(() => {
     if (tab !== 'outbox') return;
-    void outboxApi.list({ status: statusFilter || undefined, perPage: 100 }).then((r) => setEvents(r.data));
+    outboxApi
+      .list({ status: statusFilter || undefined, perPage: 100 })
+      .then((r) => {
+        setEvents(r.data);
+        setLoadError(null);
+      })
+      .catch((err) => setLoadError(extractApiMessages(err, 'Não foi possível carregar os eventos enviados.')[0]));
   }, [tab, statusFilter]);
 
   const satelliteColumns: ColumnDef<Satellite>[] = [
@@ -156,33 +173,29 @@ export function IntegrationsPage() {
       </KpiRow>
 
       <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
-        <button
-          onClick={() => setTab('satellites')}
-          style={{
-            padding: '6px 14px',
-            fontSize: 13,
-            borderRadius: 6,
-            border: '1px solid var(--border)',
-            background: tab === 'satellites' ? 'var(--accent-soft)' : 'var(--bg-elevated)',
-            color: tab === 'satellites' ? 'var(--accent)' : 'var(--text)',
-          }}
-        >
-          Satélites
-        </button>
-        <button
-          onClick={() => setTab('outbox')}
-          style={{
-            padding: '6px 14px',
-            fontSize: 13,
-            borderRadius: 6,
-            border: '1px solid var(--border)',
-            background: tab === 'outbox' ? 'var(--accent-soft)' : 'var(--bg-elevated)',
-            color: tab === 'outbox' ? 'var(--accent)' : 'var(--text)',
-          }}
-        >
-          Eventos (Outbox)
-        </button>
+        {TABS.map(({ key, label }) => (
+          <button
+            key={key}
+            onClick={() => setTab(key)}
+            style={{
+              padding: '6px 14px',
+              fontSize: 13,
+              borderRadius: 6,
+              border: '1px solid var(--border)',
+              background: tab === key ? 'var(--accent-soft)' : 'var(--bg-elevated)',
+              color: tab === key ? 'var(--accent)' : 'var(--text)',
+            }}
+          >
+            {label}
+          </button>
+        ))}
       </div>
+
+      {loadError && (
+        <p role="alert" className="integration-notice integration-notice--error">
+          {loadError}
+        </p>
+      )}
 
       {resyncMessage && (
         <p role={resyncMessage.tone === 'error' ? 'alert' : 'status'} className={resyncMessage.tone === 'error' ? 'integration-notice integration-notice--error' : 'integration-notice'}>
@@ -208,6 +221,8 @@ export function IntegrationsPage() {
             )
           }
         />
+      ) : tab === 'inbox' ? (
+        <InboundMessagesPanel satellites={satellites} />
       ) : (
         <>
           <div style={{ marginBottom: 10 }}>

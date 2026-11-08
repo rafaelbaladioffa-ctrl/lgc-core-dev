@@ -5,16 +5,40 @@ import { OutboxService } from './outbox.service.js';
 import { OutboxDispatcherService } from './outbox-dispatcher.service.js';
 import { SatellitesService } from './satellites.service.js';
 import { SatelliteApiKeyGuard } from './guards/satellite-api-key.guard.js';
+import { SatelliteInboundGuard } from './guards/satellite-inbound.guard.js';
 import { SatelliteThrottlerGuard } from './guards/satellite-throttler.guard.js';
 import { IntegrationQueryController } from './integration-query.controller.js';
 import { IntegrationAdminController } from './integration-admin.controller.js';
 import { IntegrationOutboxController } from './integration-outbox.controller.js';
+import { InboundEventsController } from './inbound/inbound-events.controller.js';
+import { InboxAdminController } from './inbound/inbox-admin.controller.js';
+import { InboundEventsService } from './inbound/inbound-events.service.js';
+import { InboundHandlerRegistry } from './inbound/inbound-handler.registry.js';
+import { INBOUND_EVENT_HANDLERS } from './inbound/inbound-handler.js';
 import { AuthModule } from '../auth/auth.module.js';
 
 @Module({
   imports: [ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]), AuthModule],
-  controllers: [IntegrationQueryController, IntegrationAdminController, IntegrationOutboxController],
-  providers: [MasterDataResyncService, OutboxService, OutboxDispatcherService, SatellitesService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
+  controllers: [
+    IntegrationQueryController,
+    IntegrationAdminController,
+    IntegrationOutboxController,
+    InboundEventsController,
+    InboxAdminController,
+  ],
+  providers: [
+    MasterDataResyncService,
+    OutboxService,
+    OutboxDispatcherService,
+    SatellitesService,
+    SatelliteApiKeyGuard,
+    SatelliteInboundGuard,
+    SatelliteThrottlerGuard,
+    InboundEventsService,
+    InboundHandlerRegistry,
+    // Handlers de evento de satélite: começa vazio (PT-02); os de negócio entram no PT-09.
+    { provide: INBOUND_EVENT_HANDLERS, useValue: [] },
+  ],
   exports: [OutboxService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
 })
 export class IntegrationModule {}

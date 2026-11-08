@@ -27,7 +27,10 @@ function resolveAllowedOrigins(): string[] {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
+    // O receptor de eventos dos satélites confere o HMAC do corpo BRUTO (integration/inbound).
+    rawBody: true,
+  });
   app.use(helmet());
   app.enableCors({ origin: resolveAllowedOrigins() });
   app.useBodyParser('json', { limit: JSON_BODY_LIMIT_BYTES });

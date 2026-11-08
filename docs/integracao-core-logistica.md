@@ -14,7 +14,7 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
 | Launcher (`axisToken` de 90 s) | Core → Logística | Funciona |
 | Catálogo de compra e disponibilidade | Navegador do Core → Logística | Funciona via nginx; sem proxy no `vite dev` |
 | Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística já entende `material_request.*` com destino, `site.*` e `cost_center.*`; **o Core ainda não emite** `material_request.*` nem `site.*` (§3) |
-| Eventos de saída da Logística | Logística → Core | Formato fixado (§4); **ainda não existe receptor no Core** |
+| Eventos de saída da Logística | Logística → Core | Formato fixado (§4.1); receptor `POST /integration/inbound` no Core (§4); sem handlers de negócio ainda (PT-09): tudo é guardado como `ignored` |
 | API de consulta por API key | Logística → Core | Disponível no Core; **a Logística não usa** |
 | Consulta de materiais e custo por API key | Core e Financeiro → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); **nenhum dos dois a chama ainda** |
 
@@ -123,11 +123,28 @@ Regras do lado da Logística (detalhe na [especificação §12.2.1](../lgc-dev-l
 
 ## 4. Eventos Logística → Core
 
-O outbox da Logística envia para `AXIS_EVENTS_URL` com `X-Logistica-Signature` e `Idempotency-Key`
-(`outbox-dispatcher.service.ts`), no envelope `{ event_id, event_type, occurred_at, correlation_id, source: "logistica", payload }`.
-**O Core não tem endpoint de entrada** (PT-02 do plano); com `AXIS_EVENTS_URL` vazio, as mensagens ficam `PENDING`.
+O outbox da Logística envia para `AXIS_EVENTS_URL` o envelope
+`{event_id, event_type, occurred_at, correlation_id, source: 'logistica', payload}` com
+`Idempotency-Key`, `X-Event-Id` e `X-Logistica-Signature: sha256=<hmac do corpo>`
+(`outbox-dispatcher.service.ts`). Com `AXIS_EVENTS_URL` vazio, as mensagens ficam `PENDING`.
 Eventos produzidos: `receipt.divergent`, `inventory.variance_detected`, `replenishment.suggested`, `alert.raised`, entre outros, e os
 da ordem de atendimento abaixo, que o Core acompanhará (PT-09).
+
+**Receptor no Core** (`POST /api/v1/integration/inbound`, detalhes em
+[arquitetura.md §6](arquitetura.md#6-integração-com-satélites)): valida o HMAC do corpo bruto com o
+segredo do satélite, deduplica por `(satélite, event_id)` na tabela `integration_inbox` e despacha para
+o handler do `event_type`. Sem handler: `202` e a mensagem fica `ignored`; erro do handler: `500` e
+`failed` (a Logística reenvia pelo backoff dela).
+
+Para ligar, na Logística:
+
+| Variável | Valor |
+|---|---|
+| `AXIS_EVENTS_URL` | `https://<host do Core>/api/v1/integration/inbound` |
+| `AXIS_OUTBOUND_SECRET` | segredo HMAC devolvido por `POST /integration/satellites` ao registrar a Logística (**obrigatório**: sem ele o outbox não assina e o Core responde `401`) |
+
+A Logística precisa estar registrada e ativa no Core. As mensagens `PENDING` acumuladas são entregues
+no ciclo seguinte do outbox, em ordem de criação.
 
 ### 4.1 Eventos da ordem de envio (formato exato)
 
@@ -189,8 +206,9 @@ disponível publicável. O custo médio é móvel e recalculado a cada recebimen
 1. Endurecer o SSO (§1) — risco de segurança.
 2. Definir e implementar o contrato de requisição de material: o Core emitir `material_request.*` (a Logística já o aceita, §3.1;
    falta o lado do Core, PT-06) e `user.disabled`.
-3. Criar o receptor de eventos da Logística no Core (`POST /integration/inbound`, HMAC, idempotência; PT-02) e os handlers dos
-   eventos da §4.1 (PT-09).
+3. ~~Criar o receptor de eventos da Logística no Core~~ (feito: `POST /integration/inbound`, HMAC,
+   idempotência, §4). Falta ligar `AXIS_EVENTS_URL`/`AXIS_OUTBOUND_SECRET` e escrever os handlers de
+   negócio dos eventos da §4.1 (PT-09).
 4. Validar preço e material no servidor: a rota da §4.2 já existe na Logística; falta o Core chamá-la com a chave de serviço (PT-06).
 5. Proteger custo no `purchase-catalog` (`material:read_cost`) e paginar.
 6. ~~Remover `SEED_REVISED_CATALOG` do runtime~~ (feito: o filtro saiu da listagem e do

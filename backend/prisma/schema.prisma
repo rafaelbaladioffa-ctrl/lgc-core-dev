@@ -85,6 +85,12 @@ enum OutboxStatus {
   failed
 }
 
+enum InboxStatus {
+  processed
+  ignored
+  failed
+}
+
 enum SatelliteStatus {
   active
   inactive
@@ -934,10 +940,31 @@ model IntegrationSatellite {
   status        SatelliteStatus @default(active)
   subscriptions IntegrationSubscription[]
   projectQuotes ProjectQuote[]
+  inbox         IntegrationInbox[]
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
   @@map("integration_satellites")
+}
+
+/// Eventos recebidos dos satélites (POST /integration/inbound). `(satellite_id, event_id)` único:
+/// é a chave de deduplicação — um reenvio de evento já processado ou ignorado não reprocessa.
+model IntegrationInbox {
+  id          String      @id @default(uuid())
+  satelliteId String      @map("satellite_id")
+  satellite   IntegrationSatellite @relation(fields: [satelliteId], references: [id], onDelete: Cascade)
+  eventId     String      @map("event_id")
+  eventType   String      @map("event_type")
+  payload     Json
+  status      InboxStatus
+  error       String?
+  receivedAt  DateTime    @default(now()) @map("received_at")
+  processedAt DateTime?   @map("processed_at")
+
+  @@unique([satelliteId, eventId])
+  @@index([receivedAt])
+  @@index([status, receivedAt])
+  @@map("integration_inbox")
 }
 
 model IntegrationSubscription {
