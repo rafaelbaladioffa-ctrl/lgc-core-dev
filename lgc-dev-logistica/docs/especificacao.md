@@ -787,17 +787,24 @@ Para o total entregue de uma expedição parcial, some os `items` dos eventos `d
 entrega: o evento fica `PENDING` e é reenviado (seção 12.4). O consumo em R$ continua nos eventos `stock.movement.posted/reversed` (com
 `project_id` e `cost_center_id`) e na leitura da seção 12.3.1.
 
-### 12.3.3 Consulta de materiais para o Core (por chave)
+### 12.3.3 Consulta de materiais para o Core e o Financeiro (por chave)
 
-`GET /api/v1/integration/materials?codes=A,B` com `X-Api-Key` (mesma `INTEGRATION_API_KEY` e mesmo guard da seção 12.3.1; fora do JWT).
-O Core usa para estimar o valor da requisição de envio e mostrar a disponibilidade; nunca grava custo.
+`GET /api/v1/integration/materials` com `X-Api-Key` (mesma `INTEGRATION_API_KEY` e mesmo guard da seção 12.3.1; fora do JWT).
+O Core usa para estimar o valor da requisição de envio e mostrar a disponibilidade; o Financeiro, para escolher o material da cotação.
+Ninguém grava custo por aqui. Dois modos, **mutuamente exclusivos**:
 
-- `codes`: de 1 a 200 códigos (`Material.code`) separados por vírgula (aceita `codes` repetido; espaços, vazios e repetidos são descartados;
-  cada código tem até 40 caracteres). Sem códigos, mais de 200 ou parâmetro desconhecido: **400**. Sem a chave ou com chave errada: **401**.
-  Chave não configurada no servidor: **503**.
-- `warehouse_code` (opcional): almoxarifado da disponibilidade; inexistente é 400. Sem ele vale `DEFAULT_WAREHOUSE_CODE` e, se não houver
-  (ou não existir), a soma de todos os almoxarifados.
-- Resposta **200** (itens na ordem pedida):
+- **`codes=A,B`** — de 1 a 200 códigos (`Material.code`) separados por vírgula (aceita `codes` repetido; espaços, vazios e repetidos são
+  descartados; cada código tem até 40 caracteres). Itens na ordem pedida. Código inexistente **ou de material inativo** vai para `notFound`.
+- **`search=texto`** — busca de materiais pelo nome: mínimo de 2 caracteres depois do `trim` (máximo 80); casa por "contém", sem diferenciar
+  maiúsculas, em `code` **ou** `shortDescription`. Ordem: código igual ao termo, depois os que começam com o termo (no código ou na
+  descrição), depois o resto; em cada grupo, por `code`. `limit` (opcional): padrão 20, mínimo 1, acima de 50 vale 50 (inteiro inválido é 400);
+  é ignorado com `codes`. `notFound` vem sempre vazio.
+- **Só materiais com status `ATIVO`** aparecem, nos dois modos.
+- `warehouse_code` (opcional, vale nos dois modos): almoxarifado da disponibilidade; inexistente é 400. Sem ele vale `DEFAULT_WAREHOUSE_CODE` e,
+  se não houver (ou não existir), a soma de todos os almoxarifados.
+- **400** (mensagens em pt-BR): nenhum dos dois (`codes` e `search`), os dois juntos, `search` com menos de 2 caracteres, `codes` vazio ou com mais
+  de 200, `limit` inválido, parâmetro desconhecido. **401**: sem a chave ou com chave errada. **503**: chave não configurada no servidor.
+- Resposta **200**, o mesmo formato nos dois modos:
 
 ```json
 {
@@ -810,8 +817,8 @@ O Core usa para estimar o valor da requisição de envio e mostrar a disponibili
 ```
 
 `averageCost` e `lastCost` são strings decimais com 4 casas (ou `null` se o material ainda não tem custo); `available` é o disponível
-publicável (seção 4: condição `DISPONIVEL`, lote liberado e não vencido, menos o reservado); `active` é falso para material inativo (que a
-Logística não aceita em ordem nova). Código inexistente vem só em `notFound`.
+publicável (seção 4: condição `DISPONIVEL`, lote liberado e não vencido, menos o reservado); `active` é sempre `true` (só ativos são devolvidos;
+o campo fica por compatibilidade).
 
 ### 12.4 Consistência e falhas
 

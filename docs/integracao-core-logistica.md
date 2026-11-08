@@ -16,7 +16,7 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
 | Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística já entende `material_request.*` com destino, `site.*` e `cost_center.*`; **o Core ainda não emite** `material_request.*` nem `site.*` (§3) |
 | Eventos de saída da Logística | Logística → Core | Formato fixado (§4); **ainda não existe receptor no Core** |
 | API de consulta por API key | Logística → Core | Disponível no Core; **a Logística não usa** |
-| Consulta de materiais e custo por API key | Core → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); **o Core ainda não a chama** |
+| Consulta de materiais e custo por API key | Core e Financeiro → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); **nenhum dos dois a chama ainda** |
 
 ## 1. Identidade e sessão
 
@@ -162,10 +162,17 @@ Mapeamento sugerido para o Core (PT-09): `fulfillment.created` → requisição 
 somando os `items` por `shipment_id`; `delivery.refused` → comentário com `reason`. O custo em R$ da entrega vem em
 `stock.movement.posted` (`project_id`, `cost_center_id`) e, no Financeiro, por `consumption-by-cost-center`.
 
-### 4.2 Consulta de materiais e custo (Core → Logística, por chave)
+### 4.2 Consulta de materiais e custo (Core e Financeiro → Logística, por chave)
 
-`GET /api/v1/integration/materials?codes=A,B` com `X-Api-Key` (`INTEGRATION_API_KEY` da Logística), 1 a 200 códigos, `warehouse_code`
-opcional. Resposta `200`:
+`GET /api/v1/integration/materials` com `X-Api-Key` (`INTEGRATION_API_KEY` da Logística) em um de dois modos, **mutuamente exclusivos**
+(os dois juntos ou nenhum: `400`):
+
+- `codes=A,B`: 1 a 200 códigos; devolve na ordem pedida; código inexistente ou de material inativo vai para `notFound`.
+- `search=texto`: mínimo de 2 caracteres depois do `trim`; "contém", sem diferenciar maiúsculas, em `code` ou `shortDescription`; ordem:
+  código igual ao termo, depois os que começam com o termo, depois o resto, por `code`; `limit` padrão 20, máximo 50 (acima disso vale 50);
+  `notFound` sempre vazio. Usado pelo seletor de materiais da cotação do Financeiro.
+
+Só materiais `ATIVO` aparecem. `warehouse_code` opcional vale nos dois modos. Resposta `200`, igual nos dois:
 
 ```json
 { "items": [ { "id": "<uuid>", "code": "RED-CAB-0123", "shortDescription": "Cabo óptico 12F", "unit": "M",
@@ -173,9 +180,9 @@ opcional. Resposta `200`:
   "notFound": ["COD-DESCONHECIDO"] }
 ```
 
-Sem chave ou chave errada `401`; sem `INTEGRATION_API_KEY` no servidor `503`; `codes` ausente, vazio ou com mais de 200 `400`. Custos são
-strings com 4 casas (ou `null`); `available` é o disponível publicável. O custo médio é móvel e recalculado a cada recebimento
-([especificação §12.5](../lgc-dev-logistica/docs/especificacao.md)); o Core usa o valor só para estimar a requisição.
+Sem chave ou chave errada `401`; sem `INTEGRATION_API_KEY` no servidor `503`. Custos são strings com 4 casas (ou `null`); `available` é o
+disponível publicável. O custo médio é móvel e recalculado a cada recebimento
+([especificação §12.5](../lgc-dev-logistica/docs/especificacao.md)); o Core usa o valor só para estimar a requisição e o Financeiro não o lê.
 
 ## 5. Próximos passos (ordem sugerida)
 

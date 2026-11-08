@@ -76,7 +76,7 @@ describe('GET /integration/materials', () => {
 
   describe('400', () => {
     it.each([
-      ['sem codes', ''],
+      ['sem codes nem search', ''],
       ['codes vazio', '?codes='],
       ['só vírgulas e espaços', '?codes=,%20,'],
       ['campo extra', '?codes=A&foo=1'],
@@ -126,16 +126,17 @@ describe('GET /integration/materials', () => {
         ],
         notFound: ['NAO-TEM'],
       });
-      expect(findMany.mock.calls.at(-1)![0].where).toEqual({ code: { in: ['EPI-CAP-0001', 'NAO-TEM', 'RED-CAB-0123'] } });
+      expect(findMany.mock.calls.at(-1)![0].where).toEqual({ code: { in: ['EPI-CAP-0001', 'NAO-TEM', 'RED-CAB-0123'] }, status: 'ATIVO' });
     });
 
-    it('tira espaços e repetidos e aceita codes repetido na query; material inativo vem com active=false', async () => {
-      findMany.mockResolvedValueOnce([mat('A', { status: 'INATIVO' }), mat('B')]);
-      compute.mockResolvedValueOnce([{ material_id: 'id-A', available: '3' }]);
+    it('tira espaços e repetidos e aceita codes repetido na query; só materiais ATIVO (inativo cai em notFound)', async () => {
+      findMany.mockResolvedValueOnce([mat('B')]); // o banco já filtra status ATIVO: A (inativo) não volta
+      compute.mockResolvedValueOnce([{ material_id: 'id-B', available: '3' }]);
       const res = await get('?codes=A,%20B%20,A&codes=B');
       expect(res.status).toBe(200);
-      expect(findMany.mock.calls.at(-1)![0].where).toEqual({ code: { in: ['A', 'B'] } });
-      expect(res.body.items.map((i: { code: string; active: boolean; available: string }) => [i.code, i.active, i.available])).toEqual([['A', false, '3'], ['B', true, '0']]);
+      expect(findMany.mock.calls.at(-1)![0].where).toEqual({ code: { in: ['A', 'B'] }, status: 'ATIVO' });
+      expect(res.body.items.map((i: { code: string; active: boolean; available: string }) => [i.code, i.active, i.available])).toEqual([['B', true, '3']]);
+      expect(res.body.notFound).toEqual(['A']);
     });
 
     it('todos desconhecidos: itens vazios e notFound com todos, sem consultar disponibilidade de ninguém', async () => {
@@ -168,6 +169,123 @@ describe('GET /integration/materials', () => {
 
       await get('?codes=A');
       expect(compute.mock.calls.at(-1)![1]).toEqual({ warehouseId: undefined });
+    });
+  });
+
+  describe('search', () => {
+    type Str = { equals?: string; startsWith?: string; contains?: string; mode?: string };
+    type Where = { status?: string; id?: { notIn: string[] }; code?: Str; shortDescription?: Str; OR?: Where[] };
+    const catalog = [
+      mat('CAB-001', { shortDescription: 'Cabo óptico 12F' }),
+      mat('CAB', { shortDescription: 'Cabo genérico' }),
+      mat('ABC-9', { shortDescription: 'Peça do cabo preto' }),
+      mat('EPI-001', { shortDescription: 'Capacete' }),
+      mat('CAB-002', { shortDescription: 'Cabo inativo', status: 'INATIVO' }),
+      ...Array.from({ length: 60 }, (_, i) => mat(`CBL-${String(i).padStart(3, '0')}`, { shortDescription: `Conector cabo ${i}` })),
+    ];
+    const hit = (v: string, f: Str) => {
+      const a = v.toLowerCase();
+      return (f.equals === undefined || a === f.equals.toLowerCase()) && (f.startsWith === undefined || a.startsWith(f.startsWith.toLowerCase())) && (f.contains === undefined || a.includes(f.contains.toLowerCase()));
+    };
+    const matches = (m: ReturnType<typeof mat>, w: Where): boolean =>
+      (w.status === undefined || m.status === w.status) && (!w.id || !w.id.notIn.includes(m.id)) && (!w.code || hit(m.code, w.code)) &&
+      (!w.shortDescription || hit(m.shortDescription, w.shortDescription)) && (!w.OR || w.OR.some((o) => matches(m, o)));
+
+    beforeAll(() => {
+      findMany.mockReset();
+      findMany.mockImplementation(async ({ where, take, orderBy }: { where: Where; take: number; orderBy: { code: string } }) => {
+        expect(orderBy).toEqual({ code: 'asc' });
+        return catalog.filter((m) => matches(m, where)).sort((a, b) => a.code.localeCompare(b.code)).slice(0, take);
+      });
+      compute.mockReset();
+      compute.mockResolvedValue([]);
+    });
+    afterAll(() => { findMany.mockReset(); compute.mockReset(); });
+
+    const codes = (res: { body: { items: Array<{ code: string }> } }) => res.body.items.map((i) => i.code);
+
+    it.each([
+      ['search de 1 caractere', '?search=c'],
+      ['search só de espaços', '?search=%20%20%20'],
+      ['search vazio', '?search='],
+      ['search de 1 caractere depois do trim', '?search=%20c%20'],
+      ['search e codes juntos', '?search=cabo&codes=A'],
+      ['limit zero', '?search=cabo&limit=0'],
+      ['limit negativo', '?search=cabo&limit=-1'],
+      ['limit que não é número', '?search=cabo&limit=muitos'],
+      ['limit decimal', '?search=cabo&limit=2.5'],
+    ])('400: %s', async (_nome, qs) => {
+      const res = await get(qs);
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBeDefined();
+    });
+
+    it('400 em pt-BR: search curto, search com codes e nenhum dos dois', async () => {
+      expect(JSON.stringify((await get('?search=a')).body.message)).toContain('ao menos 2 caracteres');
+      expect((await get('?search=cabo&codes=A')).body.message).toBe('Informe codes ou search, não os dois.');
+      expect((await get('')).body.message).toContain('Informe codes');
+    });
+
+    it('sem a chave continua 401', async () => {
+      expect((await get('?search=cabo', null)).status).toBe(401);
+    });
+
+    it('casa por descrição e por código, sem diferenciar maiúsculas, e traz notFound vazio', async () => {
+      const res = await get('?search=CABO');
+      expect(res.status).toBe(200);
+      expect(res.body.notFound).toEqual([]);
+      expect(codes(res)).toContain('ABC-9'); // casou só pela descrição ("Peça do cabo preto")
+      expect(codes(await get('?search=epi-0'))).toEqual(['EPI-001']);
+    });
+
+    it('mesmo formato de hoje: id, code, shortDescription, unit, custos, available, active', async () => {
+      compute.mockResolvedValueOnce([{ material_id: 'id-EPI-001', available: '7' }]);
+      const res = await get('?search=capacete');
+      expect(res.body.items).toEqual([{ id: 'id-EPI-001', code: 'EPI-001', shortDescription: 'Capacete', unit: 'M', averageCost: '12.3000', lastCost: '13.0000', available: '7', active: true }]);
+    });
+
+    it('material inativo não aparece', async () => {
+      const res = await get('?search=inativo');
+      expect(res.status).toBe(200);
+      expect(codes(res)).toEqual([]);
+      expect(codes(await get('?search=cab-00'))).toEqual(['CAB-001']); // CAB-002 é inativo
+    });
+
+    it('ordem: código igual ao termo, depois os que começam com o termo, depois o resto, por código', async () => {
+      const list = codes(await get('?search=cab&limit=50'));
+      expect(list.slice(0, 2)).toEqual(['CAB', 'CAB-001']); // igual (sem diferenciar maiúsculas), depois começa com "cab"
+      // ABC-9 só contém "cab" no código e na descrição ("do cabo"): fica no resto, por código, antes de CBL-nnn (que só contêm na descrição)
+      expect(list.indexOf('ABC-9')).toBe(2);
+      expect(list[3]).toBe('CBL-000');
+    });
+
+    it('descrição que começa com o termo vem antes de quem só contém o termo', async () => {
+      // "Cabo genérico" e "Cabo óptico 12F" começam com "cabo"; "Peça do cabo preto" e "Conector cabo n" só contêm
+      const list = codes(await get('?search=cabo&limit=50'));
+      expect(list.slice(0, 2)).toEqual(['CAB', 'CAB-001']);
+      expect(list.indexOf('ABC-9')).toBe(2);
+    });
+
+    it('limit: padrão 20, respeitado e limitado a 50', async () => {
+      expect(codes(await get('?search=cab'))).toHaveLength(20);
+      expect(codes(await get('?search=cab&limit=3'))).toHaveLength(3);
+      expect(codes(await get('?search=cab&limit=1'))).toEqual(['CAB']);
+      expect(codes(await get('?search=cab&limit=50'))).toHaveLength(50);
+      expect(codes(await get('?search=cab&limit=500'))).toHaveLength(50);
+    });
+
+    it('limit é ignorado com codes', async () => {
+      findMany.mockResolvedValueOnce([mat('A')]);
+      const res = await get('?codes=A&limit=1');
+      expect(res.status).toBe(200);
+      expect(codes(res)).toEqual(['A']);
+    });
+
+    it('consulta o banco sempre com status ATIVO e trim no termo', async () => {
+      findMany.mockClear();
+      expect(codes(await get('?search=%20capacete%20'))).toEqual(['EPI-001']);
+      expect(findMany.mock.calls.length).toBeGreaterThan(0);
+      for (const [arg] of findMany.mock.calls) expect(arg.where.status).toBe('ATIVO');
     });
   });
 });
