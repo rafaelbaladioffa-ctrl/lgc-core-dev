@@ -25,6 +25,8 @@ services:
     environment:
       DATABASE_URL: postgresql://axis:axis@postgres:5432/axis?schema=public
       AXIS_LOGISTICA_URL: http://lgc-dev-logistica-logistica-backend-1:3100
+      # Consulta de materiais da Logística ao aprovar projeto (a chave LOGISTICA_API_KEY vem do backend/.env).
+      LOGISTICA_API_URL: http://lgc-dev-logistica-logistica-backend-1:3100/api/v1
     depends_on:
       postgres:
         condition: service_healthy

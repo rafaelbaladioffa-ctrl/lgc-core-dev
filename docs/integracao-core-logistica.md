@@ -13,10 +13,10 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
 | SSO por JWT compartilhado | Core → Logística | Funciona; tem falhas de segurança (§1) |
 | Launcher (`axisToken` de 90 s) | Core → Logística | Funciona |
 | Catálogo de compra e disponibilidade | Navegador do Core → Logística | Funciona via nginx; sem proxy no `vite dev` |
-| Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística já entende `material_request.*` com destino, `site.*` e `cost_center.*`; **o Core ainda não emite** `material_request.*` nem `site.*` (§3) |
+| Webhook de eventos | Core → Logística | Envelope e assinatura batem; a Logística entende `material_request.*` com destino, `site.*` e `cost_center.*`; o Core emite `site.*` e, desde 2026-11-08, `material_request.approved/cancel_requested` do **envio de material para obra** (§3.1); a compra de material ainda não emite `material_request.*` |
 | Eventos de saída da Logística | Logística → Core | Formato fixado (§4.1); receptor `POST /integration/inbound` no Core (§4); sem handlers de negócio ainda (PT-09): tudo é guardado como `ignored` |
 | API de consulta por API key | Logística → Core | Disponível no Core; **a Logística não usa** |
-| Consulta de materiais e custo por API key | Core e Financeiro → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); **nenhum dos dois a chama ainda** |
+| Consulta de materiais e custo por API key | Core e Financeiro → Logística | Disponível na Logística (`GET /integration/materials`, §4.2); o Core a chama no servidor ao aprovar um projeto (valor estimado do envio, `LOGISTICA_API_URL`/`LOGISTICA_API_KEY`); o Financeiro a usa no seletor de materiais da cotação |
 
 ## 1. Identidade e sessão
 
@@ -82,17 +82,17 @@ e idempotência por `event_id`.
 | `user.*` (inclui `user.disabled`) | **não** | sim |
 | `request.submitted/status_changed/completed` | sim | **não (ignora)** |
 | `sla.warning/breached` | sim | não |
-| `material_request.*` | **não** | sim (`material-request.adapter.ts`), inclusive o `destination` do envio para obra |
+| `material_request.approved`, `material_request.cancel_requested` | **sim, só do envio de material para obra** (desde 2026-11-08; categoria `envio_material`, §3.1); a compra não emite | sim (`material-request.adapter.ts`), inclusive o `destination` do envio para obra |
 | `ticket.status_changed` | **não** (módulo não existe) | sim (adaptador legado) |
 | `purchase_order.approved/changed` | **não** | sim |
 
-**Consequência:** uma requisição de material aprovada no Core não gera ordem de atendimento na
-Logística, e a desativação de usuário não chega.
+**Consequência:** o envio de material para obra aprovado no Core gera a ordem de atendimento na
+Logística (§3.1); a compra de material continua sem gerar ordem, e a desativação de usuário não chega.
 
 ### 3.1 Envio de material para obra (`material_request.approved` com destino)
 
-Contrato do plano de projeto aprovado (§4.3), já aceito pela Logística. O Core emitirá o evento quando a requisição
-`envio_material` for aprovada:
+Contrato do plano de projeto aprovado (§4.3), aceito pela Logística. O Core emite o evento quando o responsável do centro de custo aprova a requisição
+`envio_material` (criada ao aprovar o projeto, [requisicoes-estado-atual.md §16](dominio/requisicoes-estado-atual.md#16-envio-de-material-para-obra-kind--envio_material)); o payload abaixo é o que o Core grava, conferido contra o `material-request.adapter.ts` real:
 
 ```json
 {
@@ -117,6 +117,8 @@ Regras do lado da Logística (detalhe na [especificação §12.2.1](../lgc-dev-l
   depois do evento); inativos também só avisam.
 - Sem estoque, a ordem fica `AGUARDANDO_ESTOQUE`; a Logística não compra (Suprimentos abre a compra do faltante).
 - Material vai direto ao site e é baixado na confirmação da entrega (`SAIDA_ENTREGA` com projeto e centro de custo).
+
+Do lado do Core: `request_id` é o id da requisição; `version` é sempre `1` (não há `material_request.changed` hoje); `requester_id` é `null` (o solicitante é o usuário de sistema); `recipient_id` é o colaborador responsável do projeto; `warehouse_code` é `null` (a Logística usa o almoxarifado padrão); `needed_by` é o início previsto da cotação aceita menos 5 dias úteis (ou `null`); `destination.address` junta rua, número, complemento, bairro e CEP do site, `latitude`/`longitude` vão ou `null`/`null`; `items[].quantity` é texto com 3 casas (`"1200.000"`). `material_request.cancel_requested` leva `request_id`, `code`, `project_id`, `cost_center_id` e `reason`, só quando a requisição já tinha sido aprovada; reprovar a requisição não emite nada.
 
 **`site.created/updated`** (a confirmar com o PT-01 do Core): a Logística lê `site_id` (obrigatório), `code` (ou `site_code`), `name`,
 `active` (opcional) e guarda o payload inteiro no cache. **`cost_center.*`** usa `cost_center_id`, `code`, `name` e `active`, como o Core já emite.
@@ -204,12 +206,12 @@ disponível publicável. O custo médio é móvel e recalculado a cada recebimen
 ## 5. Próximos passos (ordem sugerida)
 
 1. Endurecer o SSO (§1) — risco de segurança.
-2. Definir e implementar o contrato de requisição de material: o Core emitir `material_request.*` (a Logística já o aceita, §3.1;
-   falta o lado do Core, PT-06) e `user.disabled`.
+2. ~~Definir e implementar o contrato de requisição de material~~ (feito para o envio de material para obra, §3.1: o Core emite
+   `material_request.approved/cancel_requested`). Falta `user.disabled` e, se a compra de material passar a ir à Logística, `material_request.*` dela.
 3. ~~Criar o receptor de eventos da Logística no Core~~ (feito: `POST /integration/inbound`, HMAC,
    idempotência, §4). Falta ligar `AXIS_EVENTS_URL`/`AXIS_OUTBOUND_SECRET` e escrever os handlers de
    negócio dos eventos da §4.1 (PT-09).
-4. Validar preço e material no servidor: a rota da §4.2 já existe na Logística; falta o Core chamá-la com a chave de serviço (PT-06).
+4. Validar preço e material no servidor: feito para o valor estimado do envio de material (o Core chama a rota da §4.2 com a chave de serviço ao aprovar o projeto); a **compra** ainda grava `materialId`/`unitPrice` enviados pelo cliente.
 5. Proteger custo no `purchase-catalog` (`material:read_cost`) e paginar.
 6. ~~Remover `SEED_REVISED_CATALOG` do runtime~~ (feito: o filtro saiu da listagem e do
    `purchase-catalog`, e o compose a define como `false`). Falta aposentar o seed `REV-` em si:

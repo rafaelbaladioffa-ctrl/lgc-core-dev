@@ -23,6 +23,7 @@
     "db:migrate": "prisma db execute --file prisma/fix-migration-history.sql --schema prisma/schema.prisma && prisma migrate deploy",
     "prisma:seed": "tsx prisma/seed.ts",
     "seed:org": "tsx prisma/seed-org.ts",
+    "seed:envio-material": "tsx prisma/seed-envio-material.ts",
     "seed:org-cc-restructure": "tsx prisma/seed-org-costcenter-restructure.ts",
     "seed:requests-fase1": "tsx prisma/seed-requests-fase1.ts",
     "seed:requests-fase2-sectors": "tsx prisma/seed-requests-fase2-sectors.ts",

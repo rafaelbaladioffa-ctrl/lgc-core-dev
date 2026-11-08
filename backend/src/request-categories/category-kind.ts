@@ -10,6 +10,11 @@ export function isWhistleblower(category: { kind: RequestCategoryKind }): boolea
   return category.kind === 'denuncia';
 }
 
+/** Envio de material para obra (PT-06): requisição criada pelo sistema ao aprovar o projeto. */
+export function isShipment(category: { kind: RequestCategoryKind }): boolean {
+  return category.kind === 'envio_material';
+}
+
 type VersionClient = Pick<Prisma.TransactionClient, 'categoryVersion'>;
 
 /** Maior versão **publicada** da categoria (rascunho nunca é usado por requisições). `null` se

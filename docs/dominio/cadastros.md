@@ -274,7 +274,7 @@ Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado
 
 ## 10. Projetos
 
-**Campos-chave** (`projects`): `code` (único, gerado), `name`, `client_id`, `cost_center_id`, `responsible_collaborator_id`, `site_id` (opcional, ver abaixo), `planned_start_date` e `planned_end_date` (`DATE`, opcionais), `status` (`proposta`, `aprovado`, `em_execucao`, `encerrado`; default `proposta`), `proposal_sequence`.
+**Campos-chave** (`projects`): `code` (único, gerado), `name`, `client_id`, `cost_center_id`, `responsible_collaborator_id`, `site_id` (opcional; obrigatório para aprovar, ver abaixo), `planned_start_date` e `planned_end_date` (`DATE`, opcionais), `status` (`proposta`, `aprovado`, `em_execucao`, `encerrado`; default `proposta`), `proposal_sequence`.
 
 **Regras** ([projects.service.ts](../../backend/src/projects/projects.service.ts)):
 
@@ -282,13 +282,13 @@ Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado
 - Nome (até 200 caracteres) obrigatório na API para criar e editar; a edição não aceita apagar o nome. A coluna é opcional no banco: projetos criados antes de 2026-11-07 ficam sem nome até alguém editar (a lista mostra "Sem nome — editar" e um indicador "Sem nome").
 - Datas previstas em `AAAA-MM-DD`; a conclusão não pode ser antes do início (`400` e `CHECK` no banco). Na edição, `null` apaga a data.
 - O cliente não muda depois de criado (faz parte do código).
-- **Site do projeto** (`site_id`, PA-05): opcional na criação e na edição (`siteId` no corpo; `null` desvincula). O servidor confere que o site **existe, está ativo e é do mesmo cliente do projeto**; senão `400` ("Site não encontrado.", "O site não pertence ao cliente do projeto.", "O site está inativo. Escolha outro site ou reative este."). Na edição só confere quando o site muda, então projeto cujo site foi inativado depois segue editável. **Hoje o site não é exigido para aprovar**: a exigência entra com o PT-06 do plano de aprovação, que vai validar `site_id` na transição para `aprovado`.
-- Transições de status permitidas: `proposta → aprovado | encerrado`; `aprovado → em_execucao | encerrado`; `em_execucao → encerrado`; `encerrado` é final. Outras → `400`.
+- **Site do projeto** (`site_id`, PA-05): opcional na criação e na edição (`siteId` no corpo; `null` desvincula). O servidor confere que o site **existe, está ativo e é do mesmo cliente do projeto**; senão `400` ("Site não encontrado.", "O site não pertence ao cliente do projeto.", "O site está inativo. Escolha outro site ou reative este."). Na edição só confere quando o site muda, então projeto cujo site foi inativado depois segue editável. **O site é exigido para aprovar** (e precisa estar ativo): a aprovação do projeto confere `site_id` (§10.3).
+- Transições de status permitidas: `proposta → aprovado | encerrado`; `aprovado → em_execucao | encerrado`; `em_execucao → encerrado`; `encerrado` é final. Outras → `400`. **`proposta → aprovado` só pelo fluxo de aprovação** (§10.3: site, cotação aceita, aceite e requisição de envio de material); as demais transições seguem o `PUT` simples.
 - A criação aceita `status` arbitrário (não passa pela máquina de transição).
 - `PUT /projects/:id` altera nome, centro de custo, responsável, site e datas previstas.
 - `DELETE /projects/:id` é exclusão física e só vale para projeto em `proposta` sem requisições; nos outros casos responde `409` e o caminho é encerrar o projeto.
 
-**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`), `DELETE /projects/:id` (`project:delete`, `delete_project`).
+**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`; com `aprovado` aceita `acceptedQuoteId` e `clientPoNumber`, §10.3), `GET /projects/:id/acceptance` (`project:read`, aceite e requisição gerada), `DELETE /projects/:id` (`project:delete`, `delete_project`).
 
 **Eventos de outbox.** Todo evento `project.*` leva o estado completo do projeto, para o cache dos satélites (o Financeiro usa nome e centro de custo no orçamento e no rateio — decisão P-07 da especificação de Projetos do Financeiro):
 
@@ -300,6 +300,7 @@ Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado
 | `project.updated` | `PUT /projects/:id` | `changed_fields` (inclui `siteId` quando o site muda) |
 | `project.status_changed` | `PUT /projects/:id/status` | `previous_status` |
 | `project.deleted` | exclusão de proposta | `deleted: true`; `status` vai como `encerrado` para os satélites marcarem o projeto inativo sem mudança do lado deles |
+| `project.approved` | aprovação do projeto (§10.3), logo depois de `project.status_changed` | `site`, `accepted_quote`, `client_po_number`, `material_request_id`, `approved_by_user_id`, `approved_at` (tabela no §10.3) |
 
 No formulário do projeto, o seletor **Site** (visível com `site:read`) lista só os sites do cliente escolhido e oferece os ativos mais o site atual do projeto (marcado "(inativo)" se for o caso); trocar o cliente na criação limpa o site. Sem `site:read` o formulário não mexe no site do projeto.
 
@@ -307,7 +308,7 @@ No formulário do projeto, o seletor **Site** (visível com `site:read`) lista s
 
 A SOW do cliente e o Bid Template do RFQ ficam anexados ao projeto do Core e são consumidos pelo módulo Projetos do Financeiro (importação da SOW, §7.1, e Bid preenchida, §7.4, da especificação de Projetos do Financeiro).
 
-- **Tipos:** `sow` e `bid_template` (desde 2026-11-08, migração `20261123000003_projetos_bid_template`). O Bid Template é a planilha da proposta que o cliente manda em cada RFQ, já com os dados do projeto; só aceita `.xlsx`/`.xlsm` (ZIP pelos bytes), senão `400`.
+- **Tipos:** `sow`, `bid_template` (desde 2026-11-08, migração `20261123000003_projetos_bid_template`) e `po` (pedido de compra do cliente, migração `20261127000000_projeto_aprovado_requisicao`; aceita os mesmos arquivos da SOW). O Bid Template é a planilha da proposta que o cliente manda em cada RFQ, já com os dados do projeto; só aceita `.xlsx`/`.xlsm` (ZIP pelos bytes), senão `400`.
 
 - Tabela `project_documents`: `project_id`, `kind` (`sow` ou `bid_template`), `version`, `filename` (nome original sem caminho, só para exibição), `mime_type`, `size_bytes`, `content_hash` (SHA-256), `content` (`BYTEA`), `uploaded_by_user_id`, `created_at`. Único por (`project_id`, `kind`, `version`).
 - **Versões:** cada envio do mesmo tipo cria a versão seguinte; nenhuma versão é sobrescrita nem apagada. A mais recente é a vigente. Os documentos só somem com a exclusão do projeto (que só vale para proposta sem requisições).
@@ -348,9 +349,9 @@ lucro nunca vêm para o Core. Contrato: [integracao-core-financeiro.md §4](../i
   A de maior revisão é a vigente.
 - **Materiais da cotação** (`project_quote_materials`, migração `20261125000000_projetos_cotacao_materiais`):
   `project_quote_id`, `material_code` (código do catálogo da Logística; único por cotação), `description`,
-  `unit`, `quantity` (`NUMERIC(14,3)`) e `logistics_material_id` (nulo por enquanto; o servidor o resolverá
-  consultando a Logística no PT-06). Sem preço, custo nem frete. Apagados junto com a cotação. Alimentam,
-  no PT-06, a requisição de envio de material ao aprovar o projeto.
+  `unit`, `quantity` (`NUMERIC(14,3)`) e `logistics_material_id` (nulo até a aprovação do projeto, que o resolve
+  consultando a Logística, §10.3). Sem preço, custo nem frete. Apagados junto com a cotação. Alimentam
+  a requisição de envio de material criada ao aprovar o projeto.
 - **Situação** mostrada na tela: `nao_solicitada`, `aguardando` (há pedido mais novo que a última
   cotação) e `recebida`.
 - **Permissões:** pedir exige `project:update`; ver a cotação e baixar a Bid exige
@@ -379,6 +380,39 @@ cotação guarda o satélite que enviou.
 cotação" (com recado opcional; só em proposta), cartões por revisão (dias, pessoas em campo, horas,
 equipe por função, **lista de materiais** com código, descrição, unidade e quantidade, download da Bid; sem Bid, "Sem Bid (orçamento genérico)") e histórico de pedidos.
 
+### 10.3 Aprovação do projeto
+
+O comercial muda o projeto de `proposta` para `aprovado` quando o cliente aprova o orçamento (decisão PA-01 do [plano projeto aprovado → obra](../plano-projeto-aprovado-ponta-a-ponta.md)). A transição **não** passa mais pelo `PUT` genérico de status: `PUT /projects/:id/status` com `status: "aprovado"` é tratado por `ProjectApprovalService` ([project-approval.service.ts](../../backend/src/projects/project-approval.service.ts)) e aceita dois campos opcionais, só válidos nessa transição (em outras, `400`):
+
+- `acceptedQuoteId`: a cotação (revisão do Financeiro) que o cliente aceitou; padrão, a **vigente** (maior `revision_number`). Cotação de outro projeto → `400` "A cotação informada não pertence ao projeto.";
+- `clientPoNumber`: nº do PO do cliente (até 60 caracteres). O arquivo do PO vai como documento do projeto de tipo `po` (§10.1), antes ou depois de aprovar.
+
+**Exige** (`400` em pt-BR, nada é gravado): projeto em `proposta` ("Não é possível mudar o projeto de ... para aprovado."); `site_id` preenchido ("Informe o site do projeto antes de aprovar.") e **ativo** ("O site do projeto está inativo. Reative o site ou escolha outro antes de aprovar."); ao menos uma cotação recebida do Financeiro ("O projeto não tem cotação recebida do Financeiro. Solicite a cotação antes de aprovar."). A linha do projeto é travada (`FOR UPDATE`) e o status relido dentro da transação: dois cliques simultâneos aprovam uma vez só.
+
+**Numa transação só** (regra 6 do AGENTS.md):
+
+1. `projects.status = aprovado` e o aceite em `project_acceptances` (`project_id` único, `project_quote_id`, `client_po_number`, `accepted_by_user_id`, `accepted_at`);
+2. se a cotação aceita tem materiais (`project_quote_materials`), a requisição de **envio de material** ([requisicoes-estado-atual.md §16](requisicoes-estado-atual.md#16-envio-de-material-para-obra-kind--envio_material)); sem materiais, o projeto é aprovado e a requisição **não** é criada (a tela avisa);
+3. outbox: `project.status_changed` (com `previous_status: proposta`), `project.approved` e, com requisição, `request.submitted`.
+
+A resposta é o projeto mais `materialRequest` (`{id, code, status}` ou `null`) e `withoutMaterials`. `GET /projects/:id/acceptance` (`project:read`) devolve o aceite (revisão, PO, quem aprovou e quando) e a requisição gerada (`id`, `code`, `status`, `estimatedValue`, `neededBy`), ou `{acceptance: null, materialRequest: null}` enquanto for proposta. `logistics_material_id` dos materiais da cotação é resolvido na aprovação, pela consulta à Logística (§10.2).
+
+**Evento `project.approved`** (assinantes: Financeiro e Field): o estado completo do projeto do §10 (com `status: "aprovado"`) mais:
+
+| Campo | Conteúdo |
+|---|---|
+| `site` | `site_id`, `code`, `name`, `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`, `longitude` (números ou `null`) |
+| `accepted_quote` | `project_quote_id`, `external_revision_id` (id da revisão no Financeiro), `revision_number`, `work_days` (número), `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`), `team[]` (`role_key`, `role_name`, `field_role`, `people`, `days`, `hours`, como a cotação guarda) e `sow_document_id` (ou `null`) |
+| `client_po_number` | texto ou `null` |
+| `material_request_id` | id da requisição de envio criada, ou `null` se a cotação não tem materiais |
+| `approved_by_user_id`, `approved_at` | quem aprovou (usuário) e quando (ISO 8601) |
+
+**Usuário de sistema.** A requisição de envio tem como solicitante o usuário/colaborador técnico **"Axis (automático)"** (`axis-automatico@sistema.axis.local`), criado pela migração `20261127000001_usuario_sistema_categoria_envio` e pelo seed (`npm run seed:envio-material`, também chamado pelo `prisma:seed`), ambos idempotentes. Não faz login (usuário `disabled`, hash que não é bcrypt) e o colaborador (`is_system`, status `desligado`) não aparece em listas de colaboradores, de usuários, no organograma nem nas integrações (`GET /integration/collaborators`, reenvio de cadastros).
+
+**Frontend.** Na edição do projeto, a seção **Aprovação do projeto** tem o botão **Aprovar projeto**, que abre o diálogo: site da obra, revisão da cotação aceita (lista as revisões com a quantidade de materiais; com `project:read_documents`), nº e arquivo do PO opcionais e o aviso "Esta cotação não tem materiais" quando for o caso. Trocar o status para "Aprovado" na lista de projetos leva a essa tela com o diálogo aberto. Depois de aprovado, a seção mostra a revisão aceita, o PO, quem aprovou e o link para a requisição gerada, e permite anexar o PO.
+
+**Configuração (backend/.env):** `LOGISTICA_API_URL` (com `/api/v1`) e `LOGISTICA_API_KEY` (a `INTEGRATION_API_KEY` da Logística) para o valor estimado; `SHIPMENT_LEAD_BUSINESS_DAYS` (padrão 5) para a folga da data de necessidade.
+
 ---
 
 ## 11. Divergências em relação ao planning v0.2
@@ -401,4 +435,5 @@ equipe por função, **lista de materiais** com código, descrição, unidade e 
 - Drift das tabelas `bpm_*` (ver [arquitetura.md](../arquitetura.md)). `migrate deploy` em banco vazio foi exercitado em 2026-11-08 num banco `_test` e aplicou todas as migrações, inclusive `20261126000001_sites`, sem diferença para o schema.
 - Se o `OutboxDispatcherService` entrega os eventos acima a satélites reais em produção.
 - Testes automatizados: não há testes de backend nem de frontend cobrindo os cadastros (só `test/a24-auth-refresh-password.e2e-spec.ts` cobre refresh/troca de senha). Exceção: sites e o site do projeto têm testes de serviço com Prisma simulado (`sites.service.spec.ts`, `projects.service.spec.ts`).
+- Aprovação do projeto (§10.3, PT-06): verificada em 2026-11-08 num banco `_test` com `migrate deploy` + `migrate diff` vazio, testes de serviço com Prisma simulado, o teste e2e `test/pt06-aprovacao-projeto.e2e-spec.ts` (Postgres real: aprovação, requisição única, aprovação pelo responsável do CC, `material_request.approved`, cancelamento, sem materiais, sem aprovador) e, no navegador, o diálogo, o aceite, a requisição e "Reavaliar aprovador" contra o backend com esse banco. O payload de `material_request.approved` foi aceito pelo `material-request.adapter.ts` real. **Não** foram exercitados: a consulta de custo à Logística real (só um servidor HTTP de mentira e o cliente com `fetch` simulado), o recebimento de `project.approved` pelo Financeiro e pelo Field, a entrega ao webhook da Logística e o upload do PO pela tela.
 - Sites: o trecho de permissões da migração foi testado no banco `_test` (concede aos papéis certos e reaplicar não duplica). **Não** foram exercitados com HTTP real nem no navegador: `/sites`, `/integration/sites`, o `PermissionsGuard` nas rotas novas e as telas (seção Sites do cliente, formulário do site, seletor no projeto).

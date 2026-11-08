@@ -36,6 +36,7 @@ export class MasterDataResyncService {
       for (const cc of costCenters) await this.outbox.record(tx, 'cost_center.updated', costCenterEventPayload(cc));
 
       const collaborators = await tx.collaborator.findMany({
+        where: { isSystem: false },
         include: { jobTitle: true, workSchedule: true, costCenter: true },
         orderBy: { fullName: 'asc' },
       });

@@ -13,6 +13,7 @@ import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { ProjectDocumentsService, contentDisposition } from './project-documents.service.js';
 import { CreateProjectDocumentDto } from './dto/create-project-document.dto.js';
 import { ProjectQuotesService } from './project-quotes.service.js';
+import { ProjectApprovalService } from './project-approval.service.js';
 import { RequestProjectQuoteDto } from './dto/project-quote.dto.js';
 
 /** A Bid é guardada como ZIP genérico (detecção pelos bytes); o download usa o tipo de planilha. */
@@ -25,6 +26,7 @@ export class ProjectsController {
     private readonly projectsService: ProjectsService,
     private readonly documentsService: ProjectDocumentsService,
     private readonly quotesService: ProjectQuotesService,
+    private readonly approvalService: ProjectApprovalService,
   ) {}
 
   @Post()
@@ -56,8 +58,16 @@ export class ProjectsController {
   @Put(':id/status')
   @RequirePermissions('project:update')
   @AuditAction({ action: 'change_project_status', resourceType: 'project', resourceIdParam: 'id' })
-  updateStatus(@Param('id') id: string, @Body() dto: UpdateProjectStatusDto) {
+  updateStatus(@Param('id') id: string, @Body() dto: UpdateProjectStatusDto, @CurrentUser() user: AuthenticatedUser) {
+    // Aprovar o projeto exige site e cotação, grava o aceite e cria a requisição de envio de material (PT-06).
+    if (dto.status === 'aprovado') return this.approvalService.approve(id, dto, user.userId);
     return this.projectsService.updateStatus(id, dto);
+  }
+
+  @Get(':id/acceptance')
+  @RequirePermissions('project:read')
+  getAcceptance(@Param('id') id: string) {
+    return this.approvalService.getAcceptance(id);
   }
 
   @Delete(':id')

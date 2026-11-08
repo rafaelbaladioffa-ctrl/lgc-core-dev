@@ -140,7 +140,12 @@ export class ProjectsService {
     });
   }
 
+  /** Mudança de status. A aprovação (`aprovado`) tem fluxo próprio: `ProjectApprovalService.approve` (PT-06). */
   async updateStatus(id: string, dto: UpdateProjectStatusDto) {
+    if (dto.status === 'aprovado') throw new BadRequestException('A aprovação do projeto exige a cotação aceita e o site: use a aprovação do projeto.');
+    if (dto.acceptedQuoteId !== undefined || dto.clientPoNumber !== undefined) {
+      throw new BadRequestException('Cotação aceita e PO só valem na aprovação do projeto.');
+    }
     const project = await this.findOne(id);
     const allowed = ALLOWED_TRANSITIONS[project.status];
     if (!allowed.includes(dto.status)) {
