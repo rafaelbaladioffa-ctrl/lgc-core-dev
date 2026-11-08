@@ -72,14 +72,17 @@ export function parsePeriod(from: string | undefined, to: string | undefined, to
   return { from: f, to: t, start: a.start, end: b.end, months };
 }
 
-/** Dias úteis (segunda a sexta) do período, até hoje inclusive. */
-export function workingDays(period: Pick<Period, 'start' | 'end'>, today = todaySaoPaulo()): Date[] {
+/**
+ * Dias úteis (segunda a sexta, menos os feriados do Core) do período, até hoje inclusive. `holidays` são datas
+ * `AAAA-MM-DD` (cache `HOLIDAY`, ver integration/master-cache.ts); sem elas, conta só segunda a sexta.
+ */
+export function workingDays(period: Pick<Period, 'start' | 'end'>, today = todaySaoPaulo(), holidays?: ReadonlySet<string> | null): Date[] {
   const limit = Math.min(period.end.getTime(), parseDate(today).getTime() + DAY_MS);
   const days: Date[] = [];
   for (let t = period.start.getTime(); t < limit; t += DAY_MS) {
     const d = new Date(t);
     const wd = d.getUTCDay();
-    if (wd !== 0 && wd !== 6) days.push(d);
+    if (wd !== 0 && wd !== 6 && !holidays?.has(d.toISOString().slice(0, 10))) days.push(d);
   }
   return days;
 }

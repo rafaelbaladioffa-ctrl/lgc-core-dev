@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { getDestination, getMaterial, listDestinations, listMaterials, saveDestination, saveMaterial, type BudgetDestination, type BudgetMaterial } from '../lib/budgetParams';
+import { getDestination, getMaterial, listDestinations, listMaterials, saveDestination, saveMaterial, siteLabel, type BudgetDestination, type BudgetMaterial } from '../lib/budgetParams';
+import type { MasterItem } from '../lib/masterData';
+import { CoreMasterPicker } from '../components/CoreMasterPicker';
 import { decimalToInput, formatNumber, parseDecimal } from '../lib/decimal';
 import { formatBRL } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -218,7 +220,7 @@ export function DestinationsPage({ canWrite }: { canWrite: boolean }) {
           )
         }
       >
-        <p className="muted">Distância e pedágio de ida e volta a partir da sede. Confirme a rota com o endereço do site.</p>
+        <p className="muted">Distância e pedágio de ida e volta a partir da sede. Ligue o destino ao site do Axis Core para a revisão sugerir o deslocamento pelo site do projeto.</p>
       </PageHeader>
       <div className="toolbar">
         <InactiveToggle value={inactive} onChange={setInactive} />
@@ -231,6 +233,7 @@ export function DestinationsPage({ canWrite }: { canWrite: boolean }) {
             <thead>
               <tr>
                 <th>Destino</th>
+                <th>Site no Axis Core</th>
                 <th className="num">Km ida e volta</th>
                 <th className="num">Pedágio por dia</th>
                 <th>Rota / fonte</th>
@@ -240,7 +243,7 @@ export function DestinationsPage({ canWrite }: { canWrite: boolean }) {
             <tbody>
               {data.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="muted empty">
+                  <td colSpan={6} className="muted empty">
                     Nenhum destino cadastrado.
                   </td>
                 </tr>
@@ -248,6 +251,17 @@ export function DestinationsPage({ canWrite }: { canWrite: boolean }) {
               {data.map((d) => (
                 <tr key={d.id} className={canWrite ? 'row-link' : undefined} onClick={canWrite ? () => navigate(`/destinos/${d.id}`) : undefined}>
                   <td>{canWrite ? <a href={`#/destinos/${d.id}`}>{d.name}</a> : d.name}</td>
+                  <td>
+                    {d.site ? (
+                      <>
+                        {siteLabel(d.site)} {!d.site.active && <Badge tone="warning">Inativo no Core</Badge>}
+                      </>
+                    ) : d.siteAxisId ? (
+                      <span className="muted">Site fora dos cadastros recebidos do Core</span>
+                    ) : (
+                      <span className="muted">—</span>
+                    )}
+                  </td>
                   <td className="num">{formatNumber(d.kmRoundTrip)}</td>
                   <td className="num">{formatBRL(d.tollPerDay)}</td>
                   <td>{d.routeNotes ?? '—'}</td>
@@ -262,7 +276,7 @@ export function DestinationsPage({ canWrite }: { canWrite: boolean }) {
   );
 }
 
-const EMPTY_DESTINATION = { name: '', kmRoundTrip: '', tollPerDay: '', routeNotes: '', active: true };
+const EMPTY_DESTINATION = { name: '', kmRoundTrip: '', tollPerDay: '', routeNotes: '', siteAxisId: null as string | null, active: true };
 type DestinationForm = typeof EMPTY_DESTINATION;
 
 const destinationToForm = (d: BudgetDestination): DestinationForm => ({
@@ -270,8 +284,13 @@ const destinationToForm = (d: BudgetDestination): DestinationForm => ({
   kmRoundTrip: decimalToInput(d.kmRoundTrip),
   tollPerDay: decimalToInput(d.tollPerDay),
   routeNotes: d.routeNotes ?? '',
+  siteAxisId: d.siteAxisId,
   active: d.active,
 });
+
+/** Site do destino já carregado, no formato do seletor (evita buscar de novo). */
+const siteItem = (d: BudgetDestination | null | undefined): MasterItem | null =>
+  d?.site ? { axisId: d.site.axisId, code: d.site.code, name: d.site.name, active: d.site.active, label: siteLabel(d.site), info: {} } : null;
 
 export function DestinationFormPage({ id }: { id: string | null }) {
   const loaded = useLoad(() => (id ? getDestination(id) : Promise.resolve(null)), [id], 'Não foi possível carregar o destino.');
@@ -282,7 +301,12 @@ export function DestinationFormPage({ id }: { id: string | null }) {
   const [formError, setFormError] = useState<string | null>(null);
   useEffect(() => setForm(loaded.data ? destinationToForm(loaded.data) : EMPTY_DESTINATION), [loaded.data]);
   useUnsavedWarning(JSON.stringify(form) !== JSON.stringify(initial) && !saving);
-  const set = (k: keyof DestinationForm, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
+  const set = (k: keyof DestinationForm, v: string | boolean | null) => setForm((f) => ({ ...f, [k]: v }));
+
+  /** Escolher o site do Core preenche o nome do destino quando ele ainda está vazio. */
+  function pickSite(item: MasterItem | null) {
+    setForm((f) => ({ ...f, siteAxisId: item?.axisId ?? null, name: f.name.trim() || !item ? f.name : item.label.slice(0, 120) }));
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -304,6 +328,7 @@ export function DestinationFormPage({ id }: { id: string | null }) {
         kmRoundTrip: km.ok ? km.value : null,
         tollPerDay: (toll.ok && toll.value) || '0',
         routeNotes: form.routeNotes.trim() || null,
+        siteAxisId: form.siteAxisId,
         active: form.active,
       });
       navigate('/destinos');
@@ -321,6 +346,17 @@ export function DestinationFormPage({ id }: { id: string | null }) {
       <PageHeader title={id ? `Editar ${loaded.data?.name ?? 'destino'}` : 'Novo destino'} back={{ href: '/destinos', label: 'Destinos' }} />
       {formError && <ErrorAlert message={formError} />}
       <section className="card">
+        <Field label="Site no Axis Core" hint="Mantido no Axis Core. Km e pedágio continuam definidos aqui no Financeiro.">
+          <CoreMasterPicker
+            kind="sites"
+            value={form.siteAxisId}
+            selected={siteItem(loaded.data)}
+            editable
+            placeholder="Buscar site do Core (código ou nome)"
+            emptyLabel="Sem site do Core"
+            onPick={pickSite}
+          />
+        </Field>
         <div className="grid-2">
           <Field label="Destino / site" required error={errors.name}>
             <input value={form.name} maxLength={120} onChange={(e) => set('name', e.target.value)} aria-invalid={!!errors.name} autoFocus />

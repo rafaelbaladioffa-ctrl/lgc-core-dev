@@ -35,11 +35,14 @@ export class LogisticsImportScheduler {
   }
 
   async runOnce(today = todaySaoPaulo()) {
-    const results: Array<{ month: string; created: number; replaced: number; unchanged: number; withoutCostCenter: number } | { month: string; error: string }> = [];
+    const results: Array<Awaited<ReturnType<CostCentersService['importLogisticsScheduled']>> | { month: string; error: string }> = [];
     for (const month of scheduledMonths(today)) {
       try {
         const r = await this.costCenters.importLogisticsScheduled(month);
         this.logger.log(`Consumo da Logística ${month}: ${r.created} novos, ${r.replaced} refeitos, ${r.unchanged} iguais, ${r.withoutCostCenter} sem centro de custo.`);
+        if (r.unknownCostCenters.length || r.unknownProjects.length) {
+          this.logger.warn(`Consumo da Logística ${month}: ids fora do cache do Core — centros de custo [${r.unknownCostCenters.join(', ')}], projetos [${r.unknownProjects.join(', ')}].`);
+        }
         results.push(r);
       } catch (e) {
         const error = (e as Error).message;

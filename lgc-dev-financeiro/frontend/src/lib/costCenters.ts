@@ -165,7 +165,8 @@ export type OverheadRuleInput = { driver: OverheadDriver; active: boolean; notes
  * O §8 só diz `{ maps, unmapped, roles }`; as formas abaixo são as que a tela assume
  * (cargo do Core → função do conjunto de parâmetros vigente).
  */
-export type JobTitleMap = { jobTitleId: string; jobTitleName: string; roleKey: string; roleLabel?: string | null };
+/** `active: false` = cargo excluído no Core (o mapa fica, só para a folha de quem ainda tem o cargo). */
+export type JobTitleMap = { jobTitleId: string; jobTitleName: string; roleKey: string; roleLabel?: string | null; active?: boolean };
 export type UnmappedJobTitle = { jobTitleId: string; jobTitleName: string; collaborators?: number };
 export type BudgetRole = { roleKey: string; label: string };
 export type JobTitleMaps = { maps: JobTitleMap[]; unmapped: UnmappedJobTitle[]; roles: BudgetRole[] };
@@ -183,7 +184,17 @@ export type FieldLaborImportResult = {
   invalidRows: number;
   pending: FieldLaborPending[];
 };
-export type LogisticsImportResult = { month: string; created: number; replaced: number; unchanged: number };
+/** `unknown*`: ids que a Logística mandou e o Financeiro ainda não recebeu do Core (lançados assim mesmo). */
+export type LogisticsImportResult = { month: string; created: number; replaced: number; unchanged: number; withoutCostCenter?: number; unknownCostCenters?: string[]; unknownProjects?: string[] };
+
+/** Aviso da importação da Logística quando há CC ou projeto fora dos cadastros recebidos do Core (F5). */
+export function logisticsImportWarning(r: LogisticsImportResult): string | null {
+  const cc = r.unknownCostCenters?.length ?? 0;
+  const pj = r.unknownProjects?.length ?? 0;
+  if (!cc && !pj) return null;
+  const parts = [cc ? `${cc} ${cc === 1 ? 'centro de custo' : 'centros de custo'}` : null, pj ? `${pj} ${pj === 1 ? 'projeto' : 'projetos'}` : null].filter(Boolean).join(' e ');
+  return `A Logística citou ${parts} que o Financeiro ainda não recebeu do Axis Core. O consumo foi lançado assim mesmo e aparece no centro de custo quando o cadastro chegar; peça ao Core para reenviar os cadastros.`;
+}
 
 export type Purchase = {
   id: string;

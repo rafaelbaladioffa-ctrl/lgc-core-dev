@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, Length, Matches, MaxLength, ValidateIf } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, Length, Matches, MaxLength, ValidateIf } from 'class-validator';
 import { decimalPattern } from './parameter-sets.dto.js';
 
 const nullable = () => ValidateIf((_o, v) => v !== null && v !== undefined);
@@ -97,6 +97,11 @@ export class CreateDestinationDto {
   @MaxLength(300, { message: 'Rota / fonte: até 300 caracteres.' })
   routeNotes?: string | null;
 
+  /** Site do Core (cache `SITE`); `null` desfaz o vínculo. */
+  @nullable()
+  @IsUUID('all', { message: 'Site do Core inválido.' })
+  siteAxisId?: string | null;
+
   @IsOptional()
   @IsBoolean({ message: 'Ativo: sim ou não.' })
   active?: boolean;
@@ -121,6 +126,11 @@ export class UpdateDestinationDto {
   @IsString()
   @MaxLength(300, { message: 'Rota / fonte: até 300 caracteres.' })
   routeNotes?: string | null;
+
+  /** Site do Core (cache `SITE`); `null` desfaz o vínculo. */
+  @nullable()
+  @IsUUID('all', { message: 'Site do Core inválido.' })
+  siteAxisId?: string | null;
 
   @IsOptional()
   @IsBoolean({ message: 'Ativo: sim ou não.' })

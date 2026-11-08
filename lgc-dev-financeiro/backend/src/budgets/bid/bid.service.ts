@@ -1,5 +1,5 @@
 import { createHash } from 'crypto';
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, HttpException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { AuditService } from '../../audit/audit.service.js';
@@ -10,7 +10,8 @@ import type { BudgetInputs, BudgetResult } from '../budget-engine.js';
 import { buildBidPlan, DEFAULT_ROLE_CODES, type BidHeaderProfile, type CableLineProfile } from './bid-plan.js';
 import { fillBid } from './bid-fill.js';
 import { XlsxEditor } from './xlsx-editor.js';
-import { buildCoreQuoteBody, CORE_QUOTE_EVENT, quoteMaterialsBlocker, type CoreQuoteMessage } from './core-quote.js';
+import { buildCoreQuoteBody, buildCoreQuoteMaterials, CORE_QUOTE_EVENT, quoteMaterialsBlocker, type CoreQuoteMessage } from './core-quote.js';
+import { LogisticsClient } from '../../cost-centers/logistics.client.js';
 import { preferredSuppliers, suggestCableLine, type SuggestedLine } from './suggest-lines.js';
 
 export interface BidProfile {
@@ -76,6 +77,7 @@ export class BidService {
     private readonly audit: AuditService,
     private readonly outbox: OutboxService,
     private readonly budgets: BudgetsService,
+    private readonly logistics: LogisticsClient,
   ) {}
 
   // -------------------------------------------------------------------------
@@ -161,7 +163,7 @@ export class BidService {
     const rev = await this.budgets.loadRevisionFull(revisionId);
     if (rev.budget.model !== 'aws_sow') throw new BadRequestException('Só o modelo aws_sow gera Bid.');
     const project = await this.budgets.projectInfoOrNull(rev.budget.axisProjectId);
-    const aws = this.budgets.awsInfo(rev, project);
+    const aws = this.budgets.awsInfo(rev, project, await this.budgets.holidays());
     if (!aws?.quote) {
       return { rev, project, aws, plan: null, blockers: aws?.blockers.length ? aws.blockers : ['A cotação AWS ainda não pode ser calculada.'], unmappedCables: [], unmappedRoles: [], suggestedCables: {} };
     }
@@ -234,6 +236,7 @@ export class BidService {
     const { rev, project, plan, blockers } = await this.plan(revisionId, user);
     this.assertMaterialsLinked(rev.result as unknown as BudgetResult);
     if (!plan) throw new BadRequestException(`Não dá para aprovar o envio: ${blockers.join(' ')}`);
+    await this.assertMaterialsInLogistics(rev.result as unknown as BudgetResult);
     const bid = await fillBid(await this.template(revisionId), plan, rev.number);
     const result = rev.result as unknown as BudgetResult;
     const header = this.budgets.header(rev.budget, project);
@@ -275,12 +278,36 @@ export class BidService {
     if (blocker) throw new BadRequestException(`Não dá para aprovar o envio. ${blocker}`);
   }
 
+  /**
+   * F4: reconfere na Logística, na hora da aprovação, cada código de material que vai para o Core. O código pode ter
+   * sido inativado ou apagado depois de escolhido na revisão; código que não volta como ativo bloqueia com a lista.
+   * Logística fora do ar ou sem configuração também bloqueia: não se envia cotação com material não conferido.
+   */
+  async assertMaterialsInLogistics(result: BudgetResult) {
+    const codes = buildCoreQuoteMaterials(result.materials).materials.map((m) => m.material_code);
+    if (codes.length === 0) return;
+    let missing: string[];
+    try {
+      missing = await this.logistics.missingCodes(codes);
+    } catch (e) {
+      const why = e instanceof HttpException ? e.message : 'Tente de novo em instantes.';
+      throw new ServiceUnavailableException(`Não dá para aprovar o envio sem conferir os materiais na Logística. ${why}`);
+    }
+    if (missing.length > 0) {
+      const list = missing.join(', ');
+      throw new BadRequestException(
+        `Não dá para aprovar o envio: ${missing.length === 1 ? `o código ${list} não existe ou está inativo` : `os códigos ${list} não existem ou estão inativos`} no catálogo da Logística. Escolha de novo o material na revisão.`,
+      );
+    }
+  }
+
   /** Modelo `generico`: devolve equipe, dias e materiais ao Core, sem Bid. */
   private async approveSendWithoutBid(revisionId: string, user: AuthenticatedUser) {
     const rev = await this.budgets.loadRevisionFull(revisionId);
     const project = await this.budgets.projectInfoOrNull(rev.budget.axisProjectId);
     const result = rev.result as unknown as BudgetResult;
     this.assertMaterialsLinked(result);
+    await this.assertMaterialsInLogistics(result);
     const header = this.budgets.header(rev.budget, project);
     const source = (approvedAt: Date | null) => ({
       revisionId,

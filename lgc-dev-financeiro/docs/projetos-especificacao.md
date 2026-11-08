@@ -148,7 +148,9 @@ cadastradas):
 - **Materiais** (`budget_materials`): nome, fabricante, código, unidade, preço cobrado, custo real,
   referência no formulário do cliente (ex.: linha do Bid Template), ativo. Ver P-06.
 - **Destinos** (`budget_destinations`): nome, km ida e volta a partir da sede, pedágio por dia
-  ida e volta, rota/fonte, ativo.
+  ida e volta, rota/fonte, ativo e, opcional, o **site do Core** (`site_axis_id`, escolhido do cache `SITE`; site
+  inativo ou fora do cache é recusado). Km e pedágio continuam do Financeiro. A revisão sugere o destino ligado ao
+  site do projeto (F1 do mapa de interoperabilidade).
 
 ## 5. Composição do orçamento (entradas)
 
@@ -584,8 +586,8 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
   `GET /projects` grava as mesmas chaves e preserva o código e o nome do centro de custo vindos do
   webhook (a lista do Core só devolve o id). Contrato: `docs/dominio/cadastros.md` §4 e §10 do Core e
   [integracao-core-financeiro.md §2](../../docs/integracao-core-financeiro.md#2-eventos-core--financeiro).
-- Feriados para "cabe na janela": consulta ao calendário do Core; se o Core não expuser, só dias
-  úteis com aviso "sem feriados".
+- Feriados para "cabe na janela": cache `HOLIDAY` alimentado por `holiday.*` do Core (desde 2026-11-08); sem
+  nenhum feriado no cache, conta só segunda a sexta com aviso na tela.
 - SOW: `project.document_added` e download por
   `GET /integration/projects/:id/documents/:documentId/content` (API key; precisa assinar o evento).
 
@@ -769,7 +771,7 @@ de custo; outros modelos de cliente além do AWS.
 - Cálculo (`bid/aws-quote.ts`): horas-meta por tipo = peso_m × qtd × comprimento médio × meta_h_metro +
   peso_p × portas × meta_h_porta; o termo de dispositivos fica 0 (o modelo só conta linhas de
   dispositivo preenchidas, o que uma proposta só de cabeamento não tem). Dias sugeridos, dias úteis da
-  janela da SOW (segunda a sexta; **feriados ainda não entram**, aviso na tela), horas T proporcionais
+  janela da SOW (segunda a sexta menos os feriados do Core; aviso só enquanto o cache não tem feriados), horas T proporcionais
   com sobra na primeira linha ou digitadas à mão, indicadores com meta, desvio e tolerância do modelo,
   e os valores para a Bid. As "horas" dos indicadores são todas as horas de mão de obra.
 - A meta de mão de obra por porta do cluster vem muito baixa no modelo (§7.3: "meta do cliente

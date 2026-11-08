@@ -11,11 +11,11 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 | Login e refresh no Core pelo navegador (CORS) | Financeiro web → Core | Funciona; o Core precisa listar a origem do Financeiro em `CORS_ALLOWED_ORIGINS` |
 | Access token do Core na API do Financeiro | Core → Financeiro | Funciona; o Financeiro recusa tokens com `iss` e não troca por sessão própria |
 | Launcher ("Abrir") | Core → Financeiro | **Não suportado** até o Core emitir token de launcher com `typ`/`aud` e `jti` de uso único |
-| Webhook de dados mestres | Core → Financeiro | Funciona para `collaborator.*`, `client.*`, `project.*`, `cost_center.*` |
+| Webhook de dados mestres | Core → Financeiro | Funciona para `collaborator.*`, `client.*`, `project.*`, `cost_center.*`, `user.*`, `site.*`, `job_title.*` e `holiday.*` (os quatro últimos no Financeiro desde 2026-11-08, onda V2 do [mapa de interoperabilidade](mapa-interoperabilidade.md)) |
 | Webhook de compra, reembolso e adiantamento | Core → Financeiro | Core emite desde 2026-11-08 ([integracao-centros-de-custo.md §3](integracao-centros-de-custo.md#3-core-compras-reembolsos-e-adiantamentos)) |
 | Alocação do colaborador no CC (`collaborator.cost_center_changed`) | Core → Financeiro | Core emite desde 2026-11-08 ([integracao-centros-de-custo.md §2](integracao-centros-de-custo.md#2-core-alocação-do-colaborador-no-cc-com-vigência)) |
 | Situação do orçamento do CC (`PUT /integration/cost-centers/:id/budget-status`) | Financeiro → Core | Core recebe desde 2026-11-08 ([integracao-centros-de-custo.md §4](integracao-centros-de-custo.md#4-financeiro--core-situação-do-orçamento-do-cc)) |
-| Eventos de pagamento | Financeiro → Core | Outbox pronto; **o Core não tem receptor** |
+| Eventos de pagamento | Financeiro → Core | Outbox pronto; o receptor do Core (`POST /integration/inbound`) já existe, mas **não tem handler de `payable.*`** (F7, onda V5) |
 | Projeto aprovado (`project.approved`) | Core → Financeiro | Financeiro consome (PT-07): a revisão aceita vira `ganha` e o comprometido vai ao CC do projeto (§2). O Core passa a emitir com o PT-06 |
 | Pedido de cotação do projeto (`project.quote_requested`) | Core → Financeiro | Core emite e o Financeiro consome desde 2026-11-08 (fila de pedidos de cotação, PJ4) (§4) |
 | Devolução da cotação (`POST /integration/projects/:id/quotes`) | Financeiro → Core | Core recebe e o Financeiro envia desde 2026-11-08 (PJ7: ao aprovar o envio, pelo outbox com retry) (§4) |
@@ -27,8 +27,10 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 - `JWT_SECRET` do Financeiro = `JWT_ACCESS_SECRET` do Core; algoritmo fixo `HS256`.
 - O Financeiro ignora as permissões do token e resolve as próprias: `axis_role_to_finance_role`
   (inicial: `admin → ADMIN_TECNICO`) mais `user_finance_roles`. O Core não tem papel financeiro (F-03).
-- Sem `user.disabled`, um usuário desativado no Core perde o acesso quando o access token (15 min)
-  expira. Com o evento, o bloqueio é imediato.
+- Com `user.updated`/`user.disabled` (contrato V1, [mapa-interoperabilidade §6](mapa-interoperabilidade.md#6-contrato-v1-eventos-e-consultas-novos-do-core)),
+  o cache `USER` do Financeiro guarda nome, e-mail, `status`, `active`, `collaborator_id` e `roles`; usuário com
+  `active: false` (ou `status: disabled`) é recusado na hora, sem esperar o access token (15 min) expirar. Sem o
+  evento, o bloqueio só vale quando o token expira.
 
 ## 2. Eventos Core → Financeiro
 
@@ -37,13 +39,15 @@ Mesmo envelope e assinatura usados com a Logística (`{event_id, event_type, occ
 
 | Evento | Core emite? | Financeiro consome? |
 |---|---|---|
-| `collaborator.created/updated/offboarded` | sim (`created/updated` com o estado completo desde 2026-11-08) | sim (cache) |
+| `collaborator.created/updated/offboarded` | sim (`created/updated` com o estado completo desde 2026-11-08) | sim (cache; `active` do payload e, sem ele, `status != desligado`: `updated` com desligado já inativa, F6) |
 | `collaborator.cost_center_changed` | sim (desde 2026-11-08) | sim (alocação com vigência) |
-| `client.created/updated` | sim | sim (cache) |
+| `client.created/updated` | sim | sim (cache; nome = `name`, ou `legal_name` em evento antigo; `trade_name`, CNPJ e endereço ficam em `data`). O botão "Atualizar do Axis Core" grava as mesmas chaves |
 | `project.created/updated/status_changed/deleted` | sim (`updated` e `deleted` desde 2026-11-07) | sim (cache; `encerrado` = inativo) |
-| `user.disabled` | **não** | sim (bloqueio) |
+| `user.created/updated/disabled` | contrato V1 (onda V1, em implantação no Core) | sim (cache `USER` com nome, `status`, `active`, `collaborator_id`, `roles`; inativo é bloqueado no login) |
 | `cost_center.created/updated` | sim (desde 2026-11-07; exclusão vai como `updated` com `active: false`) | sim (cache) |
-| `site.created/updated` | sim (desde 2026-11-08; inativar vai como `updated` com `active: false`) | **ainda não assina**; o evento só vai para quem assinar |
+| `site.created/updated` | sim (desde 2026-11-08; inativar vai como `updated` com `active: false`) | sim (cache `SITE`, desde 2026-11-08): o destino do orçamento aponta para o site (F1). O satélite precisa **assinar** `site.*` |
+| `job_title.created/updated/deleted` | contrato V1 (em implantação no Core) | sim (cache `JOB_TITLE`): o mapa cargo → função mostra e grava o nome do Core e é renomeado no `updated` (F2) |
+| `holiday.created/updated/deleted` | contrato V1 (em implantação no Core) | sim (cache `HOLIDAY`, data em `code`): dias úteis da cotação AWS e das equipes/rateio descontam os feriados ativos (F3) |
 | `project.document_added` | sim | recebido e ignorado: o Financeiro baixa o documento pelo pedido de cotação |
 | `project.quote_requested` | sim (desde 2026-11-08) | sim (fila de pedidos de cotação, PJ4; §4) |
 | `project.approved` | sim (desde 2026-11-08, aprovação do projeto no Core) | **sim (PT-07)**: revisão aceita → `ganha` + comprometido no CC (§2.1) |
@@ -60,8 +64,8 @@ Projeto antigo sem nome (`name: null`) não apaga o nome já guardado no cache. 
 `cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`,
 `kind`, `short_code` e `active`. `site.*` leva o estado completo do site (`site_id`, `client_id`, `code`, `name`, `cep`, `address_street`,
 `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`,
-`longitude`, `active`; `updated` traz também `changed_fields`); o Financeiro que quiser o endereço do site
-assina `site.*` ou consulta `GET /api/v1/integration/sites` por API key. Contrato no Core:
+`longitude`, `active`; `updated` traz também `changed_fields`); o Financeiro guarda tudo no cache `SITE` e mostra
+"código — nome, cidade/UF" no seletor. Contrato no Core:
 [dominio/cadastros.md §4, §9.1 e §10](dominio/cadastros.md#91-sites).
 O Financeiro usa nome e prazo previsto no cabeçalho do orçamento e o centro de custo no rateio
 (decisão P-07 da especificação de Projetos).
@@ -94,12 +98,36 @@ Quando não dá para aplicar: outra revisão já `ganha` no mesmo orçamento (n�
 `FAILED` no inbox com o motivo em `last_error` e o receptor responde `200 { status: "failed", error }`, sem
 reentrega em laço. O Financeiro não altera o status do projeto no Core.
 
+### 2.2 Caches de site, cargo e feriado e conferência dos ids (ondas V2 e V4)
+
+Desde 2026-11-08 o Financeiro segue a regra do [mapa de interoperabilidade §1](mapa-interoperabilidade.md#1-regra-de-casamento-vale-para-os-quatro):
+guarda o id do Core e escolhe do cache (`axis_master_cache`), sem digitar.
+
+| Cache | Evento | Uso no Financeiro |
+|---|---|---|
+| `SITE` | `site.*` | `budget_destinations.site_axis_id` (opcional): o destino escolhe o site do Core; km e pedágio continuam do Financeiro. Site fora do cache ou inativo é recusado ao gravar. A revisão sugere o destino ligado ao site do projeto (`site_id` de `project.*`) |
+| `JOB_TITLE` | `job_title.*` | `job_title_role_maps.job_title_name` vem do cache (o nome que o navegador manda é ignorado); `job_title.updated` renomeia o mapa; cargo excluído não recebe mapa novo. A lista "cargos sem função" junta os cargos do cache e os dos colaboradores |
+| `HOLIDAY` | `holiday.*` | Dias úteis da janela da cotação AWS e dos painéis de equipe e rateio descontam os feriados ativos. Sem nenhum feriado no cache, a cotação avisa que contou só segunda a sexta |
+
+Consulta para os seletores: `GET /api/v1/master-data/:kind` (`sites`, `clients`, `projects`, `cost-centers`,
+`collaborators`, `job-titles`, `holidays`) com `?search=` (código ou nome), `?ids=` (o já escolhido) e
+`?includeInactive=true`. Centro de custo e colaborador exigem `cost_center:read`.
+
+Conferência dos ids (F5): compra, reembolso, adiantamento e alocação com `cost_center_id` ou `project_id` que o
+cache não conhece **são lançados assim mesmo** (dado financeiro não se perde); o evento fica `PROCESSED` com
+`last_error` começando por `aviso:` e o aviso vai para o log. A importação do consumo da Logística faz o mesmo e
+devolve `unknownCostCenters`/`unknownProjects`, que a tela de controladoria mostra.
+
+Aprovação do envio da cotação (F4): todo `logisticsMaterialCode` que vai ao Core é reconferido na Logística
+(`GET /integration/materials?codes=`). Código inexistente ou inativo bloqueia a aprovação com a lista dos códigos;
+Logística fora do ar ou sem configuração também bloqueia (não sai cotação com material não conferido).
+
 ## 3. Eventos Financeiro → Core
 
 Outbox do Financeiro → `AXIS_EVENTS_URL`, com `X-Financeiro-Signature` e `Idempotency-Key`.
 Eventos previstos: `payable.approved`, `payable.paid`, `payable.cancelled` (F6). Com
-`AXIS_EVENTS_URL` vazio, ficam `PENDING`. O receptor no Core (`POST /integration/inbound`) é o mesmo
-pré-requisito da Logística ([integracao-core-logistica.md §5](integracao-core-logistica.md#5-próximos-passos-ordem-sugerida)).
+`AXIS_EVENTS_URL` vazio, ficam `PENDING`. O receptor no Core (`POST /integration/inbound`) já existe (o mesmo
+da Logística), mas ainda **não tem handler de `payable.*`** (F7 do mapa de interoperabilidade, onda V5); até lá esses eventos não mudam nada no Core. Ver [integracao-core-logistica.md §5](integracao-core-logistica.md#5-próximos-passos-ordem-sugerida).
 
 ## 4. Cotação do projeto
 
@@ -191,8 +219,9 @@ da SOW e do Bid Template e envio da cotação). O Financeiro precisa assinar `pr
 ## 5. O que o Core precisa fazer (ordem sugerida)
 
 1. Incluir a origem do Financeiro em `CORS_ALLOWED_ORIGINS` e cadastrar o satélite (sem `frontendUrl`).
-2. Emitir `user.disabled`. (`cost_center.created/updated` e `project.updated/deleted` com o estado
-   completo do projeto já são emitidos desde 2026-11-07.)
+2. Emitir `user.*`, `job_title.*` e `holiday.*` (contrato V1; o Financeiro já consome desde 2026-11-08) e cadastrar
+   a assinatura de `site.*`, `user.*`, `job_title.*` e `holiday.*` no satélite Financeiro. (`cost_center.created/updated`
+   e `project.updated/deleted` com o estado completo do projeto já são emitidos desde 2026-11-07.)
 3. ~~Emitir `purchase.*` e `finance_request.approved`~~ — feito em 2026-11-08
    ([integracao-centros-de-custo.md §3](integracao-centros-de-custo.md#3-core-compras-reembolsos-e-adiantamentos)).
    O Financeiro precisa assinar `purchase.*`, `finance_request.approved` e
@@ -200,5 +229,6 @@ da SOW e do Bid Template e envio da cotação). O Financeiro precisa assinar `pr
    orçamento (`PUT /integration/cost-centers/:id/budget-status`).
 4. Decidir F-01 (dono do cadastro de fornecedores) e, se for o Financeiro, trocar o texto livre
    `supplier` da cotação por `supplierId`.
-5. Criar o receptor de eventos de satélite e mostrar na requisição de compra o estado do pagamento.
+5. ~~Criar o receptor de eventos de satélite~~ (existe: `POST /integration/inbound`); falta o handler de `payable.*`
+   (F7) e mostrar na requisição de compra o estado do pagamento.
 6. Token de launcher dedicado, para habilitar o botão "Abrir".

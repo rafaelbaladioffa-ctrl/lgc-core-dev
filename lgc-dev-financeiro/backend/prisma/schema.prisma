@@ -123,9 +123,10 @@ model IntegrationMessage {
   @@map("integration_messages")
 }
 
-/// Cache dos mestres do Core (usuário, colaborador, cliente, projeto, centro de custo). Nunca editável aqui.
+/// Cache dos mestres do Core (usuário, colaborador, cliente, projeto, centro de custo, site, cargo, feriado). Nunca editável aqui.
+/// HOLIDAY guarda a data (`AAAA-MM-DD`) em `code`.
 model AxisMasterCache {
-  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER
+  kind             String // USER | COLLABORATOR | CLIENT | PROJECT | COST_CENTER | SITE | JOB_TITLE | HOLIDAY
   axisId           String   @map("axis_id")
   code             String?
   name             String?
@@ -264,10 +265,13 @@ model BudgetMaterial {
   @@map("budget_materials")
 }
 
-/// Destinos a partir da sede: km ida e volta e pedágio por dia.
+/// Destinos a partir da sede: km ida e volta e pedágio por dia. Pode apontar para o site do Core (F1); km e
+/// pedágio continuam do Financeiro.
 model BudgetDestination {
   id          String   @id @default(uuid())
   name        String   @unique
+  /// Site do Core (cache `SITE`); nulo = destino sem site cadastrado no Core.
+  siteAxisId  String?  @map("site_axis_id")
   kmRoundTrip Decimal  @map("km_round_trip") @db.Decimal(10, 2)
   tollPerDay  Decimal  @default(0) @map("toll_per_day") @db.Decimal(14, 2)
   routeNotes  String?  @map("route_notes")
@@ -277,6 +281,7 @@ model BudgetDestination {
   updatedBy   String   @map("updated_by")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
+  @@index([siteAxisId])
   @@map("budget_destinations")
 }
 

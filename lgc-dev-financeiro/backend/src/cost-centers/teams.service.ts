@@ -147,7 +147,7 @@ export class TeamsService {
   private async compute(node: CcNode, period: Period) {
     const warnings: string[] = [];
     const today = parseDate(todaySaoPaulo());
-    const days = workingDays(period);
+    const days = workingDays(period, undefined, await this.ctx.holidays(period));
     const [allocations, params, roleMap, logs, costs] = await Promise.all([
       this.ctx.allocations([node.id], period),
       this.ctx.paramsAt(new Date(Math.min(period.end.getTime() - 1, today.getTime()))),

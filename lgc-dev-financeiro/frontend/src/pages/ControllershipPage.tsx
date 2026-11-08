@@ -15,6 +15,7 @@ import {
   listAdvances,
   listCostCenters,
   listOverheadRules,
+  logisticsImportWarning,
   percentTargetsComplete,
   saveJobTitleMap,
   saveOverheadRule,
@@ -145,6 +146,11 @@ function Closing() {
           <p>
             {logistics.created} lançamentos novos · {logistics.replaced} substituídos · {logistics.unchanged} sem alteração.
           </p>
+          {logisticsImportWarning(logistics) && (
+            <p className="alert alert-warning" role="status">
+              {logisticsImportWarning(logistics)}
+            </p>
+          )}
         </div>
       )}
     </section>
@@ -549,7 +555,7 @@ function JobTitles() {
   return (
     <section className="card">
       <h2>Cargos × funções</h2>
-      <p className="muted section-hint">O cargo do Axis Core define a função do orçamento usada no custo da folha por centro de custo.</p>
+      <p className="muted section-hint">O cargo do Axis Core define a função do orçamento usada no custo da folha por centro de custo. O nome do cargo é mantido no Axis Core.</p>
       <Notice notice={notice} />
       {maps.error && <ErrorAlert message={maps.error} onRetry={maps.reload} />}
       {maps.loading && !maps.data && <p className="muted">Carregando…</p>}
@@ -609,7 +615,9 @@ function JobTitles() {
                   const changed = choice[m.jobTitleId] !== undefined && choice[m.jobTitleId] !== m.roleKey;
                   return (
                     <tr key={m.jobTitleId}>
-                      <td>{m.jobTitleName}</td>
+                      <td>
+                        {m.jobTitleName} {m.active === false && <Badge tone="warning">Excluído no Core</Badge>}
+                      </td>
                       <td>{roleSelect(m.jobTitleId, m.roleKey, m.jobTitleName)}</td>
                       <td>
                         {changed && (
