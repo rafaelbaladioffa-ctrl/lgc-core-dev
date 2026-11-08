@@ -11,6 +11,7 @@ O que descreve código removido ou entregas passadas está em [arquivo/](arquivo
 - [operacao.md](operacao.md) — como subir, variáveis de ambiente, migrações, backup.
 - [diretrizes-desenvolvimento.md](diretrizes-desenvolvimento.md) — padrões obrigatórios e Definition of Done.
 - [integracao-core-logistica.md](integracao-core-logistica.md) — contratos entre Core e Logística.
+- [plano-projeto-aprovado-ponta-a-ponta.md](plano-projeto-aprovado-ponta-a-ponta.md) — plano: projeto aprovado → requisição à Logística → custos no CC → obra no Field (em implantação).
 
 ## Domínio
 
