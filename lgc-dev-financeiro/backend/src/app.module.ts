@@ -14,6 +14,7 @@ import { AuditInterceptor } from './audit/audit.interceptor.js';
 import { CorrelationMiddleware } from './audit/correlation.middleware.js';
 import { IntegrationModule } from './integration/integration.module.js';
 import { HealthController } from './health/health.controller.js';
+import { BudgetParamsModule } from './budget-params/budget-params.module.js';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { HealthController } from './health/health.controller.js';
     RbacModule,
     AuthModule,
     IntegrationModule,
+    BudgetParamsModule,
   ],
   controllers: [HealthController],
   providers: [

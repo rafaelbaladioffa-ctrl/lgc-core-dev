@@ -1,0 +1,480 @@
+# Axis Financeiro — módulo Projetos (orçamento e resultado)
+
+Primeiro módulo de domínio do satélite Financeiro: **orçar o projeto, medir o lucro previsto e
+comparar com o realizado**. Documento de **alvo**: nada daqui está implementado; o estado de cada
+entrega fica em [§16](#16-entregas).
+
+Redigido em 2026-11-07 a partir da planilha que a LGC usa hoje para cotar projetos do cliente AWS
+(*Calculadora SOW AWS v5*: abas Calculadora, Custos e Lucro, Parâmetros e leitura da SOW), da
+[especificação do Financeiro](especificacao.md) e do cadastro de projetos do Core
+([cadastros.md §10](../../docs/dominio/cadastros.md#10-projetos)).
+
+> **Repositório público.** Este documento descreve parâmetros e fórmulas, **nunca valores**:
+> salários, custo hora, valor hora cobrado, custo de material, metas e catálogos de cliente, textos de
+> SOW e dados de sites ficam só no banco (cadastrados pela tela de Parâmetros) ou em arquivos fora do
+> Git. Testes usam valores fictícios.
+
+## 0. Resumo
+
+| Item | Decisão |
+|---|---|
+| Prioridade | Projetos é o primeiro módulo do Financeiro; contas a pagar (F1–F6 da [especificação](especificacao.md)) vem depois. Ver P-01 |
+| Onde mora | Satélite Financeiro (`lgc-dev-financeiro/`), banco `axis_financeiro` |
+| Projeto | O do Core (`PROP-…`), lido do cache `axis_master_cache`. O Financeiro não cria nem edita projeto |
+| O que o módulo guarda | Parâmetros de custo versionados, catálogos (material, destinos), orçamentos com revisões, dados da SOW, apontamentos e custos realizados |
+| Cálculo | No servidor, com `Prisma.Decimal`. O frontend pede simulação à API; nunca calcula dinheiro sozinho |
+| Modelos de orçamento | `generico` (qualquer obra) e `aws_sow` (genérico + leitura da SOW, horas-meta, indicadores e valores do Bid Template) |
+| Resultado-chave | Lucro real depois de impostos e **lucro sobre o custo** contra a meta da empresa |
+
+## 1. Da planilha para o sistema
+
+| Aba da planilha | Vira no sistema |
+|---|---|
+| Parâmetros | Conjunto de parâmetros **versionado** (§4) + catálogo de materiais + tabela de destinos |
+| SOW (colar aqui) | Importação da SOW no modelo `aws_sow` (§7.1) |
+| Calculadora §1–§2 | Cabeçalho do orçamento e linhas de cabo do modelo AWS (§7) |
+| Calculadora §3–§6 | Composição do orçamento: equipe, material, condições gerais, total da proposta (§5) |
+| Calculadora §7–§8 | Indicadores da AWS e valores para o Bid Template (§7.3–§7.4) |
+| Custos e Lucro §1–§11 | Custo previsto, indiretos, resultado, preço mínimo e preço da meta (§6) |
+| Custos e Lucro §12 | Realizado: apontamentos e custos lançados (§8) |
+
+O que muda em relação à planilha está em [§15](#15-diferenças-intencionais-em-relação-à-planilha).
+
+## 2. Conceitos
+
+- **Projeto**: registro do Core (`code`, cliente, centro de custo, responsável, status). O Core ainda
+  não tem nome nem valor de projeto; o título fica no orçamento (P-07).
+- **Orçamento** (`project_budgets`): um por projeto e modelo. Tem revisões.
+- **Revisão** (`budget_revisions`): versão numerada (R1, R2…) com as entradas, o conjunto de
+  parâmetros usado e o resultado calculado. Só a revisão `rascunho` é editável.
+- **Conjunto de parâmetros** (`parameter_sets`): valores de custo, impostos e metas vigentes a partir
+  de uma data. Publicado, fica imutável; mudar um valor gera nova versão. Cada revisão aponta para o
+  conjunto que usou, então um orçamento antigo não muda quando o salário ou o imposto mudam.
+- **Cobrado × custo**: toda linha do orçamento tem o valor **cobrado do cliente** (receita) e o
+  **custo real da LGC**. A diferença por grupo mostra onde está o lucro.
+- **Realizado**: o que de fato aconteceu na obra (equipe, dias, carros, custos), comparado com a
+  revisão aprovada.
+
+## 3. Ciclo de vida
+
+### 3.1 Revisão
+
+```
+rascunho ──submeter──▶ em_aprovacao ──aprovar envio──▶ enviada ──cliente aceitou──▶ ganha
+   ▲                      │                              │
+   └────── devolver ──────┘                              ├──cliente recusou──▶ perdida
+                                                         └──nova revisão─────▶ substituida
+```
+
+- Nova revisão nasce copiando a última (entradas e conjunto de parâmetros, que pode ser trocado pelo
+  vigente). A anterior, se `enviada`, vira `substituida` quando a nova é enviada.
+- **Nada é enviado ao cliente sem aprovação** (regra da planilha): `aprovar envio` exige
+  `budget:approve`. Ver P-03.
+- `ganha` congela a revisão como **linha de base** do realizado. Só uma revisão por orçamento pode
+  estar `ganha`.
+- Revisões nunca são apagadas; rascunho abandonado pode ser `descartado`.
+
+### 3.2 Relação com o status do Core
+
+O Core é dono do status do projeto (`proposta → aprovado → em_execucao → encerrado`). O Financeiro
+**não altera** o status do Core; só avisa divergências na tela:
+
+| Situação | Aviso |
+|---|---|
+| Projeto `aprovado`/`em_execucao` no Core sem revisão `ganha` | "Projeto aprovado sem orçamento ganho" |
+| Revisão `ganha` com projeto ainda `proposta` no Core | "Atualize o status do projeto no Core" |
+| Projeto `encerrado` no Core com realizado aberto | "Feche o realizado" |
+
+Emitir evento para o Core (`budget.won`) fica para quando o Core tiver receptor (P-07).
+
+## 4. Parâmetros (versionados)
+
+Conjunto `PAR-NNNN`, estados `rascunho → vigente → arquivado`. Só um `vigente` por vez; publicar
+um novo arquiva o anterior. Toda leitura e alteração é auditada (há salário).
+
+### 4.1 Funções da equipe
+
+Uma linha por função (inicialmente `tecnico`, `encarregado`, `gerente_projeto`; outras podem ser
+cadastradas):
+
+| Campo | Uso |
+|---|---|
+| `billing_rate` | Valor hora cobrado do cliente (margem embutida) |
+| `monthly_salary` | Salário bruto da carteira |
+| `plr_salaries_per_year` | PLR em nº de salários (sem INSS/FGTS) |
+| `meal_per_worked_day` | Vale-refeição por dia trabalhado |
+| `transport_per_month` | Vale-transporte, pago 11 meses |
+| `gym_per_month`, `health_per_month`, `other_benefits_per_month` | Pagos 12 meses |
+| `cost_per_hour_override` | Custo hora informado direto (ex.: gerente terceirizado); quando preenchido, substitui o cálculo |
+| `field_role` | Se entra nas "horas de campo" (técnico e encarregado sim; gerente não) |
+
+### 4.2 Gerais
+
+| Grupo | Parâmetros |
+|---|---|
+| Jornada | horas por dia; dias úteis no ano; dias úteis de férias |
+| Encargos | INSS patronal; RAT × FAP; terceiros; FGTS; provisão de multa do FGTS (% do FGTS); desconta 6% no VT (sim/não) |
+| Impostos (lucro presumido) | PIS; COFINS; ISS; presunção IRPJ; IRPJ; adicional de IRPJ aplica (sim/não); presunção CSLL; CSLL |
+| Veículo | R$/km cobrado; consumo (km/l); preço do combustível; desgaste (R$/km) |
+| Material | markup sobre material; sobra de RJ45 (%) |
+| Plataforma | locação mensal; dias de uso por mês; frete/mobilização; diária cobrada padrão |
+| Indiretos e meta | contingência (% dos diretos); rateio de despesas fixas (% da receita); comissão (% da receita); prazo de recebimento (dias); custo do dinheiro (% ao mês); **meta de lucro sobre o custo** |
+
+### 4.3 Catálogos (não versionados; o orçamento copia o valor na hora de usar)
+
+- **Materiais** (`budget_materials`): nome, fabricante, código, unidade, preço cobrado, custo real,
+  referência no formulário do cliente (ex.: linha do Bid Template), ativo. Ver P-06.
+- **Destinos** (`budget_destinations`): nome, km ida e volta a partir da sede, pedágio por dia
+  ida e volta, rota/fonte, ativo.
+
+## 5. Composição do orçamento (entradas)
+
+Cada revisão guarda as entradas abaixo; o servidor gera as linhas calculadas (§6). Quantidades
+`NUMERIC(14,4)`; dinheiro `NUMERIC(14,2)`.
+
+| Seção | Entradas |
+|---|---|
+| Cabeçalho | Projeto do Core (obrigatório), título, início e conclusão previstos, observações |
+| Equipe | Por função: pessoas e dias (funções de campo) ou horas (gerente) |
+| Material | Item do catálogo ou avulso (descrição, preço cobrado, custo real), quantidade; frete/retirada; perdas (% do custo) |
+| Deslocamento | Destino do catálogo ou km/pedágio manuais; carros; aluguel de carro e estacionamento por carro/dia (custo). Diárias de veículo = carros × dias de trabalho |
+| Plataforma | Dias; diária cobrada; custo real opcional (substitui o cálculo) |
+| Hospedagem e alimentação | Pessoas × noites × valor; pessoas × dias × valor; custo real opcional |
+| Mão de obra extra (custo, não cobrada) | Horas extras/fim de semana previstas (R$); credenciamento e integração do cliente (R$) |
+| Outros custos (não cobrados) | EPI e uniformes; ferramentas e equipamentos; seguro e ART; outros com descrição |
+
+"Dias de trabalho" é um número da revisão, comum a todas as funções de campo (como na planilha).
+Equipes com dias diferentes por função ficam para depois.
+
+## 6. Regras de cálculo
+
+Arredondamento meio-para-cima em 2 casas **só no total de cada linha**; custo hora com 4 casas.
+`N(x)` = 0 quando vazio.
+
+### 6.1 Custo hora do colaborador CLT (por função)
+
+```
+dias_trab      = dias_úteis_ano − dias_férias
+horas_ano      = dias_trab × horas_dia
+base_folha     = 12 × salário + salário (13º) + salário / 3 (1/3 de férias)
+encargos       = base_folha × (INSS + RAT + terceiros)
+fgts           = base_folha × FGTS × (1 + provisão_multa)
+plr            = salário × plr_salários
+vr             = vale_refeição × dias_trab
+vt             = max(0, 11 × (vale_transporte − (desconta_6% ? 0,06 × salário : 0)))
+fixos          = 12 × (wellhub + saúde + outros_benefícios)
+custo_anual    = 12 × salário + 13º + 1/3 + encargos + fgts + plr + vr + vt + fixos
+custo_hora     = custo_override ?? custo_anual / horas_ano
+```
+
+A tela de Parâmetros mostra também o markup da hora: `billing_rate / custo_hora − 1`.
+
+### 6.2 Receita (valor da proposta)
+
+```
+horas(função)      = pessoas × dias × horas_dia        (gerente: horas informadas)
+MO_cobrada         = Σ horas(função) × billing_rate(função)
+material_cobrado   = Σ qtd × preço_cobrado × (1 + markup_material)
+diárias_veículo    = carros × dias
+carro_dia          = km_ida_volta × R$/km + pedágio_dia
+deslocamento_cobr  = diárias_veículo × carro_dia
+plataforma_cobr    = dias_plataforma × diária_cobrada
+hosp_alim_cobr     = pessoas×noites×valor + pessoas×dias×valor
+RECEITA            = MO_cobrada + material_cobrado + deslocamento_cobr + plataforma_cobr + hosp_alim_cobr
+```
+
+### 6.3 Impostos sobre a nota
+
+```
+alíquota = PIS + COFINS + ISS + presunção_IRPJ × (IRPJ + (adicional ? 10% : 0)) + presunção_CSLL × CSLL
+impostos = RECEITA × alíquota
+```
+
+O adicional de IRPJ aplicado sobre toda a presunção é a simplificação conservadora da planilha
+(P-09). CBS/IBS de teste não entram como custo.
+
+### 6.4 Custos diretos
+
+```
+MO        = Σ horas(função) × custo_hora(função) + horas_extras + credenciamento
+material  = Σ qtd × custo_real + frete + perdas% × Σ qtd × custo_real
+km_total  = diárias_veículo × km_ida_volta
+desloc    = km_total / consumo × combustível + diárias_veículo × pedágio_dia
+            + km_total × desgaste + diárias_veículo × (aluguel_carro + estacionamento)
+plataforma= (custo_real_informado ?? dias_plataforma × (locação_mensal / dias_uso_mês)) + frete_plataforma
+hosp_alim = custo_real_informado ?? valor cobrado
+outros    = EPI + ferramentas + seguro_ART + outros
+DIRETOS   = MO + material + desloc + plataforma + hosp_alim + outros
+```
+
+Material sem custo real cadastrado usa o preço cobrado, **mas a linha e o resultado ficam marcados
+como "custo estimado"** (na planilha isso era silencioso).
+
+### 6.5 Indiretos e resultado
+
+```
+contingência   = DIRETOS × contingência%
+rateio         = RECEITA × rateio%
+comissão       = RECEITA × comissão%
+custo_fin      = DIRETOS × custo_dinheiro%_mês × prazo_recebimento / 30
+INDIRETOS      = contingência + rateio + comissão + custo_fin
+
+margem_contrib = RECEITA − impostos − DIRETOS
+LUCRO_REAL     = margem_contrib − INDIRETOS
+CUSTO_TOTAL    = DIRETOS + INDIRETOS
+LUCRO_S_CUSTO  = LUCRO_REAL / CUSTO_TOTAL            (meta: parâmetro; 100% = lucro igual ao gasto)
+margem_real    = LUCRO_REAL / RECEITA
+lucro_dia      = LUCRO_REAL / dias ;  lucro_hora_campo = LUCRO_REAL / horas_de_campo
+```
+
+Situação: `PREJUÍZO` (lucro < 0), `ABAIXO DA META`, `META ATINGIDA`.
+
+### 6.6 Preço mínimo, preço da meta e valor hora necessário
+
+Com `K = DIRETOS + contingência + custo_fin`, `t` = alíquota, `r` = rateio%, `c` = comissão%,
+`m` = meta:
+
+```
+preço_mínimo   = K / (1 − t − r − c)                        (lucro zero)
+preço_meta     = (1 + m) × K / (1 − t − (1 + m) × (r + c))  (lucro = m × custo total)
+falta          = preço_meta − RECEITA
+hora_meta(f)   = billing_rate(f) × (MO_cobrada + falta) / MO_cobrada
+```
+
+Se um denominador for ≤ 0, o valor fica "inviável com estes percentuais". O `hora_meta` mantém
+material e deslocamento e ajusta só as horas, como a planilha.
+
+### 6.7 Cobrado × custo por grupo
+
+Mão de obra; material; deslocamento + plataforma + hospedagem/alimentação; outros (só custo).
+Para cada grupo: cobrado, custo, resultado, lucro sobre o custo. Deslocamento negativo = R$/km
+cobrado abaixo do custo real.
+
+## 7. Modelo `aws_sow`
+
+Estende o genérico. Constantes do cliente (pesos das horas-meta, metas de horas por metro e por
+porta, eficiência mínima, custo por porta, tolerâncias, tabela tipo de cabo → linha do Bid Template)
+ficam num **perfil de cliente** versionado junto com os parâmetros, nunca no código.
+
+### 7.1 Importação da SOW
+
+- O usuário cola o texto da SOW (como hoje). Upload de PDF com extração fica para depois.
+- O servidor extrai: FBN, SOW UID, site, nome do projeto, início e conclusão da execução, prazo de
+  envio (UTC, exibido também em Brasília), visita técnica, contatos, racks *live* (exige janela),
+  plataforma elevatória (pedida / não precisa / não mencionada) e as linhas de cabo
+  (quantidade × tipo, comprimento, fibras).
+- A tela mostra **linha a linha** o que foi lido e o total de cabos, para conferência contra a SOW.
+  Todo campo pode ser corrigido; a correção fica registrada.
+- Linhas manuais para cabo que a SOW não listou no formato padrão.
+- O parser é testado com SOWs fictícias no formato real (as reais são do cliente e não entram no
+  repositório). O texto original é guardado ou não conforme P-05.
+
+### 7.2 Horas-meta e equipe
+
+```
+por tipo de cabo:
+  comprimento_médio  = round(metros_SOW / qtd)
+  metros_considerados= qtd × comprimento_médio
+  portas             = qtd × fibras / 2              (cobre: fibras = 0)
+  horas_meta         = peso_m × metros_considerados × meta_h_metro + peso_p × portas × meta_h_porta
+horas_de_campo       = Σ funções de campo: pessoas × dias × horas_dia
+dias_sugeridos       = ceil(Σ horas_meta / (pessoas_de_campo × horas_dia))
+cabe_na_janela       = dias ≤ dias úteis entre início e conclusão (calendário de feriados do Core)
+horas_T(tipo)        = round(horas_de_campo × horas_meta(tipo) / Σ horas_meta); a diferença de
+                       arredondamento vai para a primeira linha; pode ser sobrescrita à mão
+```
+
+A soma das horas T tem de ser igual às horas de campo; se não for, a revisão não pode ser submetida.
+
+Sugestões: RJ45 = `ceil(cabos de cobre × 2 × (1 + sobra))`; limpador MPO quando houver cabo MPO.
+Cabos fornecidos pelo cliente entram **só como instalação** (nunca em material).
+
+### 7.3 Indicadores do cliente (prévia da aba *Bid KPIs*)
+
+| Indicador | Cotação | Precisa "Yes" + justificativa quando |
+|---|---|---|
+| Eficiência | Σ horas_meta / horas_de_campo | abaixo da eficiência mínima |
+| Custo por porta | RECEITA / portas | mais de 10% acima da meta |
+| Mão de obra por porta | MO_cobrada / portas | sempre (meta do cliente inconsistente; configurável) |
+| Horas por porta | horas_de_campo / portas | acima da meta + tolerância |
+| Horas por metro | horas_de_campo / metros_considerados | acima da meta + tolerância |
+
+Cada "Yes" pede um texto de justificativa (em inglês) guardado na revisão.
+
+### 7.4 Valores para o Bid Template
+
+Lista pronta para digitação: nome da proposta (código do projeto), início e conclusão, lead time,
+R$/h e horas por função, deslocamento por carro/dia e nº de diárias, plataforma (diária/dias), e por
+tipo de cabo linha do bid, comprimento médio, quantidade e horas T. Textos de apoio em inglês
+(ex.: descrição do deslocamento). Exportar para planilha fica para depois.
+
+## 8. Realizado
+
+Disponível quando o orçamento tem revisão `ganha`. Linha de base = essa revisão.
+
+- **Apontamento** (um por projeto, editável até fechar): técnicos, encarregados, dias trabalhados,
+  horas por dia, carros, dias de plataforma, horas extras (R$), valor faturado ao cliente
+  (padrão = receita da revisão ganha). Em branco = igual ao cotado.
+- **Custos lançados** (`actual_cost_entries`): data, grupo (material, deslocamento, plataforma,
+  hospedagem/alimentação, outros, mão de obra extra), descrição, valor, documento de referência.
+  Não se apagam: correção por lançamento inverso com motivo. Quando o contas a pagar existir, os
+  títulos rateados para o projeto entram aqui automaticamente.
+- **Cálculo do realizado**: mão de obra = horas apontadas × custo hora (P-04 define de qual conjunto
+  de parâmetros); deslocamento recalculado com carros × dias apontados; plataforma = dias apontados ×
+  diária real; material e demais grupos = **lançamentos**, ou o cotado enquanto não houver lançamento
+  no grupo (marcado "sem lançamento"). Contingência não entra no realizado.
+- **Cotado × realizado**: receita, impostos, cada grupo de custo, indiretos, lucro real, lucro sobre
+  o custo, margem e horas de campo, com a diferença.
+- **Fechar realizado**: congela o resultado; reabrir exige `budget:approve` e motivo.
+
+## 9. Permissões e perfis
+
+Salário e custo são confidenciais: quem monta a proposta não precisa vê-los.
+
+| Permissão | Descrição |
+|---|---|
+| `budget:read` | Ver orçamentos: entradas, valores cobrados, indicadores do cliente |
+| `budget:read_cost` | Ver custos, impostos, indiretos, lucro, preço mínimo/meta e custo hora |
+| `budget:write` | Criar orçamento e editar revisão em rascunho; importar SOW |
+| `budget:approve` | Aprovar envio, marcar ganha/perdida, reabrir realizado |
+| `budget_params:read` | Ver parâmetros e catálogos (sem salários) |
+| `budget_params:read_payroll` | Ver salários e benefícios (leitura auditada) |
+| `budget_params:write` | Criar e publicar conjunto de parâmetros, catálogos e perfis de cliente |
+| `project_actual:write` | Lançar apontamentos e custos realizados |
+
+| Perfil | Permissões |
+|---|---|
+| `ORCAMENTISTA` | budget:read/write, budget_params:read |
+| `GESTOR_COMERCIAL` | budget:read/read_cost/approve, budget_params:read |
+| `GESTOR_PROJETO` | budget:read, project_actual:write |
+| `CONTROLADORIA` | budget:read/read_cost, budget_params:read/read_payroll/write, project_actual:write |
+
+Sem `budget:read_cost`, a API **omite** os campos de custo (não basta esconder na tela). Ver P-02 e
+P-03.
+
+## 10. Modelo de dados (alvo)
+
+| Tabela | Conteúdo |
+|---|---|
+| `parameter_sets` | `code` (`PAR-NNNN`), status, `effective_from`, parâmetros gerais (§4.2) em colunas, publicado por/em |
+| `parameter_set_roles` | função (§4.1) por conjunto |
+| `client_profiles` | perfil de cliente versionado (constantes AWS §7, tabela tipo de cabo → linha do bid) |
+| `budget_materials`, `budget_destinations` | catálogos (§4.3) |
+| `project_budgets` | `axis_project_id`, `model` (`generico`/`aws_sow`), `client_profile_id?`, título |
+| `budget_revisions` | número, status, `parameter_set_id`, entradas escalares, totais calculados em colunas (receita, impostos, diretos, indiretos, lucro, lucro sobre custo), `result_snapshot` JSON, criado/submetido/aprovado por e em, motivo |
+| `budget_revision_team`, `budget_revision_items` | equipe e itens de material/custo da revisão, com valores copiados do catálogo |
+| `budget_revision_sow` | dados lidos da SOW, correções e justificativas dos indicadores |
+| `budget_revision_cables` | linhas de cabo (§7.2) |
+| `project_actuals` | apontamento (§8), status aberto/fechado |
+| `actual_cost_entries` | lançamentos realizados, append-only com estorno |
+
+Revisão `ganha`/`enviada` e conjunto publicado são imutáveis (checado no serviço e por teste).
+Toda mutação em `audit_events`; publicar parâmetros, aprovar envio, ganhar/perder e fechar realizado
+gravam evento de negócio com antes/depois.
+
+## 11. API (prefixo `api/v1`)
+
+| Rota | Permissão |
+|---|---|
+| `GET/POST /parameter-sets`, `GET/PATCH /parameter-sets/:id`, `POST /:id/publish` | budget_params:read / write (salários exigem read_payroll) |
+| `GET /parameter-sets/:id/hourly-costs` | budget_params:read_payroll |
+| `GET/POST/PATCH /budget-materials`, `/budget-destinations`, `/client-profiles` | budget_params:read / write |
+| `GET /projects` (cache do Core + resumo do orçamento) | budget:read |
+| `GET/POST /budgets`, `GET /budgets/:id` | budget:read / write |
+| `POST /budgets/:id/revisions` (nova revisão a partir da última) | budget:write |
+| `GET/PATCH /revisions/:id` | budget:read / write |
+| `POST /revisions/:id/simulate` (calcula sem gravar) | budget:read |
+| `POST /revisions/:id/sow/import` | budget:write |
+| `POST /revisions/:id/submit`, `/return`, `/approve-send`, `/won`, `/lost`, `/discard` | budget:write / approve |
+| `GET/PUT /projects/:axisProjectId/actual`, `POST /actual/close`, `/reopen` | project_actual:write / budget:approve |
+| `GET/POST /projects/:axisProjectId/actual/costs`, `POST /actual/costs/:id/reverse` | project_actual:write |
+| `GET /projects/:axisProjectId/comparison` | budget:read_cost |
+
+Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.05"`).
+
+## 12. Telas
+
+1. **Projetos**: projetos do Core com status, orçamento, revisão atual, receita, lucro sobre o custo
+   e situação (sem custo para quem não tem `read_cost`). Filtros por status, cliente, situação.
+2. **Projeto**: revisões (histórico, quem aprovou), resultado da revisão ganha, cotado × realizado,
+   avisos de divergência com o Core.
+3. **Revisão** (`FormPage` em seções, como a calculadora): cabeçalho, [SOW e cabos], equipe e dias,
+   material, deslocamento, plataforma, hospedagem, outros custos; painel lateral com receita, lucro,
+   lucro sobre o custo, preço mínimo e preço da meta atualizado por `simulate`; [indicadores e
+   valores do bid].
+4. **Realizado**: apontamento, lançamentos e comparação.
+5. **Parâmetros**: conjunto vigente, rascunho do próximo, comparação entre versões, custo hora por
+   função; catálogos de material e destinos; perfis de cliente.
+
+## 13. Integração
+
+- **Projetos e clientes**: cache alimentado por `project.created/status_changed` e
+  `client.created/updated` (já funcionam). Carga inicial pela API de consulta do Core (§2.5 da
+  [especificação](especificacao.md)).
+- O evento `project.created` não traz nome nem centro de custo; o centro de custo será necessário
+  para rateio. Ver P-07.
+- Feriados para "cabe na janela": consulta ao calendário do Core; se o Core não expuser, só dias
+  úteis com aviso "sem feriados".
+- Nenhum evento Financeiro → Core nesta frente.
+
+## 14. Fora do escopo desta frente
+
+Upload e leitura de PDF da SOW; exportação para o Bid Template; equipe com dias diferentes por
+função; custo por colaborador individual (usa-se a média por função); faturamento e contas a receber;
+custos realizados vindos do contas a pagar (até ele existir, lançamento manual); orçamento por centro
+de custo; outros modelos de cliente além do AWS.
+
+## 15. Diferenças intencionais em relação à planilha
+
+| Planilha | Sistema |
+|---|---|
+| Parâmetros alterados no lugar; orçamento antigo muda junto | Conjunto versionado; a revisão guarda o que usou |
+| Máximo de 8 itens de material e 15 tipos de cabo | Sem limite |
+| Material sem custo real vira preço cobrado, sem aviso | Usa o preço cobrado e marca "custo estimado" |
+| Realizado repete o material e os outros custos cotados | Usa custos lançados; cotado só como fallback marcado |
+| Dias úteis da janela sem feriados (`NETWORKDAYS`) | Com o calendário de feriados |
+| Uma pessoa pode alterar tudo | Permissões separadas; custo e salário confidenciais |
+| "Nada é enviado sem aprovação" é combinado | Estado `em_aprovacao` e permissão `budget:approve` |
+
+## 16. Entregas
+
+| # | Entrega | Estado |
+|---|---|---|
+| PJ1 | Parâmetros versionados, funções e custo hora (§6.1), catálogos de material e destinos, permissões e perfis; testes do cálculo com valores fictícios | **feito** (2026-11-07): ver nota abaixo |
+| PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | pendente |
+| PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | pendente |
+| PJ4 | Modelo `aws_sow`: perfil de cliente, importação da SOW, horas-meta, indicadores, valores do bid | pendente |
+| PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
+| PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
+
+**Notas da PJ1.**
+- Migração `20261108120000_pj1_parametros`: tabelas `parameter_sets`, `parameter_set_roles`,
+  `budget_materials`, `budget_destinations`; código `PAR-NNNN` por sequence; no máximo um `vigente` e
+  um `rascunho` (índices parciais); gatilhos no banco impedem alterar ou apagar conjunto publicado e
+  suas funções (só `vigente → arquivado`).
+- Primeiro rascunho nasce com as referências legais públicas (jornada, INSS, terceiros, FGTS, PIS,
+  COFINS, presunções e alíquotas de IRPJ/CSLL); ISS, RAT, veículo, metas e funções ficam vazios.
+  Rascunhos seguintes copiam o vigente.
+- Publicar exige os campos obrigatórios e ao menos uma função de campo com valor hora e custo; vigência
+  vazia vale a data de hoje (São Paulo) e não pode ser anterior à do vigente.
+- Sem `budget_params:read_payroll` a API omite salários, benefícios e custo hora; quem não tem a
+  permissão pode editar o nome e o valor hora da função, e a remuneração já cadastrada é preservada.
+- O cálculo do custo hora foi conferido contra a planilha atual com os valores reais, fora do
+  repositório; os testes versionados usam valores fictícios.
+- Telas: `#/parametros` (lista, rascunho, publicação, custo hora com composição), `#/materiais`,
+  `#/destinos`. Perfis de cliente (`client_profiles`, §7) ficam para a PJ4.
+
+## 17. Decisões pendentes
+
+| # | Pergunta | Recomendação |
+|---|---|---|
+| P-01 | Projetos antes de contas a pagar? | Sim (pedido do dono em 2026-11-07); F1–F6 continuam na especificação, depois de PJ1–PJ5 |
+| P-02 | Quem vê custo, lucro e salários? Quais pessoas recebem cada perfil? | Custo e lucro para gestor comercial e controladoria; salários só para controladoria |
+| P-03 | Quem aprova o envio? Quem orçou pode aprovar a própria revisão? | Aprovação pelo dono/gestor comercial; no início, permitir a mesma pessoa, com auditoria |
+| P-04 | Custo hora do realizado: parâmetros da revisão ganha ou os vigentes na execução? | Os da revisão ganha (compara só o que mudou na obra); mostrar os vigentes como informação |
+| P-05 | Guardar o texto original da SOW (documento do cliente)? | Guardar, com acesso restrito a `budget:write`, e prazo de retenção definido |
+| P-06 | Catálogo de material próprio ou o catálogo de materiais do Core com preço e custo? | Próprio no início (precisa de preço cobrado por cliente); vincular `axis_material_id` opcional |
+| P-07 | O projeto do Core deve ganhar nome (e o evento trazer nome e centro de custo)? | Sim: mudança de contrato no Core, em PR próprio |
+| P-08 | Planilhas preenchidas de projetos reais para validar o cálculo | Usar fora do Git, só para conferir; testes versionados com números fictícios |
+| P-09 | Manter o adicional de IRPJ sobre toda a presunção (conservador)? | Manter até a contabilidade confirmar |
+| P-10 | Valores a revisar na carga inicial: salário igual para técnico e encarregado, ISS no teto, rateio/contingência/prazo em 0, R$/km estimado, gerente sem valor | Revisar com a contabilidade antes de publicar o primeiro conjunto |

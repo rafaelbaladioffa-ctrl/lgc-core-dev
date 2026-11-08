@@ -138,3 +138,143 @@ model AxisMasterCache {
   @@index([kind, active])
   @@map("axis_master_cache")
 }
+
+// ---------------------------------------------------------------------------
+// PJ1 — módulo Projetos: parâmetros de custo versionados e catálogos
+// (docs/projetos-especificacao.md §4). Valores da empresa só no banco, nunca no Git.
+// ---------------------------------------------------------------------------
+
+enum ParameterSetStatus {
+  rascunho
+  vigente
+  arquivado
+}
+
+/// Conjunto de parâmetros de custo, impostos e metas. Publicado, fica imutável; mudar gera nova versão.
+/// Percentuais como fração (0.2 = 20%). Campos nulos só são aceitos em rascunho.
+model ParameterSet {
+  id            String             @id @default(uuid())
+  code          String             @unique // PAR-NNNN
+  status        ParameterSetStatus @default(rascunho)
+  effectiveFrom DateTime?          @map("effective_from") @db.Date
+  notes         String?
+  basedOnId     String?            @map("based_on_id")
+
+  // Jornada
+  hoursPerDay      Decimal? @map("hours_per_day") @db.Decimal(6, 2)
+  workingDaysYear  Int?     @map("working_days_year")
+  vacationWorkDays Int?     @map("vacation_work_days")
+
+  // Encargos
+  inssRate          Decimal? @map("inss_rate") @db.Decimal(9, 6)
+  ratRate           Decimal? @map("rat_rate") @db.Decimal(9, 6)
+  thirdPartyRate    Decimal? @map("third_party_rate") @db.Decimal(9, 6)
+  fgtsRate          Decimal? @map("fgts_rate") @db.Decimal(9, 6)
+  fgtsFineProvision Decimal? @map("fgts_fine_provision") @db.Decimal(9, 6)
+  vtSalaryDiscount  Boolean? @map("vt_salary_discount")
+
+  // Impostos — lucro presumido
+  pisRate         Decimal? @map("pis_rate") @db.Decimal(9, 6)
+  cofinsRate      Decimal? @map("cofins_rate") @db.Decimal(9, 6)
+  issRate         Decimal? @map("iss_rate") @db.Decimal(9, 6)
+  irpjPresumption Decimal? @map("irpj_presumption") @db.Decimal(9, 6)
+  irpjRate        Decimal? @map("irpj_rate") @db.Decimal(9, 6)
+  irpjSurcharge   Boolean? @map("irpj_surcharge")
+  csllPresumption Decimal? @map("csll_presumption") @db.Decimal(9, 6)
+  csllRate        Decimal? @map("csll_rate") @db.Decimal(9, 6)
+
+  // Veículo
+  kmRate            Decimal? @map("km_rate") @db.Decimal(14, 2)
+  fuelKmPerLiter    Decimal? @map("fuel_km_per_liter") @db.Decimal(8, 2)
+  fuelPricePerLiter Decimal? @map("fuel_price_per_liter") @db.Decimal(14, 2)
+  vehicleWearPerKm  Decimal? @map("vehicle_wear_per_km") @db.Decimal(14, 4)
+
+  // Material
+  materialMarkup Decimal? @map("material_markup") @db.Decimal(9, 6)
+  rj45SpareRate  Decimal? @map("rj45_spare_rate") @db.Decimal(9, 6)
+
+  // Plataforma elevatória
+  platformMonthlyRent  Decimal? @map("platform_monthly_rent") @db.Decimal(14, 2)
+  platformDaysPerMonth Int?     @map("platform_days_per_month")
+  platformFreight      Decimal? @map("platform_freight") @db.Decimal(14, 2)
+  platformDailyBilled  Decimal? @map("platform_daily_billed") @db.Decimal(14, 2)
+
+  // Indiretos e meta
+  contingencyRate    Decimal? @map("contingency_rate") @db.Decimal(9, 6)
+  overheadRate       Decimal? @map("overhead_rate") @db.Decimal(9, 6)
+  commissionRate     Decimal? @map("commission_rate") @db.Decimal(9, 6)
+  receivableDays     Int?     @map("receivable_days")
+  moneyCostMonthly   Decimal? @map("money_cost_monthly") @db.Decimal(9, 6)
+  targetProfitOnCost Decimal? @map("target_profit_on_cost") @db.Decimal(9, 6)
+
+  createdBy   String    @map("created_by")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedBy   String    @map("updated_by")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  publishedBy String?   @map("published_by")
+  publishedAt DateTime? @map("published_at")
+
+  roles ParameterSetRole[]
+
+  @@index([status])
+  @@map("parameter_sets")
+}
+
+/// Função da equipe num conjunto (técnico, encarregado, gerente…): valor cobrado e custo CLT.
+model ParameterSetRole {
+  id                    String   @id @default(uuid())
+  parameterSetId        String   @map("parameter_set_id")
+  roleKey               String   @map("role_key")
+  label                 String
+  fieldRole             Boolean  @default(true) @map("field_role")
+  sortOrder             Int      @default(0) @map("sort_order")
+  billingRate           Decimal? @map("billing_rate") @db.Decimal(14, 2)
+  monthlySalary         Decimal? @map("monthly_salary") @db.Decimal(14, 2)
+  plrSalariesPerYear    Decimal? @map("plr_salaries_per_year") @db.Decimal(8, 4)
+  mealPerWorkedDay      Decimal? @map("meal_per_worked_day") @db.Decimal(14, 2)
+  transportPerMonth     Decimal? @map("transport_per_month") @db.Decimal(14, 2)
+  gymPerMonth           Decimal? @map("gym_per_month") @db.Decimal(14, 2)
+  healthPerMonth        Decimal? @map("health_per_month") @db.Decimal(14, 2)
+  otherBenefitsPerMonth Decimal? @map("other_benefits_per_month") @db.Decimal(14, 2)
+  costPerHourOverride   Decimal? @map("cost_per_hour_override") @db.Decimal(14, 4)
+
+  parameterSet ParameterSet @relation(fields: [parameterSetId], references: [id], onDelete: Cascade)
+
+  @@unique([parameterSetId, roleKey])
+  @@map("parameter_set_roles")
+}
+
+/// Catálogo de materiais cobrados à parte (miscelâneas). O orçamento copia preço e custo ao usar.
+model BudgetMaterial {
+  id           String   @id @default(uuid())
+  name         String   @unique
+  manufacturer String?
+  partNumber   String?  @map("part_number")
+  unit         String   @default("un")
+  billedPrice  Decimal  @map("billed_price") @db.Decimal(14, 4)
+  realCost     Decimal? @map("real_cost") @db.Decimal(14, 4)
+  clientRef    String?  @map("client_ref") // ex.: linha no formulário do cliente
+  active       Boolean  @default(true)
+  createdBy    String   @map("created_by")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedBy    String   @map("updated_by")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("budget_materials")
+}
+
+/// Destinos a partir da sede: km ida e volta e pedágio por dia.
+model BudgetDestination {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  kmRoundTrip Decimal  @map("km_round_trip") @db.Decimal(10, 2)
+  tollPerDay  Decimal  @default(0) @map("toll_per_day") @db.Decimal(14, 2)
+  routeNotes  String?  @map("route_notes")
+  active      Boolean  @default(true)
+  createdBy   String   @map("created_by")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedBy   String   @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("budget_destinations")
+}

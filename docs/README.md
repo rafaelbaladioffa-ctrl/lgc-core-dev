@@ -37,7 +37,8 @@ O que descreve código removido ou entregas passadas está em [arquivo/](arquivo
 ## Financeiro
 
 - [../lgc-dev-financeiro/README.md](../lgc-dev-financeiro/README.md) — como rodar e o que foi entregue (F0, esqueleto).
-- [../lgc-dev-financeiro/docs/especificacao.md](../lgc-dev-financeiro/docs/especificacao.md) — especificação de contas a pagar, decisões pendentes F-01–F-07 e entregas F0–F6.
+- [../lgc-dev-financeiro/docs/projetos-especificacao.md](../lgc-dev-financeiro/docs/projetos-especificacao.md) — primeiro módulo: orçamento e resultado por projeto, decisões P-01–P-10 e entregas PJ1–PJ6.
+- [../lgc-dev-financeiro/docs/especificacao.md](../lgc-dev-financeiro/docs/especificacao.md) — base do satélite e contas a pagar (frente seguinte), decisões F-01–F-07 e entregas F0–F6.
 - [integracao-core-financeiro.md](integracao-core-financeiro.md) — contratos entre Core e Financeiro e o que falta no Core.
 
 ## Convenções desta pasta

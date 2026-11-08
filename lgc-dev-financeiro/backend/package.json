@@ -1,7 +1,7 @@
 {
   "name": "financeiro-backend",
   "version": "0.0.1",
-  "description": "Axis Financeiro — API do satélite financeiro (contas a pagar)",
+  "description": "Axis Financeiro — API do satélite financeiro (projetos e contas a pagar)",
   "private": true,
   "license": "UNLICENSED",
   "type": "module",

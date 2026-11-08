@@ -1,14 +1,21 @@
-# Axis Financeiro (satélite de contas a pagar)
+# Axis Financeiro (satélite financeiro: projetos e contas a pagar)
 
 Satélite do Axis Core, mantido como subpasta deste repositório, como a Logística.
 
 - **Stack:** NestJS 12 + Prisma 5 + PostgreSQL 16 com banco **próprio** (`axis_financeiro`); frontend React 19 + Vite 8.
-- **Especificação e entregas:** [docs/especificacao.md](docs/especificacao.md).
+- **Primeiro módulo — Projetos** (orçamento, lucro previsto e realizado): [docs/projetos-especificacao.md](docs/projetos-especificacao.md).
+- **Contas a pagar** (frente seguinte) e base do satélite: [docs/especificacao.md](docs/especificacao.md).
 - **Contratos com o Core:** [../docs/integracao-core-financeiro.md](../docs/integracao-core-financeiro.md).
 
 > **Estado em 2026-11-07:** entrega F0 (esqueleto). Health, `/me`, SSO com o access token do Core,
 > RBAC local, auditoria append-only, receptor de webhook do Core com cache de mestres, outbox e
-> frontend com login e tela inicial. Ainda não há domínio de contas a pagar (F1–F3).
+> frontend com login e tela inicial. Módulo Projetos: **PJ1 entregue** (parâmetros de orçamento
+> versionados com custo hora da equipe, catálogo de materiais e destinos, perfis do módulo). Próximo:
+> PJ2 (orçamento do projeto); contas a pagar (F1–F6) vem depois de Projetos.
+>
+> **Primeiro uso do PJ1:** conceda `CONTROLADORIA` a quem mantém os custos, crie o rascunho em
+> Parâmetros (já vem com as referências legais de encargos e impostos), preencha ISS, veículo, meta e
+> as funções da equipe, e publique. Os valores da empresa ficam só no banco.
 
 ## Rodando em desenvolvimento
 
@@ -50,6 +57,15 @@ no build e inclua o domínio do Financeiro em `CORS_ALLOWED_ORIGINS` do Core.
 | `GET /audit` | `audit:read` |
 | `POST /webhooks/axis` | assinatura HMAC (`X-Axis-Signature`) |
 | `GET /integration/outbox/status`, `POST /dispatch`, `POST /:id/retry` | `integration:configure` |
+| `GET /parameter-sets`, `/parameter-sets/schema`, `/parameter-sets/:id` | `budget_params:read` (salários e custo hora só com `budget_params:read_payroll`, leitura registrada) |
+| `GET /parameter-sets/:id/hourly-costs` | `budget_params:read_payroll` |
+| `POST /parameter-sets` (novo rascunho), `PATCH /parameter-sets/:id`, `POST /parameter-sets/:id/publish` | `budget_params:write` |
+| `GET /budget-materials`, `/budget-destinations` (e `/:id`; `?includeInactive=true`) | `budget_params:read` (custo real do material só com `budget:read_cost`) |
+| `POST`, `PATCH /budget-materials`, `/budget-destinations` | `budget_params:write` |
+
+Perfis do módulo Projetos: `ORCAMENTISTA`, `GESTOR_COMERCIAL`, `GESTOR_PROJETO`, `CONTROLADORIA`
+([especificação §9](docs/projetos-especificacao.md#9-permissões-e-perfis)). Rode `npx prisma db seed`
+depois de aplicar a migração `pj1_parametros` para criá-los.
 
 ## Integração com o Core
 

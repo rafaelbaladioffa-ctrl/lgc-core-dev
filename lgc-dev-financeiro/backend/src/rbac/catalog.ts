@@ -1,4 +1,4 @@
-/** Catálogo de permissões e perfis do Financeiro (especificação §3). Fonte do seed. */
+/** Catálogo de permissões e perfis do Financeiro (especificação §3 e projetos-especificacao §9). Fonte do seed. */
 
 export const PERMISSIONS: Record<string, string> = {
   'supplier:read': 'Consultar fornecedores (sem dados bancários)',
@@ -18,6 +18,15 @@ export const PERMISSIONS: Record<string, string> = {
   'rbac:read': 'Consultar perfis e mapeamentos de acesso',
   'rbac:write': 'Alterar perfis concedidos e mapeamentos de acesso',
   'integration:configure': 'Acompanhar e reprocessar a integração com o Core',
+  // Módulo Projetos (orçamento e resultado)
+  'budget:read': 'Ver orçamentos de projeto: entradas, valores cobrados e indicadores do cliente',
+  'budget:read_cost': 'Ver custos, impostos, lucro, preço mínimo e custo real de material',
+  'budget:write': 'Criar orçamentos e editar revisões em rascunho',
+  'budget:approve': 'Aprovar envio de proposta, marcar ganha ou perdida e reabrir realizado',
+  'budget_params:read': 'Consultar parâmetros de orçamento e catálogos (sem salários)',
+  'budget_params:read_payroll': 'Ver salários, benefícios e custo hora da equipe (leitura registrada)',
+  'budget_params:write': 'Criar e publicar parâmetros de orçamento e manter catálogos',
+  'project_actual:write': 'Lançar apontamentos e custos realizados de projeto',
 };
 
 export interface RoleDefinition {
@@ -70,6 +79,30 @@ export const ROLES: RoleDefinition[] = [
     name: 'Administrador técnico',
     description: 'Configura acessos e integração',
     permissions: ['rbac:read', 'rbac:write', 'integration:configure', 'audit:read'],
+  },
+  {
+    code: 'ORCAMENTISTA',
+    name: 'Orçamentista',
+    description: 'Monta orçamentos de projeto; não vê custo, lucro nem salários',
+    permissions: ['budget:read', 'budget:write', 'budget_params:read'],
+  },
+  {
+    code: 'GESTOR_COMERCIAL',
+    name: 'Gestor comercial',
+    description: 'Vê custo e lucro dos orçamentos e aprova o envio das propostas',
+    permissions: ['budget:read', 'budget:read_cost', 'budget:approve', 'budget_params:read'],
+  },
+  {
+    code: 'GESTOR_PROJETO',
+    name: 'Gestor de projeto',
+    description: 'Consulta o orçamento e lança o realizado da obra',
+    permissions: ['budget:read', 'project_actual:write'],
+  },
+  {
+    code: 'CONTROLADORIA',
+    name: 'Controladoria',
+    description: 'Mantém parâmetros de custo, salários e catálogos; vê custo e lucro',
+    permissions: ['budget:read', 'budget:read_cost', 'budget_params:read', 'budget_params:read_payroll', 'budget_params:write', 'project_actual:write'],
   },
 ];
 

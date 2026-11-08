@@ -49,8 +49,15 @@ describe('catálogo de RBAC', () => {
     expect(can('TESOURARIA', 'payable:approve')).toBe(false);
   });
 
-  it('o administrador técnico não acessa títulos, pagamentos nem dados bancários', () => {
+  it('o administrador técnico não acessa títulos, pagamentos, dados bancários nem orçamentos', () => {
     const admin = byCode.get('ADMIN_TECNICO')!.permissions;
-    expect(admin.filter((p) => /^(payable|payment|supplier|bank_account):/.test(p))).toEqual([]);
+    expect(admin.filter((p) => /^(payable|payment|supplier|bank_account|budget|budget_params|project_actual):/.test(p))).toEqual([]);
+  });
+
+  it('projetos: salário só para a controladoria; orçamentista não vê custo', () => {
+    const withPayroll = ROLES.filter((r) => r.permissions.includes('budget_params:read_payroll')).map((r) => r.code);
+    expect(withPayroll).toEqual(['CONTROLADORIA']);
+    expect(byCode.get('ORCAMENTISTA')!.permissions).not.toContain('budget:read_cost');
+    expect(byCode.get('ORCAMENTISTA')!.permissions).not.toContain('budget:approve');
   });
 });

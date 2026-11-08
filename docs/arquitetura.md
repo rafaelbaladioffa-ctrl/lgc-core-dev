@@ -142,6 +142,6 @@ seed a cada partida. Procedimentos: [operacao.md](operacao.md).
 | A6 | Anexos em BYTEA no Postgres, sem antimalware (provisório) | Especificação de Requisições §27.1 |
 | A7 | Motor BPM removido em 02/11/2026 para reescrita organizada (checkpoint `629044d`) | Commit `98dfce5` |
 | A8 | Logística mantida como subpasta deste repositório (monorepo informal) | Estado atual; ver [avaliacao §5](avaliacao-2026-11-07.md#5-estrutura-do-repositório) |
-| A9 | Financeiro como subpasta `lgc-dev-financeiro/`, banco próprio, primeira frente contas a pagar; aceita só o access token do Core (sem sessão própria) | Dono do produto, 2026-11-07; [especificação](../lgc-dev-financeiro/docs/especificacao.md) |
+| A9 | Financeiro como subpasta `lgc-dev-financeiro/`, banco próprio; primeiro módulo Projetos (orçamento e resultado, decisão de 2026-11-07), depois contas a pagar; aceita só o access token do Core (sem sessão própria) | Dono do produto, 2026-11-07; [especificação](../lgc-dev-financeiro/docs/especificacao.md) |
 
 Decisões de negócio: [dominio/decisoes-negocio.md](dominio/decisoes-negocio.md).

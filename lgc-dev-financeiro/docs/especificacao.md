@@ -1,6 +1,8 @@
 # Axis Financeiro — especificação
 
-Satélite financeiro do Axis. Primeira frente: **contas a pagar**. Documento de **alvo**: a seção
+Satélite financeiro do Axis. Primeiro módulo de domínio: **Projetos** (orçamento e resultado por
+projeto), especificado em [projetos-especificacao.md](projetos-especificacao.md); decisão do dono em
+2026-11-07. Este documento cobre a frente seguinte, **contas a pagar**. Documento de **alvo**: a seção
 [§12](#12-entregas) diz o que já existe no código; o resto ainda não foi implementado.
 
 Redigido em 2026-11-07 a partir de: [arquitetura do Core](../../docs/arquitetura.md),
@@ -20,7 +22,8 @@ Redigido em 2026-11-07 a partir de: [arquitetura do Core](../../docs/arquitetura
 | Identidade | Sem login próprio. Aceita o access token do Core (HS256, mesmo segredo) |
 | Autorização | RBAC local: papéis do Core → perfis do Financeiro, mais perfis concedidos por usuário |
 | Integração | Webhook do Core (HMAC) para dados mestres e eventos de compra; outbox próprio para avisar o Core |
-| MVP | Fornecedores, contas bancárias da empresa, títulos a pagar com parcelas e rateio, aprovação, programação e baixa |
+| Ordem | 1º Projetos (PJ1–PJ6, [projetos-especificacao.md](projetos-especificacao.md)); 2º contas a pagar (F1–F6, abaixo) |
+| Contas a pagar | Fornecedores, contas bancárias da empresa, títulos a pagar com parcelas e rateio, aprovação, programação e baixa |
 
 ## 1. Princípios
 
@@ -354,6 +357,7 @@ de adiantamento; orçamento por CC; integração contábil; multiempresa.
 | # | Entrega | Estado |
 |---|---|---|
 | F0 | Esqueleto: health, `/me`, SSO com o Core, RBAC local, auditoria, receptor de webhook com cache de mestres, outbox, frontend com login e tela inicial, compose | **feito** (2026-11-07) |
+| PJ1–PJ6 | Módulo Projetos, antes de F1: ver [projetos-especificacao.md §16](projetos-especificacao.md#16-entregas) | pendente |
 | F1 | Fornecedores e dados bancários com confirmação; contas da empresa | pendente |
 | F2 | Títulos manuais: documento, retenções, parcelas, rateio, envio, aprovação, cancelamento | pendente |
 | F3 | Programação e baixa, estorno, agenda e previsão de saídas | pendente |

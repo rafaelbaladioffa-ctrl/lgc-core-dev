@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ApiError, bindSession, getMe, type Me } from './lib/api';
 import { LoginError, loadSession, loginWithAxis, saveSession, validateLogin, type Session } from './lib/auth';
+import { matchRoute, useHashPath } from './lib/router';
+import { ParameterSetsPage } from './pages/ParameterSetsPage';
+import { ParameterSetPage } from './pages/ParameterSetPage';
+import { DestinationFormPage, DestinationsPage, MaterialFormPage, MaterialsPage } from './pages/CatalogPages';
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
@@ -66,14 +70,21 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
 }
 
 const NEXT_STEPS = [
-  { title: 'Fornecedores e dados bancários', detail: 'Cadastro com confirmação dupla da conta bancária.' },
-  { title: 'Títulos a pagar', detail: 'Documento fiscal, parcelas, rateio por centro de custo e aprovação.' },
-  { title: 'Programação e baixa', detail: 'Agenda de pagamentos, baixa e estorno.' },
+  { title: 'Orçamento do projeto', detail: 'Equipe, material, deslocamento e outros custos; receita, impostos, lucro sobre o custo e preço da meta.' },
+  { title: 'Proposta do cliente AWS', detail: 'Leitura da SOW, horas-meta, indicadores e valores do Bid Template.' },
+  { title: 'Realizado', detail: 'Apontamento da obra e custos lançados; cotado × realizado.' },
+];
+
+const NAV = [
+  { path: '/parametros', label: 'Parâmetros', permission: 'budget_params:read' },
+  { path: '/materiais', label: 'Materiais', permission: 'budget_params:read' },
+  { path: '/destinos', label: 'Destinos', permission: 'budget_params:read' },
 ];
 
 function Home({ session, onLogout }: { session: Session; onLogout: () => void }) {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const path = useHashPath();
 
   const load = useCallback(() => {
     setError(null);
@@ -84,10 +95,21 @@ function Home({ session, onLogout }: { session: Session; onLogout: () => void })
 
   useEffect(load, [load]);
 
+  const can = (p: string) => me?.permissions.includes(p) ?? false;
+
   return (
     <div className="shell">
       <header className="topbar">
-        <strong>Axis Financeiro</strong>
+        <a className="brand" href="#/">
+          Axis Financeiro
+        </a>
+        <nav className="topnav" aria-label="Principal">
+          {NAV.filter((n) => can(n.permission)).map((n) => (
+            <a key={n.path} href={`#${n.path}`} aria-current={path === n.path || path.startsWith(`${n.path}/`) ? 'page' : undefined}>
+              {n.label}
+            </a>
+          ))}
+        </nav>
         <span className="topbar-user">
           {session.email}
           <button className="btn btn-ghost" type="button" onClick={onLogout}>
@@ -96,7 +118,6 @@ function Home({ session, onLogout }: { session: Session; onLogout: () => void })
         </span>
       </header>
       <main className="content">
-        <h1>Início</h1>
         {error && (
           <div className="alert alert-danger" role="alert">
             {error}{' '}
@@ -106,34 +127,68 @@ function Home({ session, onLogout }: { session: Session; onLogout: () => void })
           </div>
         )}
         {!me && !error && <p className="muted">Carregando…</p>}
-        {me && (
-          <section className="card">
-            <h2>Seu acesso</h2>
-            {me.financeRoles.length === 0 ? (
-              <p className="muted">Você ainda não tem perfil no Financeiro. Peça ao administrador para conceder o acesso.</p>
-            ) : (
-              <ul className="tags">
-                {me.financeRoles.map((r) => (
-                  <li key={r.code} className="tag">
-                    {r.name}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </section>
-        )}
-        <section className="card">
-          <h2>Em construção</h2>
-          <ul className="steps">
-            {NEXT_STEPS.map((s) => (
-              <li key={s.title}>
-                <strong>{s.title}</strong>
-                <span className="muted">{s.detail}</span>
+        {me && <Routes path={path} me={me} can={can} />}
+      </main>
+    </div>
+  );
+}
+
+function NoAccess() {
+  return (
+    <div className="card">
+      <h1>Sem acesso</h1>
+      <p className="muted">Seu perfil no Financeiro não permite abrir esta página. Peça o acesso ao administrador.</p>
+      <a href="#/">Voltar ao início</a>
+    </div>
+  );
+}
+
+function Routes({ path, me, can }: { path: string; me: Me; can: (p: string) => boolean }) {
+  const read = can('budget_params:read');
+  const write = can('budget_params:write');
+  const cost = can('budget:read_cost');
+  let m: Record<string, string> | null;
+
+  if (matchRoute('/parametros', path)) return read ? <ParameterSetsPage canWrite={write} /> : <NoAccess />;
+  if ((m = matchRoute('/parametros/:id', path))) return read ? <ParameterSetPage key={m.id} id={m.id} canWrite={write} /> : <NoAccess />;
+  if (matchRoute('/materiais', path)) return read ? <MaterialsPage canWrite={write} canSeeCost={cost} /> : <NoAccess />;
+  if (matchRoute('/materiais/novo', path)) return write ? <MaterialFormPage id={null} canSeeCost={cost} /> : <NoAccess />;
+  if ((m = matchRoute('/materiais/:id', path))) return write ? <MaterialFormPage key={m.id} id={m.id} canSeeCost={cost} /> : <NoAccess />;
+  if (matchRoute('/destinos', path)) return read ? <DestinationsPage canWrite={write} /> : <NoAccess />;
+  if (matchRoute('/destinos/novo', path)) return write ? <DestinationFormPage id={null} /> : <NoAccess />;
+  if ((m = matchRoute('/destinos/:id', path))) return write ? <DestinationFormPage key={m.id} id={m.id} /> : <NoAccess />;
+  return <Start me={me} />;
+}
+
+function Start({ me }: { me: Me }) {
+  return (
+    <>
+      <h1>Início</h1>
+      <section className="card">
+        <h2>Seu acesso</h2>
+        {me.financeRoles.length === 0 ? (
+          <p className="muted">Você ainda não tem perfil no Financeiro. Peça ao administrador para conceder o acesso.</p>
+        ) : (
+          <ul className="tags">
+            {me.financeRoles.map((r) => (
+              <li key={r.code} className="tag">
+                {r.name}
               </li>
             ))}
           </ul>
-        </section>
-      </main>
-    </div>
+        )}
+      </section>
+      <section className="card">
+        <h2>Projetos — próximas entregas</h2>
+        <ul className="steps">
+          {NEXT_STEPS.map((s) => (
+            <li key={s.title}>
+              <strong>{s.title}</strong>
+              <span className="muted">{s.detail}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    </>
   );
 }
