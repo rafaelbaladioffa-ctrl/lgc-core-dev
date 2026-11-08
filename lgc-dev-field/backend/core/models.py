@@ -136,6 +136,9 @@ class Site(TimestampedModel):
         "endereço geocodificado", max_length=400, blank=True, editable=False,
         help_text="Guarda o endereço que gerou a última latitude/longitude, para saber quando regeocodificar.",
     )
+    axis_site_id = models.UUIDField(
+        "id do site no Axis", null=True, blank=True, unique=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
 
     class Meta:
         verbose_name = "site"
@@ -332,6 +335,12 @@ class Collaborator(TimestampedModel):
             | models.Q(job_title__name__icontains="Coordenador")
             | models.Q(job_title__name__icontains="Gerente")
         ),
+    )
+    axis_collaborator_id = models.UUIDField(
+        "id do colaborador no Axis", null=True, blank=True, unique=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
+    axis_cost_center_id = models.UUIDField(
+        "centro de custo no Axis", null=True, blank=True, editable=False, help_text="Centro de custo vigente no Axis Core (cache)."
     )
     is_active = models.BooleanField("ativo", default=True)
 
@@ -573,6 +582,9 @@ class Client(PhoneNormalizedModel, ActiveCompanyModel):
     city = models.CharField("cidade", max_length=100, blank=True)
     state = models.CharField("UF", max_length=2, blank=True)
     notes = models.TextField("observações", blank=True)
+    axis_client_id = models.UUIDField(
+        "id do cliente no Axis", null=True, blank=True, unique=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
 
     class Meta:
         verbose_name = "cliente"

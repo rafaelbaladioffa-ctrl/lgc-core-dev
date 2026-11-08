@@ -1,0 +1,106 @@
+"""Cliente da API de consulta do Core (`GET /api/v1/integration/...`), autenticada por API key do satélite."""
+
+import logging
+import re
+
+import requests
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+# Recursos de lista da API de consulta e o tipo de cadastro a que correspondem.
+RESOURCES = {
+    "clients": "client",
+    "collaborators": "collaborator",
+    "users": "user",
+    "projects": "project",
+    "cost-centers": "cost_center",
+    "sites": "site",
+}
+
+
+# Campo com o id do Core, por tipo de cadastro (igual ao dos eventos).
+ID_KEYS = {
+    "client": "client_id",
+    "collaborator": "collaborator_id",
+    "user": "user_id",
+    "project": "project_id",
+    "cost_center": "cost_center_id",
+    "site": "site_id",
+}
+# Dados pessoais de contato do cliente não são necessários para o casamento e não ficam no cache.
+DROP_KEYS = {"client": {"contacts", "address"}}
+
+
+def _snake(key: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", key).lower()
+
+
+def normalize_core_row(kind: str, row: dict) -> dict:
+    """Linha da API de consulta (camelCase do Prisma) -> mesmo formato dos eventos (snake_case)."""
+    drop = DROP_KEYS.get(kind, set())
+    data = {_snake(k): v for k, v in row.items() if k not in drop}
+    if "id" in data:
+        data[ID_KEYS[kind]] = data.pop("id")
+    return data
+
+
+class AxisApiError(Exception):
+    pass
+
+
+class AxisApiNotFound(AxisApiError):
+    """Recurso inexistente no Core (ex.: `sites` antes do PT-01 estar no ar)."""
+
+
+def is_configured() -> bool:
+    return bool(settings.AXIS_API_URL and settings.AXIS_API_KEY)
+
+
+class AxisApiClient:
+    def __init__(self, base_url=None, api_key=None, timeout=None, session=None):
+        self.base_url = (base_url or settings.AXIS_API_URL).rstrip("/")
+        self.api_key = api_key or settings.AXIS_API_KEY
+        self.timeout = timeout or settings.AXIS_API_TIMEOUT
+        self.session = session or requests.Session()
+        if not self.base_url or not self.api_key:
+            raise AxisApiError("AXIS_API_URL e AXIS_API_KEY precisam estar configuradas.")
+
+    def _get(self, path, params=None):
+        url = f"{self.base_url}/integration/{path.lstrip('/')}"
+        try:
+            response = self.session.get(
+                url,
+                params=params,
+                headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/json"},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise AxisApiError(f"Falha ao consultar o Core: {exc.__class__.__name__}") from exc
+        if response.status_code == 404:
+            raise AxisApiNotFound(f"{path}: não encontrado no Core.")
+        if response.status_code in (401, 403):
+            raise AxisApiError("O Core recusou a API key (confira AXIS_API_KEY e as assinaturas do satélite).")
+        if response.status_code >= 400:
+            raise AxisApiError(f"O Core respondeu {response.status_code} em {path}.")
+        try:
+            return response.json()
+        except ValueError as exc:
+            raise AxisApiError(f"Resposta inválida do Core em {path}.") from exc
+
+    def get_one(self, resource: str, axis_id: str) -> dict:
+        return self._get(f"{resource}/{axis_id}")
+
+    def iter_all(self, resource: str, per_page: int = 200):
+        """Percorre as páginas de `{data, meta}`. Recurso sem paginação devolve uma lista direta."""
+        page = 1
+        while True:
+            body = self._get(resource, {"page": page, "per_page": per_page})
+            rows = body if isinstance(body, list) else body.get("data", [])
+            yield from rows
+            if isinstance(body, list):
+                return
+            total = (body.get("meta") or {}).get("total", 0)
+            if not rows or page * per_page >= total:
+                return
+            page += 1

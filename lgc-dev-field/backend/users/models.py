@@ -57,6 +57,10 @@ class User(AbstractUser):
         ),
     )
 
+    axis_user_id = models.UUIDField(
+        "id do usuário no Axis", null=True, blank=True, unique=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
+
     class Meta:
         verbose_name = "usuário"
         verbose_name_plural = "usuários"

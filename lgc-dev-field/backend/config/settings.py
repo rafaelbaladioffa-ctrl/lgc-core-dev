@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     "dispatch",
     "bot",
     "master_data",
+    "axis_integration",
     "api",
 ]
 
@@ -286,3 +287,15 @@ SESSION_COOKIE_AGE = 10 * 60
 # Renova a contagem dos 10 minutos a cada requisição (vira um timeout por
 # inatividade, não um limite fixo de sessão).
 SESSION_SAVE_EVERY_REQUEST = True
+
+# --- Integração com o Axis Core (docs/integracao-core-field.md §3) --------
+# Webhook: o Core assina o corpo com HMAC-SHA256 (X-Axis-Signature) usando este segredo.
+# Vazio = o receptor responde 503. Nunca versionar o valor.
+AXIS_WEBHOOK_SECRET = os.getenv("AXIS_WEBHOOK_SECRET", "")
+# Retentativas do Core chegam horas depois; fora desta janela o evento é tratado como replay.
+AXIS_WEBHOOK_MAX_AGE_HOURS = int(os.getenv("AXIS_WEBHOOK_MAX_AGE_HOURS") or 72)
+# API de consulta do Core (carga inicial `manage.py axis_sync` e dados que o evento não traz).
+# AXIS_API_URL termina em /api/v1 (ex.: http://localhost:3000/api/v1); AXIS_API_KEY é a chave do satélite.
+AXIS_API_URL = os.getenv("AXIS_API_URL", "").rstrip("/")
+AXIS_API_KEY = os.getenv("AXIS_API_KEY", "")
+AXIS_API_TIMEOUT = int(os.getenv("AXIS_API_TIMEOUT") or 15)

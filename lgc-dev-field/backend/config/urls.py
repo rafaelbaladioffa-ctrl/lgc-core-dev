@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.http import JsonResponse
-from django.urls import include, path
+from django.urls import include, path, re_path
+
+from axis_integration.webhook import axis_webhook
 
 
 def health_check(request):
@@ -10,6 +12,7 @@ def health_check(request):
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("health/", health_check, name="health-check"),
+    re_path(r"^api/v1/webhooks/axis/?$", axis_webhook, name="axis-webhook"),
     path("api/", include("api.urls")),
 ]
 

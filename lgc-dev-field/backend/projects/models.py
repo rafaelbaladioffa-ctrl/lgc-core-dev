@@ -106,6 +106,12 @@ class Project(TimestampedModel):
     actual_end = models.DateField("término real", null=True, blank=True)
     description = models.TextField("descrição", blank=True)
     notes = models.TextField("observações", blank=True)
+    axis_project_id = models.UUIDField(
+        "id do projeto no Axis", null=True, blank=True, unique=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
+    axis_cost_center_id = models.UUIDField(
+        "centro de custo no Axis", null=True, blank=True, editable=False, help_text="Centro de custo do projeto no Axis Core (cache)."
+    )
     is_active = models.BooleanField("ativo", default=True)
 
     class Meta:

@@ -45,14 +45,28 @@ docker compose run --rm field-backend python manage.py test
 ```
 
 O Django cria o banco `test_<POSTGRES_DB>` para os testes; nunca rode testes apontando
-`POSTGRES_DB` para o banco de produção.
+`POSTGRES_DB` para o banco de produção. Só a integração com o Core: `... manage.py test axis_integration`.
 
 ## Estado da integração com o Core
 
-Por enquanto o Field é um sistema **independente dentro do repositório**: tem login, usuários,
-clientes, sites e colaboradores próprios. O plano para o Core virar a fonte da verdade (login do
-Core, cadastros pelos webhooks, casamento dos registros existentes) está em
-[../docs/integracao-core-field.md](../docs/integracao-core-field.md).
+Os cadastros do Core chegam ao Field (F2/F3, app `backend/axis_integration`); login pelo Core (F1), obra a partir
+do Core (F4) e retorno ao Core (F5) ainda não existem. Detalhes e decisões: [../docs/integracao-core-field.md](../docs/integracao-core-field.md).
+
+- **Webhook** `POST /api/v1/webhooks/axis`: HMAC-SHA256 em `X-Axis-Signature`, janela anti-replay, deduplicação por
+  `event_id` na mesma transação. Atualiza só vínculos `axis_*_id` e um cache (`AxisMasterRecord`); não cria obra e
+  não sobrescreve dado de negócio do Field.
+- **Casamento:** cliente por CNPJ (senão nome normalizado), colaborador por e-mail/matrícula, site por cliente + código.
+  Sem par único, o registro fica sem vínculo e aparece no relatório; nada é apagado.
+- **Carga inicial e relatório dos sem par:**
+
+```bash
+docker compose run --rm field-backend python manage.py axis_sync
+```
+
+- **Variáveis** (`.env.example`): `AXIS_WEBHOOK_SECRET`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`. Sem
+  `AXIS_WEBHOOK_SECRET` o receptor responde 503.
+
+O restante do sistema (login, usuários, projetos e obras) continua independente do Core por enquanto.
 
 ## Identidade visual
 
