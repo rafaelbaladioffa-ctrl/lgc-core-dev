@@ -5,7 +5,7 @@ import type { AuditService } from '../../audit/audit.service.js';
 import type { AuthenticatedUser } from '../../auth/authenticated-request.js';
 import { BudgetsService } from '../budgets.service.js';
 import { OutboxDispatcherService, PermanentDeliveryError } from '../../integration/outbox-dispatcher.service.js';
-import { buildCoreQuoteBody, CORE_QUOTE_EVENT } from './core-quote.js';
+import { buildCoreQuoteBody, buildCoreQuoteMaterials, CORE_QUOTE_EVENT, quoteMaterialsBlocker } from './core-quote.js';
 
 /** Devolução ao Core (PJ7): corpo do contrato, entrega pelo outbox e trava da aprovação. */
 
@@ -23,6 +23,7 @@ const SRC = {
       { roleKey: 'encarregado', label: 'Encarregado', fieldRole: true, people: 0, hours: '0.00' },
       { roleKey: 'gerente_projeto', label: 'Gerente', fieldRole: false, people: null, hours: '12.5' },
     ],
+    materials: [{ description: 'Cabo óptico 12F', unit: 'm', quantity: '1200', logisticsMaterialCode: 'RED-CAB-0123' }],
   },
 };
 
@@ -39,6 +40,7 @@ describe('buildCoreQuoteBody', () => {
         { role_key: 'tecnico', role_name: 'Técnico', field_role: true, people: 3, days: 6, hours: 144 },
         { role_key: 'gerente_projeto', role_name: 'Gerente', field_role: false, hours: 12.5 },
       ],
+      materials: [{ material_code: 'RED-CAB-0123', description: 'Cabo óptico 12F', unit: 'm', quantity: '1200.000' }],
       approved_at: '2030-01-15T13:00:00.000Z',
       approved_by_email: 'gestor@lgc.test',
     });
@@ -46,7 +48,45 @@ describe('buildCoreQuoteBody', () => {
 
   it('sem dias ou sem equipe não monta', () => {
     expect(() => buildCoreQuoteBody({ ...SRC, result: { ...SRC.result, workDays: 0 } })).toThrow('dias de trabalho');
-    expect(() => buildCoreQuoteBody({ ...SRC, result: { workDays: 6, labor: [] } })).toThrow('equipe');
+    expect(() => buildCoreQuoteBody({ ...SRC, result: { workDays: 6, labor: [], materials: [] } })).toThrow('equipe');
+  });
+});
+
+describe('buildCoreQuoteMaterials', () => {
+  const line = (over: Partial<Parameters<typeof buildCoreQuoteMaterials>[0][number]> = {}) => ({ description: 'Cabo', unit: 'm', quantity: '10', logisticsMaterialCode: 'A-1', ...over });
+
+  it('quantidade como texto decimal com 3 casas e nada de preço ou custo', () => {
+    const { materials, problems } = buildCoreQuoteMaterials([{ ...line({ quantity: '1200.5' }), billedUnitPrice: '9.99', realUnitCost: '5', cost: '100' } as never]);
+    expect(problems).toEqual([]);
+    expect(materials).toEqual([{ material_code: 'A-1', description: 'Cabo', unit: 'm', quantity: '1200.500' }]);
+  });
+
+  it('arredonda para 3 casas; quantidade zerada não vai ao site nem exige código', () => {
+    const { materials, problems } = buildCoreQuoteMaterials([line({ quantity: '2.00049' }), line({ description: 'Sem uso', quantity: '0', logisticsMaterialCode: null }), line({ description: 'Quase zero', quantity: '0.0004', logisticsMaterialCode: null })]);
+    expect(problems).toEqual([]);
+    expect(materials).toEqual([{ material_code: 'A-1', description: 'Cabo', unit: 'm', quantity: '2.000' }]);
+  });
+
+  it('mesmo código em duas linhas vira uma, com a quantidade somada', () => {
+    const { materials } = buildCoreQuoteMaterials([line({ quantity: '10.5' }), line({ description: 'Cabo (reserva)', quantity: '4.25' })]);
+    expect(materials).toEqual([{ material_code: 'A-1', description: 'Cabo', unit: 'm', quantity: '14.750' }]);
+  });
+
+  it('mesmo código com unidades diferentes é problema', () => {
+    const { problems } = buildCoreQuoteMaterials([line(), line({ unit: 'un' })]);
+    expect(problems[0]).toContain('unidades diferentes');
+  });
+
+  it('material com quantidade e sem código aponta o item pelo nome', () => {
+    const { problems } = buildCoreQuoteMaterials([line({ description: 'Conector LC', logisticsMaterialCode: null }), line({ description: 'Patch cord', logisticsMaterialCode: '  ' })]);
+    expect(problems).toHaveLength(2);
+    expect(problems[0]).toContain('"Conector LC"');
+    expect(quoteMaterialsBlocker([line({ description: 'Conector LC', logisticsMaterialCode: null })])).toContain('Conector LC');
+    expect(quoteMaterialsBlocker([line()])).toBeNull();
+  });
+
+  it('a devolução não monta com material sem código', () => {
+    expect(() => buildCoreQuoteBody({ ...SRC, result: { ...SRC.result, materials: [line({ logisticsMaterialCode: null })] } })).toThrow('código da Logística');
   });
 });
 
@@ -63,6 +103,22 @@ describe('OutboxDispatcherService — cotação para o Core', () => {
     expect(url).toBe('http://core.test/api/v1/integration/projects/p1/quotes');
     expect(init.headers).toMatchObject({ Authorization: 'Bearer k' });
     expect(JSON.parse(init.body as string)).toEqual({ external_revision_id: 'r2', work_days: 6, bid: { filename: 'Bid.xlsm', content_base64: Buffer.from('PK fictício').toString('base64') } });
+  });
+
+  it('modelo generico (has_bid false) vai sem Bid e sem consultar a Bid guardada', async () => {
+    const fetchFn = vi.fn(async () => new Response('{}', { status: 201 }));
+    const empty = { revisionBidOutput: { findUnique: vi.fn() } };
+    const d = new OutboxDispatcherService({} as PrismaService, config({ AXIS_API_URL: 'http://core.test/api/v1', AXIS_API_KEY: 'k' }));
+    await d.deliverQuote(empty as never, { ...message, has_bid: false }, fetchFn as unknown as typeof fetch);
+    const [, init] = fetchFn.mock.calls[0] as unknown as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toEqual({ external_revision_id: 'r2', work_days: 6 });
+    expect(empty.revisionBidOutput.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('mensagem com Bid esperada e sem Bid guardada vai para a dead-letter', async () => {
+    const d = new OutboxDispatcherService({} as PrismaService, config({ AXIS_API_KEY: 'k' }));
+    const none = { revisionBidOutput: { findUnique: vi.fn().mockResolvedValue(null) } };
+    await expect(d.deliverQuote(none as never, message, vi.fn() as unknown as typeof fetch)).rejects.toBeInstanceOf(PermanentDeliveryError);
   });
 
   it('409/400 são definitivos; 503 tenta de novo', async () => {

@@ -10,7 +10,7 @@ import type { BudgetInputs, BudgetResult } from '../budget-engine.js';
 import { buildBidPlan, DEFAULT_ROLE_CODES, type BidHeaderProfile, type CableLineProfile } from './bid-plan.js';
 import { fillBid } from './bid-fill.js';
 import { XlsxEditor } from './xlsx-editor.js';
-import { buildCoreQuoteBody, CORE_QUOTE_EVENT, type CoreQuoteMessage } from './core-quote.js';
+import { buildCoreQuoteBody, CORE_QUOTE_EVENT, quoteMaterialsBlocker, type CoreQuoteMessage } from './core-quote.js';
 import { preferredSuppliers, suggestCableLine, type SuggestedLine } from './suggest-lines.js';
 
 export interface BidProfile {
@@ -218,16 +218,21 @@ export class BidService {
   // -------------------------------------------------------------------------
 
   /**
-   * Aprovar o envio. No modelo aws_sow gera a Bid antes (falha aqui = revisão continua em aprovação, com o
-   * motivo) e, na mesma transação da aprovação, grava a Bid e a mensagem do outbox para o Core.
+   * Aprovar o envio. Toda revisão devolve a cotação ao Core, e todo material orçado precisa do código da
+   * Logística (PA-08): sem ele a aprovação é recusada com a lista dos itens.
+   *
+   * No modelo aws_sow gera a Bid antes (falha aqui = revisão continua em aprovação, com o motivo) e, na mesma
+   * transação da aprovação, grava a Bid e a mensagem do outbox para o Core. No `generico` não há Bid: a
+   * mensagem do outbox sai sem ela (`has_bid: false`).
    */
   async approveSend(revisionId: string, user: AuthenticatedUser) {
     const head = await this.prisma.budgetRevision.findUnique({ where: { id: revisionId }, select: { status: true, budget: { select: { model: true } } } });
     if (!head) throw new NotFoundException('Revisão de orçamento não encontrada.');
-    if (head.budget.model !== 'aws_sow') return this.budgets.transition(revisionId, 'approve_send', user);
     if (head.status !== 'em_aprovacao') throw new ConflictException('Só uma revisão em aprovação pode ter o envio aprovado.');
+    if (head.budget.model !== 'aws_sow') return this.approveSendWithoutBid(revisionId, user);
 
     const { rev, project, plan, blockers } = await this.plan(revisionId, user);
+    this.assertMaterialsLinked(rev.result as unknown as BudgetResult);
     if (!plan) throw new BadRequestException(`Não dá para aprovar o envio: ${blockers.join(' ')}`);
     const bid = await fillBid(await this.template(revisionId), plan, rev.number);
     const result = rev.result as unknown as BudgetResult;
@@ -248,6 +253,7 @@ export class BidService {
       const message: CoreQuoteMessage = {
         axis_project_id: rev.budget.axisProjectId,
         revision_id: revisionId,
+        has_bid: true,
         quote: buildCoreQuoteBody({
           revisionId,
           revisionNumber: rev.number,
@@ -260,6 +266,46 @@ export class BidService {
       };
       await this.outbox.record(tx, CORE_QUOTE_EVENT, message as unknown as Record<string, unknown>);
       return { bidFilename: bid.filename };
+    });
+  }
+
+  /** Recusa a aprovação se algum material com quantidade não tem código da Logística. */
+  private assertMaterialsLinked(result: BudgetResult) {
+    const blocker = quoteMaterialsBlocker(result.materials);
+    if (blocker) throw new BadRequestException(`Não dá para aprovar o envio. ${blocker}`);
+  }
+
+  /** Modelo `generico`: devolve equipe, dias e materiais ao Core, sem Bid. */
+  private async approveSendWithoutBid(revisionId: string, user: AuthenticatedUser) {
+    const rev = await this.budgets.loadRevisionFull(revisionId);
+    const project = await this.budgets.projectInfoOrNull(rev.budget.axisProjectId);
+    const result = rev.result as unknown as BudgetResult;
+    this.assertMaterialsLinked(result);
+    const header = this.budgets.header(rev.budget, project);
+    const source = (approvedAt: Date | null) => ({
+      revisionId,
+      revisionNumber: rev.number,
+      approvedAt,
+      approvedByEmail: user.email,
+      sowDocumentId: null,
+      schedule: { start: header.schedule.start.value, end: header.schedule.end.value },
+      result,
+    });
+    // Confere antes de abrir a transação: dias e equipe faltando viram erro de validação, não 500.
+    try {
+      buildCoreQuoteBody(source(null));
+    } catch (e) {
+      throw new BadRequestException(`Não dá para aprovar o envio: ${(e as Error).message}`);
+    }
+    return this.budgets.transition(revisionId, 'approve_send', user, null, async (tx, approvedAt) => {
+      const message: CoreQuoteMessage = {
+        axis_project_id: rev.budget.axisProjectId,
+        revision_id: revisionId,
+        has_bid: false,
+        quote: buildCoreQuoteBody(source(approvedAt)),
+      };
+      await this.outbox.record(tx, CORE_QUOTE_EVENT, message as unknown as Record<string, unknown>);
+      return {};
     });
   }
 }

@@ -30,6 +30,9 @@ export interface TeamInput {
 
 export interface MaterialInput {
   materialId?: string | null;
+  /** Código do material no catálogo da Logística (`Material.code`); obrigatório para aprovar o envio (PA-08). */
+  logisticsMaterialCode?: string | null;
+  logisticsMaterialId?: string | null;
   description: string;
   unit?: string | null;
   quantity: string | number;
@@ -105,6 +108,8 @@ export interface LaborLine {
 
 export interface MaterialLine {
   materialId: string | null;
+  logisticsMaterialCode: string | null;
+  logisticsMaterialId: string | null;
   description: string;
   unit: string;
   quantity: string;
@@ -229,6 +234,8 @@ export function computeBudget(params: EngineParams, inputs: BudgetInputs): Budge
     const costUnit = estimated ? price : n(m.realUnitCost);
     return {
       materialId: m.materialId ?? null,
+      logisticsMaterialCode: m.logisticsMaterialCode?.trim() || null,
+      logisticsMaterialId: m.logisticsMaterialId ?? null,
       description: m.description,
       unit: m.unit || 'un',
       quantity: qty.toString(),

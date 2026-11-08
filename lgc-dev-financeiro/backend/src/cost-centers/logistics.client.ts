@@ -15,6 +15,14 @@ export interface CustodyRow {
   value: string;
 }
 
+/** Material do catálogo da Logística, só o que o orçamento usa (custo médio fica de fora de propósito). */
+export interface LogisticsMaterial {
+  id: string;
+  code: string;
+  description: string;
+  unit: string | null;
+}
+
 const TIMEOUT_MS = 15_000;
 
 @Injectable()
@@ -37,6 +45,22 @@ export class LogisticsClient {
     return body as T;
   }
 
+  /**
+   * Busca no catálogo ativo da Logística por código ou descrição (`GET /integration/materials?search=`, PT-04).
+   * Só devolve id, código, descrição e unidade.
+   */
+  async searchMaterials(search: string, fetchFn: typeof fetch = fetch): Promise<LogisticsMaterial[]> {
+    const rows = await this.get<Array<Record<string, unknown>>>(`/integration/materials?search=${encodeURIComponent(search)}&limit=20`, fetchFn);
+    return rows.map(toLogisticsMaterial).filter((m): m is LogisticsMaterial => m !== null);
+  }
+
+  /** Materiais pelos códigos (`GET /integration/materials?codes=A,B`); código inexistente simplesmente não volta. */
+  async materialsByCodes(codes: string[], fetchFn: typeof fetch = fetch): Promise<LogisticsMaterial[]> {
+    if (codes.length === 0) return [];
+    const rows = await this.get<Array<Record<string, unknown>>>(`/integration/materials?codes=${encodeURIComponent(codes.join(','))}`, fetchFn);
+    return rows.map(toLogisticsMaterial).filter((m): m is LogisticsMaterial => m !== null);
+  }
+
   consumption(month: string, fetchFn: typeof fetch = fetch) {
     return this.get<ConsumptionRow[]>(`/integration/consumption-by-cost-center?month=${encodeURIComponent(month)}`, fetchFn);
   }
@@ -44,4 +68,13 @@ export class LogisticsClient {
   custody(fetchFn: typeof fetch = fetch) {
     return this.get<CustodyRow[]>('/integration/custody-value', fetchFn);
   }
+}
+
+const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+export function toLogisticsMaterial(row: Record<string, unknown>): LogisticsMaterial | null {
+  const id = text(row.id);
+  const code = text(row.code);
+  if (!id || !code) return null;
+  return { id, code, description: text(row.description) ?? text(row.shortDescription) ?? code, unit: text(row.unit) ?? text(row.uom) };
 }

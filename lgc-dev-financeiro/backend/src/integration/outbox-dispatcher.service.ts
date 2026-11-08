@@ -72,10 +72,16 @@ export class OutboxDispatcherService {
    * definitivos (reenviar não muda nada); rede e 5xx tentam de novo.
    */
   async deliverQuote(tx: Prisma.TransactionClient, payload: unknown, fetchFn: typeof fetch = fetch): Promise<void> {
-    const message = payload as { axis_project_id: string; revision_id: string; quote: Record<string, unknown> };
-    const bid = await tx.revisionBidOutput.findUnique({ where: { revisionId: message.revision_id }, select: { filename: true, content: true } });
-    if (!bid) throw new PermanentDeliveryError('Bid da revisão não encontrada.');
-    const body = JSON.stringify({ ...message.quote, bid: { filename: bid.filename, content_base64: Buffer.from(bid.content).toString('base64') } });
+    const message = payload as { axis_project_id: string; revision_id: string; has_bid?: boolean; quote: Record<string, unknown> };
+    let body: string;
+    if (message.has_bid === false) {
+      // Modelo generico: cotação sem Bid.
+      body = JSON.stringify(message.quote);
+    } else {
+      const bid = await tx.revisionBidOutput.findUnique({ where: { revisionId: message.revision_id }, select: { filename: true, content: true } });
+      if (!bid) throw new PermanentDeliveryError('Bid da revisão não encontrada.');
+      body = JSON.stringify({ ...message.quote, bid: { filename: bid.filename, content_base64: Buffer.from(bid.content).toString('base64') } });
+    }
     const res = await fetchFn(`${this.apiBase}/integration/projects/${encodeURIComponent(message.axis_project_id)}/quotes`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.get<string>('AXIS_API_KEY')}` },

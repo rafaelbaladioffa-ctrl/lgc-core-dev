@@ -19,6 +19,7 @@ import { Badge, ErrorAlert, Field, messageOf, PageHeader, useLoad, useUnsavedWar
 import { RevisionWorkflow } from '../components/RevisionWorkflow';
 import { RevisionSowSection } from '../components/RevisionSow';
 import { RevisionAwsSection } from '../components/RevisionAws';
+import { LogisticsMaterialPicker } from '../components/LogisticsMaterialPicker';
 
 // ---------------------------------------------------------------------------
 // Formulário ↔ entradas da API
@@ -27,6 +28,8 @@ import { RevisionAwsSection } from '../components/RevisionAws';
 interface MaterialRow {
   uid: string;
   materialId: string | null;
+  logisticsMaterialCode: string | null;
+  logisticsMaterialId: string | null;
   description: string;
   unit: string;
   quantity: string;
@@ -64,7 +67,7 @@ function toForm(rev: Revision): Form {
   return {
     workDays: i(x.workDays),
     team,
-    materials: x.materials.map((m) => ({ uid: uid(), materialId: m.materialId ?? null, description: m.description, unit: m.unit ?? 'un', quantity: d(m.quantity), billedUnitPrice: d(m.billedUnitPrice), realUnitCost: d(m.realUnitCost) })),
+    materials: x.materials.map((m) => ({ uid: uid(), materialId: m.materialId ?? null, logisticsMaterialCode: m.logisticsMaterialCode ?? null, logisticsMaterialId: m.logisticsMaterialId ?? null, description: m.description, unit: m.unit ?? 'un', quantity: d(m.quantity), billedUnitPrice: d(m.billedUnitPrice), realUnitCost: d(m.realUnitCost) })),
     materialFreight: d(x.materialFreight),
     materialLossRate: fractionToPercentInput(x.materialLossRate),
     travel: {
@@ -107,6 +110,8 @@ export function toInputs(form: Form, roles: Revision['roles'], costVisible: bool
     if (price === null && !errors[`mat.${m.uid}.billedUnitPrice`]) errors[`mat.${m.uid}.billedUnitPrice`] = 'Informe o preço.';
     return {
       materialId: m.materialId,
+      logisticsMaterialCode: m.logisticsMaterialCode,
+      logisticsMaterialId: m.logisticsMaterialId,
       description: m.description.trim(),
       unit: m.unit || 'un',
       quantity: quantity ?? '0',
@@ -175,6 +180,7 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
   const catalogs = useLoad(() => (editable ? Promise.all([listMaterials(), listDestinations()]) : Promise.resolve(null)), [editable], 'Não foi possível carregar os catálogos.');
   const [materials, destinations] = catalogs.data ?? [[], []];
 
+  const unlinkedMaterials = form.materials.filter((m) => !m.logisticsMaterialCode && Number(m.quantity.replace(',', '.')) > 0).length;
   const dirty = JSON.stringify({ ...form, materials: form.materials.map(({ uid: _u, ...m }) => m) }) !== JSON.stringify({ ...initial, materials: initial.materials.map(({ uid: _u, ...m }) => m) });
   useUnsavedWarning(dirty && editable);
 
@@ -203,8 +209,8 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
 
   function addMaterial(item?: BudgetMaterial) {
     const row: MaterialRow = item
-      ? { uid: uid(), materialId: item.id, description: item.name, unit: item.unit, quantity: '1', billedUnitPrice: d(item.billedPrice), realUnitCost: d(item.realCost ?? null) }
-      : { uid: uid(), materialId: null, description: '', unit: 'un', quantity: '1', billedUnitPrice: '', realUnitCost: '' };
+      ? { uid: uid(), materialId: item.id, logisticsMaterialCode: null, logisticsMaterialId: null, description: item.name, unit: item.unit, quantity: '1', billedUnitPrice: d(item.billedPrice), realUnitCost: d(item.realCost ?? null) }
+      : { uid: uid(), materialId: null, logisticsMaterialCode: null, logisticsMaterialId: null, description: '', unit: 'un', quantity: '1', billedUnitPrice: '', realUnitCost: '' };
     setForm((f) => ({ ...f, materials: [...f.materials, row] }));
   }
 
@@ -348,6 +354,11 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
           </Section>
 
           <Section title="Material fornecido pela LGC" hint={`Markup dos parâmetros: ${formatPercent(rev.parameterSet.materialMarkup ?? '0')}`}>
+            {unlinkedMaterials > 0 && (
+              <div className="alert alert-warning" role="status">
+                {unlinkedMaterials === 1 ? '1 material ainda não tem' : `${unlinkedMaterials} materiais ainda não têm`} código da Logística. Sem ele, a aprovação do envio é recusada: escolha o item no catálogo da Logística.
+              </div>
+            )}
             <div className="table-scroll">
               <table className="table table-form">
                 <thead>
@@ -373,6 +384,11 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
                       <td>
                         <input aria-label="Descrição" value={m.description} readOnly={!!m.materialId} onChange={(e) => setMat(m.uid, { description: e.target.value })} aria-invalid={!!err(`mat.${m.uid}.description`)} />
                         {m.materialId && <small className="muted">do catálogo</small>}
+                        <LogisticsMaterialPicker
+                          code={m.logisticsMaterialCode}
+                          editable={editable}
+                          onPick={(pick) => setMat(m.uid, pick ? { logisticsMaterialCode: pick.code, logisticsMaterialId: pick.id, unit: pick.unit ?? m.unit } : { logisticsMaterialCode: null, logisticsMaterialId: null })}
+                        />
                       </td>
                       <td>
                         <input aria-label="Unidade" value={m.unit} onChange={(e) => setMat(m.uid, { unit: e.target.value })} />

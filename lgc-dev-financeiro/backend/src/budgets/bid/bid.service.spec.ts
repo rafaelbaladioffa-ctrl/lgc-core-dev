@@ -15,14 +15,16 @@ vi.mock('./bid-fill.js', () => ({
 
 const GESTOR: AuthenticatedUser = { userId: 'g', email: 'gestor@lgc.test', axisRoles: [], collaboratorId: null, mustChangePassword: false, permissions: ['budget:approve'] };
 
-function fixture({ model = 'aws_sow', blockers = [] as string[] } = {}) {
+const LINKED = [{ description: 'Cabo óptico 12F', unit: 'm', quantity: '1200', logisticsMaterialCode: 'RED-CAB-0123' }];
+
+function fixture({ model = 'aws_sow', blockers = [] as string[], materials = LINKED as unknown[] } = {}) {
   const rev = {
     id: 'r2',
     number: 2,
     budget: { model, axisProjectId: 'p1', projectCode: 'PROP-1', title: null, plannedStartDate: null, plannedEndDate: null },
     parameterSet: { hoursPerDay: '8' },
     inputs: {},
-    result: { workDays: 6, vehicleDays: 0, revenue: { travel: '0', platform: '0' }, materials: [], labor: [{ roleKey: 'tecnico', label: 'Técnico', fieldRole: true, people: 3, hours: '144', billingRate: '80' }] },
+    result: { workDays: 6, vehicleDays: 0, revenue: { travel: '0', platform: '0' }, materials, labor: [{ roleKey: 'tecnico', label: 'Técnico', fieldRole: true, people: 3, hours: '144', billingRate: '80' }] },
     sow: { source: 'core_pdf', sowDocumentId: 'doc-sow' },
   };
   const tx = { revisionBidOutput: { create: vi.fn().mockResolvedValue({}) } };
@@ -58,7 +60,8 @@ function fixture({ model = 'aws_sow', blockers = [] as string[] } = {}) {
 
 describe('BidService.approveSend', () => {
   it('gera a Bid antes e, na transação da aprovação, grava a Bid e a cotação no outbox', async () => {
-    const { service, tx, outbox, budgets } = fixture();
+    // Sem material: o vínculo do material com a linha do Bid Template tem testes próprios (bid-plan.spec.ts).
+    const { service, tx, outbox, budgets } = fixture({ materials: [] });
     await service.approveSend('r2', GESTOR);
     expect(budgets.transition).toHaveBeenCalledWith('r2', 'approve_send', GESTOR, null, expect.any(Function));
     expect(tx.revisionBidOutput.create.mock.calls[0][0].data).toMatchObject({ revisionId: 'r2', filename: '2030-01-15_BID_X_v2.xlsm', generatedBy: 'g' });
@@ -66,8 +69,24 @@ describe('BidService.approveSend', () => {
     expect(outbox.record).toHaveBeenCalledWith(tx, CORE_QUOTE_EVENT, {
       axis_project_id: 'p1',
       revision_id: 'r2',
-      quote: expect.objectContaining({ external_revision_id: 'r2', revision_number: 2, sow_document_id: 'doc-sow', work_days: 6, approved_by_email: 'gestor@lgc.test', approved_at: '2030-01-15T13:00:00.000Z' }),
+      has_bid: true,
+      quote: expect.objectContaining({
+        external_revision_id: 'r2',
+        revision_number: 2,
+        sow_document_id: 'doc-sow',
+        work_days: 6,
+        approved_by_email: 'gestor@lgc.test',
+        approved_at: '2030-01-15T13:00:00.000Z',
+        materials: [],
+      }),
     });
+  });
+
+  it('material sem código da Logística: recusa antes de gerar a Bid, com o item na mensagem', async () => {
+    const { service, budgets, tx } = fixture({ materials: [{ description: 'Conector LC', unit: 'un', quantity: '40', logisticsMaterialCode: null }] });
+    await expect(service.approveSend('r2', GESTOR)).rejects.toThrow(/Conector LC/);
+    expect(budgets.transition).not.toHaveBeenCalled();
+    expect(tx.revisionBidOutput.create).not.toHaveBeenCalled();
   });
 
   it('com pendência, não aprova e explica', async () => {
@@ -76,11 +95,33 @@ describe('BidService.approveSend', () => {
     expect(budgets.transition).not.toHaveBeenCalled();
   });
 
-  it('modelo genérico segue a aprovação normal, sem Bid', async () => {
-    const { service, budgets, outbox } = fixture({ model: 'generico' });
+  it('modelo genérico devolve a cotação ao Core como o aws_sow, sem Bid', async () => {
+    const { service, budgets, outbox, tx } = fixture({ model: 'generico' });
     await service.approveSend('r2', GESTOR);
-    expect(budgets.transition).toHaveBeenCalledWith('r2', 'approve_send', GESTOR);
-    expect(outbox.record).not.toHaveBeenCalled();
+    expect(budgets.transition).toHaveBeenCalledWith('r2', 'approve_send', GESTOR, null, expect.any(Function));
+    expect(tx.revisionBidOutput.create).not.toHaveBeenCalled();
+    expect(outbox.record).toHaveBeenCalledWith(tx, CORE_QUOTE_EVENT, {
+      axis_project_id: 'p1',
+      revision_id: 'r2',
+      has_bid: false,
+      quote: expect.objectContaining({ external_revision_id: 'r2', work_days: 6, materials: [expect.objectContaining({ material_code: 'RED-CAB-0123', quantity: '1200.000' })] }),
+    });
+    expect(JSON.stringify(outbox.record.mock.calls[0][2])).not.toMatch(/sow_document_id/);
+  });
+
+  it('modelo genérico também recusa material sem código e revisão sem equipe', async () => {
+    const semCodigo = fixture({ model: 'generico', materials: [{ description: 'Eletroduto', unit: 'm', quantity: '10', logisticsMaterialCode: null }] });
+    await expect(semCodigo.service.approveSend('r2', GESTOR)).rejects.toThrow(/Eletroduto/);
+    expect(semCodigo.budgets.transition).not.toHaveBeenCalled();
+    const semEquipe = fixture({ model: 'generico' });
+    (semEquipe.budgets.loadRevisionFull as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: 'r2',
+      number: 2,
+      budget: { model: 'generico', axisProjectId: 'p1' },
+      result: { workDays: 6, materials: [], labor: [] },
+    });
+    await expect(semEquipe.service.approveSend('r2', GESTOR)).rejects.toThrow(BadRequestException);
+    expect(semEquipe.budgets.transition).not.toHaveBeenCalled();
   });
 });
 
