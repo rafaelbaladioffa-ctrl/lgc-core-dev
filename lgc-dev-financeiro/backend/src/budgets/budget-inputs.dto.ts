@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsInt, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsInt, IsNumber, IsOptional, IsString, IsUUID, Length, Matches, Max, MaxLength, Min, ValidateIf, ValidateNested } from 'class-validator';
 import { decimalPattern } from '../budget-params/parameter-sets.dto.js';
 
 /** Entradas da revisão (projetos-especificacao §5). Dinheiro como texto decimal; vazio/nulo = 0. */
@@ -173,4 +173,46 @@ export class RevisionTransitionDto {
   @IsString()
   @MaxLength(2000)
   reason?: string | null;
+}
+
+/** Importar a SOW: do Core (pedido informado ou o mais recente do projeto) ou texto colado. */
+export class ImportSowDto {
+  @IsOptional()
+  @IsUUID()
+  quoteRequestId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500_000)
+  text?: string;
+}
+
+export class SowCableLineDto {
+  @IsString()
+  @Length(1, 80)
+  type!: string;
+
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(10_000)
+  lengthM!: number;
+
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  quantity!: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(3456)
+  fibers?: number;
+}
+
+export class UpdateSowCablesDto {
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => SowCableLineDto)
+  cables!: SowCableLineDto[];
 }

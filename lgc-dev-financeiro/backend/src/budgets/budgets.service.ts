@@ -1,17 +1,18 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, type BudgetRevision, type ParameterSet, type ParameterSetRole, type ProjectBudget } from '@prisma/client';
+import { Prisma, type BudgetModel, type BudgetRevision, type ParameterSet, type ParameterSetRole, type ProjectBudget } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { computeBudget, type BudgetInputs, type BudgetResult, type EngineParams } from './budget-engine.js';
 import type { BudgetInputsDto, CreateBudgetDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
 import { allowedActions, coreDivergence, EVENT_LABEL, submitBlockers, WORKFLOW, type WorkflowAction } from './revision-workflow.js';
+import { presentSow } from './sow/sow-view.js';
 
 export const COST_PERMISSION = 'budget:read_cost';
 const canSeeCost = (u: AuthenticatedUser) => u.permissions.includes(COST_PERMISSION);
 
 type SetWithRoles = ParameterSet & { roles: ParameterSetRole[] };
-type RevisionFull = BudgetRevision & { budget: ProjectBudget; parameterSet: SetWithRoles };
+type RevisionFull = BudgetRevision & { budget: ProjectBudget; parameterSet: SetWithRoles; sow?: Parameters<typeof presentSow>[0] };
 
 export const REVISION_STATUS_LABEL: Record<string, string> = {
   rascunho: 'Rascunho',
@@ -223,21 +224,22 @@ export class BudgetsService {
     };
   }
 
-  async createBudget(dto: CreateBudgetDto, user: AuthenticatedUser) {
+  /** `aws_sow` nasce pela fila de pedidos de cotação do Core (PJ4); a tela de projetos cria o `generico`. */
+  async createBudget(dto: CreateBudgetDto, user: AuthenticatedUser, model: BudgetModel = 'generico') {
     const project = await this.project(dto.axisProjectId);
     return this.prisma.$transaction(async (tx) => {
-      const exists = await tx.projectBudget.findUnique({ where: { axisProjectId_model: { axisProjectId: project.axisProjectId, model: 'generico' } }, select: { id: true } });
+      const exists = await tx.projectBudget.findUnique({ where: { axisProjectId_model: { axisProjectId: project.axisProjectId, model } }, select: { id: true } });
       if (exists) throw new ConflictException('Este projeto já tem orçamento. Abra-o e crie uma nova revisão.');
       const set = await this.currentParameterSet(tx);
       const inputs = emptyInputs(set);
       const result = computeBudget(engineParams(set), inputs);
       // Sem título informado, o cabeçalho mostra o nome do projeto no Core (e acompanha a edição lá).
       const title = dto.title?.trim() || null;
-      const budget = await tx.projectBudget.create({ data: { axisProjectId: project.axisProjectId, projectCode: project.code, model: 'generico', title, createdBy: user.userId } });
+      const budget = await tx.projectBudget.create({ data: { axisProjectId: project.axisProjectId, projectCode: project.code, model, title, createdBy: user.userId } });
       const rev = await tx.budgetRevision.create({
         data: { budgetId: budget.id, number: 1, parameterSetId: set.id, inputs: inputs as unknown as Prisma.InputJsonValue, ...this.persistFields(result), createdBy: user.userId, updatedBy: user.userId },
       });
-      await this.audit.record(user.userId, 'budget.created', 'project_budget', budget.id, { project: project.code, revision: 1, parameterSet: set.code }, tx);
+      await this.audit.record(user.userId, 'budget.created', 'project_budget', budget.id, { project: project.code, model, revision: 1, parameterSet: set.code }, tx);
       return { budgetId: budget.id, revisionId: rev.id };
     });
   }
@@ -280,7 +282,7 @@ export class BudgetsService {
   }
 
   private async loadRevision(id: string, tx: Prisma.TransactionClient = this.prisma): Promise<RevisionFull> {
-    const rev = await tx.budgetRevision.findUnique({ where: { id }, include: { budget: true, parameterSet: { include: { roles: true } } } });
+    const rev = await tx.budgetRevision.findUnique({ where: { id }, include: { budget: true, parameterSet: { include: { roles: true } }, sow: true } });
     if (!rev) throw new NotFoundException('Revisão de orçamento não encontrada.');
     return rev;
   }
@@ -309,6 +311,7 @@ export class BudgetsService {
       inputs: presentInputs(rev.inputs as unknown as BudgetInputs, cost),
       result: presentResult(rev.result as unknown as BudgetResult | null, cost),
       costVisible: cost,
+      sow: presentSow(rev.sow ?? null),
       workflow: {
         allowedActions: allowedActions(rev.status, user),
         submitBlockers: rev.status === 'rascunho' ? submitBlockers(rev.result as never) : [],
@@ -399,6 +402,14 @@ export class BudgetsService {
       const rev = await tx.budgetRevision.create({
         data: { budgetId, number, parameterSetId: set.id, inputs: inputs as unknown as Prisma.InputJsonValue, ...this.persistFields(computeBudget(engineParams(set), inputs)), createdBy: user.userId, updatedBy: user.userId },
       });
+      // A SOW lida (e corrigida) acompanha a nova revisão; importar de novo continua possível no rascunho.
+      const baseSow = base ? await tx.budgetRevisionSow.findUnique({ where: { revisionId: base.id } }) : null;
+      if (baseSow) {
+        const { revisionId: _r, importedAt: _i, updatedAt: _u, ...copy } = baseSow;
+        await tx.budgetRevisionSow.create({
+          data: { ...copy, revisionId: rev.id, header: copy.header as Prisma.InputJsonValue, devices: copy.devices as Prisma.InputJsonValue, parsedCables: copy.parsedCables as Prisma.InputJsonValue, cables: copy.cables as Prisma.InputJsonValue, warnings: copy.warnings as Prisma.InputJsonValue, updatedBy: user.userId },
+        });
+      }
       await this.audit.record(user.userId, 'budget_revision.created', 'budget_revision', rev.id, { budget: budget.title ?? budget.projectCode, revision: number, basedOn: base?.number ?? null, parameterSet: set.code }, tx);
       return rev.id;
     });

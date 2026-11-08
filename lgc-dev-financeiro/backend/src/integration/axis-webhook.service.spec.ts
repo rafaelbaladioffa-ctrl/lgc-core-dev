@@ -1,7 +1,7 @@
 import { BadRequestException, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { createHmac } from 'crypto';
-import { AxisWebhookService, toMasterRecord, type Envelope } from './axis-webhook.service.js';
+import { AxisWebhookService, toMasterRecord, toQuoteRequest, type Envelope } from './axis-webhook.service.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 
 const SECRET = 'segredo-webhook-de-teste';
@@ -14,7 +14,7 @@ const envelope = (over: Partial<Envelope> = {}): Envelope => ({ event_id: EVENT_
 const raw = (e: unknown) => Buffer.from(JSON.stringify(e));
 
 function prismaMock() {
-  const tx = { axisMasterCache: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) } };
+  const tx = { axisMasterCache: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn().mockResolvedValue({}) }, quoteRequest: { upsert: vi.fn().mockResolvedValue({}) } };
   const prisma = {
     integrationMessage: { findUnique: vi.fn().mockResolvedValue(null), create: vi.fn().mockResolvedValue({ id: 'm1' }), update: vi.fn().mockResolvedValue({}) },
     $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -160,5 +160,64 @@ describe('AxisWebhookService.receive', () => {
     const body = raw(envelope({ occurred_at: new Date().toISOString(), payload: { code: 'sem id' } }));
     await expect(service.receive(body, sign(body))).rejects.toThrow('project_id ausente.');
     expect(prisma.integrationMessage.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'FAILED' }) }));
+  });
+});
+
+describe('Pedido de cotação do Core (PJ4)', () => {
+  const quotePayload = {
+    project_id: 'p1',
+    code: 'PROP-100.001-1126',
+    name: 'Projeto Exemplo',
+    status: 'proposta',
+    client_id: 'k1',
+    quote_request_id: 'core-q1',
+    sow_document_id: 'doc-sow',
+    sow_version: 2,
+    sow_filename: 'SOW.pdf',
+    sow_content_hash: 'abc',
+    bid_template_document_id: 'doc-bt',
+    bid_template_version: 1,
+    bid_template_filename: 'Bid.xlsm',
+    bid_template_content_hash: 'def',
+    notes: 'Proposta até sexta',
+    requested_by_email: 'comercial@lgc.test',
+    requested_at: '2026-11-07T11:58:00.000Z',
+  };
+
+  it('converte o evento na linha da fila', () => {
+    expect(toQuoteRequest(envelope({ event_type: 'project.quote_requested', payload: quotePayload }))).toMatchObject({
+      axisQuoteRequestId: 'core-q1',
+      axisProjectId: 'p1',
+      projectCode: 'PROP-100.001-1126',
+      sowDocumentId: 'doc-sow',
+      sowVersion: 2,
+      sowContentHash: 'abc',
+      bidTemplateDocumentId: 'doc-bt',
+      bidTemplateVersion: 1,
+      notes: 'Proposta até sexta',
+      requestedAt: new Date('2026-11-07T11:58:00.000Z'),
+      eventId: EVENT_ID,
+    });
+    expect(() => toQuoteRequest(envelope({ event_type: 'project.quote_requested', payload: { ...quotePayload, sow_document_id: '' } }))).toThrow('sow_document_id ausente');
+  });
+
+  it('põe na fila e atualiza o projeto no cache só com o estado do projeto', async () => {
+    const { prisma, tx } = prismaMock();
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(envelope({ event_type: 'project.quote_requested', occurred_at: new Date(Date.now() - 60_000).toISOString(), payload: quotePayload }));
+    await expect(service.receive(body, sign(body))).resolves.toEqual({ status: 'processed', event_id: EVENT_ID });
+    expect(tx.quoteRequest.upsert).toHaveBeenCalledWith(expect.objectContaining({ where: { axisQuoteRequestId: 'core-q1' }, update: {} }));
+    const cached = tx.axisMasterCache.upsert.mock.calls[0][0].create.data;
+    expect(cached).toMatchObject({ project_id: 'p1', name: 'Projeto Exemplo', status: 'proposta' });
+    expect(cached).not.toHaveProperty('sow_document_id');
+    expect(cached).not.toHaveProperty('notes');
+  });
+
+  it('project.document_added é ignorado pelo cache', async () => {
+    const { prisma, tx } = prismaMock();
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(envelope({ event_type: 'project.document_added', occurred_at: new Date(Date.now() - 60_000).toISOString(), payload: { project_id: 'p1', document_id: 'd1', kind: 'sow' } }));
+    await expect(service.receive(body, sign(body))).resolves.toEqual({ status: 'ignored', event_id: EVENT_ID });
+    expect(tx.axisMasterCache.upsert).not.toHaveBeenCalled();
   });
 });

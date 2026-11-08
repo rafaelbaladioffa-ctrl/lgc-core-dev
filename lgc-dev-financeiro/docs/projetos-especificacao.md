@@ -525,9 +525,12 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
 
 Contrato completo em [integracao-core-financeiro.md §4](../../docs/integracao-core-financeiro.md#4-cotação-do-projeto).
 
-1. `project.quote_requested` (P-11: alguém clica "Solicitar cotação" no Core) cria o orçamento
-   `aws_sow` do projeto, se não houver, e o coloca na fila do orçamentista com o recado (`notes`), a
-   SOW e o Bid Template indicados. Se já houver orçamento e a SOW mudou, a próxima revisão nasce com aviso "SOW nova (vN)".
+1. `project.quote_requested` (P-11: alguém clica "Solicitar cotação" no Core) entra na **fila de pedidos
+   de cotação** (`quote_requests`) com o recado (`notes`), a SOW e o Bid Template indicados, e atualiza o
+   projeto no cache. O orçamento não nasce no webhook (sem parâmetros vigentes o evento falharia e o Core
+   reentregaria sem fim): nasce quando o orçamentista clica **"Iniciar cotação"**, que abre o orçamento
+   `aws_sow` do projeto (cria na primeira vez), usa o rascunho ou cria nova revisão e importa a SOW do
+   pedido. Um pedido novo com SOW nova pode ser reimportado no rascunho.
 2. Ao **aprovar o envio** (P-12), o Financeiro gera a Bid (§7.4) e grava na outbox
    `POST /integration/projects/:axisProjectId/quotes` com `external_revision_id`, `revision_number`,
    `sow_document_id`, `work_days`, datas da execução, `team` (por função: pessoas, dias, horas; P-15),
@@ -559,7 +562,7 @@ de custo; outros modelos de cliente além do AWS.
 | PJ1 | Parâmetros versionados, funções e custo hora (§6.1), catálogos de material e destinos, permissões e perfis; testes do cálculo com valores fictícios | **feito** (2026-11-07): ver nota abaixo |
 | PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
 | PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | **feito** (2026-11-08): ver nota abaixo |
-| PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | pendente |
+| PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | **parte 1 feita** (2026-11-08): fila, SOW em PDF, leitura e correção dos cabos. **Parte 2 pendente:** horas-meta, indicadores e metas lidas do Bid Template, horas T e valores do bid |
 | PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
 | PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | pendente |
@@ -620,6 +623,26 @@ de custo; outros modelos de cliente além do AWS.
   em memória (PGlite), com os gatilhos e índices recusando transições inválidas, duas enviadas e
   alteração do histórico. Não verificado ainda: uso na tela com login real.
 - A devolução da cotação ao Core ao aprovar o envio fica para a PJ7.
+
+**Notas da PJ4 (parte 1).**
+- Migração `20261108160000_pj4_sow_cotacao`: `quote_requests` (fila, única por `axis_quote_request_id`)
+  e `budget_revision_sow` (texto original, cabeçalho, racks, linhas lidas e linhas atuais, avisos), com
+  gatilho que só deixa mudar a SOW de revisão em rascunho. A nova revisão copia a SOW da anterior.
+- Webhook: `project.quote_requested` põe o pedido na fila e atualiza o projeto no cache só com as chaves
+  do estado do projeto; `project.document_added` é ignorado (o documento é baixado pelo pedido).
+- Download pela API de integração do Core com `AXIS_API_KEY` (nova variável), conferindo o SHA-256 do
+  pedido. Extração com `pdfjs-dist` (versão fixa) por linha; PDF sem texto pede para colar o texto.
+- Rotas: `GET /quote-requests`, `POST /quote-requests/:id/start` (`budget:write`),
+  `POST /revisions/:id/sow/import` (do Core ou `text`), `PUT /revisions/:id/sow/cables` (correção, com
+  antes/depois na auditoria), `GET /revisions/:id/sow/text` (`budget:write`, leitura auditada, P-05). A
+  revisão traz `sow` (sem o texto).
+- Telas: `#/cotacoes` (fila com "Iniciar cotação"/"Continuar cotação") e seção "SOW do cliente" na
+  revisão (cabeçalho, racks/live, cabos por tipo com comprimento médio e portas, linhas para conferir e
+  corrigir, texto original).
+- Conferido: o PDF real das duas SOWs passou pela extração e pelo parser de produção com os mesmos
+  totais da conferência manual (fora do Git); testes com SOWs fictícias nos dois formatos e com um PDF
+  mínimo gerado no teste; migrações e gatilhos num Postgres em memória. Não verificado: tela com login
+  real e download contra um Core rodando.
 
 ## 17. Decisões pendentes
 

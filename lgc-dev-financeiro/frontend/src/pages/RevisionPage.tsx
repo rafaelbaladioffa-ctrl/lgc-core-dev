@@ -17,6 +17,7 @@ import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
 import { Badge, ErrorAlert, Field, messageOf, PageHeader, useLoad, useUnsavedWarning } from '../components/ui';
 import { RevisionWorkflow } from '../components/RevisionWorkflow';
+import { RevisionSowSection } from '../components/RevisionSow';
 
 // ---------------------------------------------------------------------------
 // Formulário ↔ entradas da API
@@ -148,6 +149,12 @@ export function toInputs(form: Form, roles: Revision['roles'], costVisible: bool
 // ---------------------------------------------------------------------------
 // Página
 // ---------------------------------------------------------------------------
+
+/** Erro do download da SOW ao iniciar a cotação pela fila (vem na URL: #/revisoes/:id?sowError=…). */
+function sowErrorFromUrl(): string | null {
+  const query = window.location.hash.split('?')[1];
+  return query ? new URLSearchParams(query).get('sowError') : null;
+}
 
 export function RevisionPage({ id, canWrite }: { id: string; canWrite: boolean }) {
   const { data: rev, setData, error, reload } = useLoad(() => getRevision(id), [id], 'Não foi possível carregar a revisão.');
@@ -301,6 +308,9 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
         </p>
       )}
       <RevisionWorkflow rev={rev} dirty={dirty && editable} onChange={onChange} />
+      {(rev.budget.model === 'aws_sow' || rev.sow) && (
+        <RevisionSowSection rev={rev} canWrite={canWrite} initialError={sowErrorFromUrl()} onChange={(sow) => onChange({ ...rev, sow })} />
+      )}
       {editable && paramsOutdated && (
         <p className="alert alert-warning">
           Esta revisão usa {rev.parameterSet.code}; o vigente é {rev.currentParameterSet!.code}.{' '}

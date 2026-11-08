@@ -7,6 +7,7 @@ import { ParameterSetPage } from './pages/ParameterSetPage';
 import { DestinationFormPage, DestinationsPage, MaterialFormPage, MaterialsPage } from './pages/CatalogPages';
 import { ProjectPage, ProjectsPage } from './pages/ProjectsPages';
 import { RevisionPage } from './pages/RevisionPage';
+import { QuoteRequestsPage } from './pages/QuoteRequestsPage';
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
@@ -79,6 +80,7 @@ const NEXT_STEPS = [
 
 const NAV = [
   { path: '/projetos', label: 'Projetos', permission: 'budget:read' },
+  { path: '/cotacoes', label: 'Pedidos de cotação', permission: 'budget:read' },
   { path: '/parametros', label: 'Parâmetros', permission: 'budget_params:read' },
   { path: '/materiais', label: 'Materiais', permission: 'budget_params:read' },
   { path: '/destinos', label: 'Destinos', permission: 'budget_params:read' },
@@ -157,6 +159,7 @@ function Routes({ path, me, can }: { path: string; me: Me; can: (p: string) => b
   if (matchRoute('/projetos', path)) return budgetRead ? <ProjectsPage canWrite={budgetWrite} canSeeCost={cost} /> : <NoAccess />;
   if ((m = matchRoute('/projetos/:id', path))) return budgetRead ? <ProjectPage key={m.id} id={m.id} canWrite={budgetWrite} canSeeCost={cost} /> : <NoAccess />;
   if ((m = matchRoute('/revisoes/:id', path))) return budgetRead ? <RevisionPage key={m.id} id={m.id} canWrite={budgetWrite} /> : <NoAccess />;
+  if (matchRoute('/cotacoes', path)) return budgetRead ? <QuoteRequestsPage canWrite={budgetWrite} /> : <NoAccess />;
 
   if (matchRoute('/parametros', path)) return read ? <ParameterSetsPage canWrite={write} /> : <NoAccess />;
   if ((m = matchRoute('/parametros/:id', path))) return read ? <ParameterSetPage key={m.id} id={m.id} canWrite={write} /> : <NoAccess />;

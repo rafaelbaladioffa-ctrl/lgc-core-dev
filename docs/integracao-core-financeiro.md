@@ -14,7 +14,7 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 | Webhook de dados mestres | Core → Financeiro | Funciona para `collaborator.*`, `client.*`, `project.*`, `cost_center.*` |
 | Webhook de compra, reembolso e adiantamento | Core → Financeiro | **Contratos novos; o Core ainda não emite** |
 | Eventos de pagamento | Financeiro → Core | Outbox pronto; **o Core não tem receptor** |
-| Pedido de cotação do projeto (`project.quote_requested`) | Core → Financeiro | Core emite desde 2026-11-08; **o Financeiro ainda não consome** (§4) |
+| Pedido de cotação do projeto (`project.quote_requested`) | Core → Financeiro | Core emite e o Financeiro consome desde 2026-11-08 (fila de pedidos de cotação, PJ4) (§4) |
 | Devolução da cotação (`POST /integration/projects/:id/quotes`) | Financeiro → Core | Core recebe desde 2026-11-08; **o Financeiro ainda não envia** (§4) |
 | API de consulta por API key | Financeiro → Core | Disponível no Core; o Financeiro ainda não usa |
 | Consulta de projetos e clientes com o token do usuário (`GET /projects`, `GET /clients` do Core) | Financeiro → Core | Usada pelo botão "Atualizar do Axis Core" do módulo Projetos (PJ2); respeita `project:read`/`client:read` de quem clicou. URL em `AXIS_API_URL` |
@@ -39,8 +39,8 @@ Mesmo envelope e assinatura usados com a Logística (`{event_id, event_type, occ
 | `project.created/updated/status_changed/deleted` | sim (`updated` e `deleted` desde 2026-11-07) | sim (cache; `encerrado` = inativo) |
 | `user.disabled` | **não** | sim (bloqueio) |
 | `cost_center.created/updated` | sim (desde 2026-11-07; exclusão vai como `updated` com `active: false`) | sim (cache) |
-| `project.document_added` | sim | a partir da PJ4 (SOW) |
-| `project.quote_requested` | sim (desde 2026-11-08) | a partir da PJ4 (§4) |
+| `project.document_added` | sim | recebido e ignorado: o Financeiro baixa o documento pelo pedido de cotação |
+| `project.quote_requested` | sim (desde 2026-11-08) | sim (fila de pedidos de cotação, PJ4; §4) |
 
 Todo `project.*` leva o estado completo do projeto: `project_id`, `code`, `name`, `status`,
 `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`,
@@ -127,7 +127,8 @@ Content-Type: application/json
    `recebida`), a revisão vigente, dias, pessoas em campo, horas, equipe por função e o download da
    Bid; as revisões anteriores ficam como "Substituída". Detalhe: [dominio/cadastros.md §10.2](dominio/cadastros.md#102-cotação-pelo-financeiro).
 
-**Cadastro do satélite:** o Financeiro precisa assinar `project.*`, `project.document_added` e
+**Cadastro do satélite:** a API key entregue ao cadastrar vai em `AXIS_API_KEY` do Financeiro (download
+da SOW e do Bid Template). O Financeiro precisa assinar `project.*`, `project.document_added` e
 `project.quote_requested`.
 
 ## 5. O que o Core precisa fazer (ordem sugerida)

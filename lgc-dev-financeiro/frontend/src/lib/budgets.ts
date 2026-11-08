@@ -176,6 +176,69 @@ export interface RevisionWorkflowInfo {
   events: Array<{ id: string; action: string; label: string; fromStatus: RevisionStatus; toStatus: RevisionStatus; reason: string | null; actorEmail: string | null; createdAt: string }>;
 }
 
+export interface SowCableLine {
+  type: string;
+  kind: 'fibra' | 'cobre' | 'outro';
+  fibers: number;
+  lengthM: number;
+  quantity: number;
+}
+
+/** SOW lida na revisão (PJ4, §7.1). O texto original vem à parte (GET /revisions/:id/sow/text). */
+export interface RevisionSow {
+  source: 'core_pdf' | 'texto';
+  quoteRequestId: string | null;
+  sowDocumentId: string | null;
+  sowVersion: number | null;
+  pages: number | null;
+  header: {
+    sowType: string | null;
+    projectType: string | null;
+    fbn: string | null;
+    sites: string | null;
+    projectName: string | null;
+    spsProjectId: string | null;
+    sowUid: string | null;
+    walkthroughAt: string | null;
+    bidDueAt: string | null;
+    poDate: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    contacts: { primary: string | null; secondary: string | null; team: string | null };
+    platform: 'pedida' | 'nao_precisa' | 'nao_mencionada';
+  };
+  devices: { total: number; live: number; notLive: number };
+  cables: SowCableLine[];
+  edited: boolean;
+  types: Array<{ type: string; kind: SowCableLine['kind']; fibers: number; quantity: number; meters: number; averageLengthM: number; ports: number }>;
+  totals: { cables: number; meters: number; ports: number };
+  warnings: string[];
+  importedAt: string;
+  importedBy: string;
+  updatedAt: string;
+}
+
+export type QuoteRequestStatus = 'pendente' | 'em_cotacao' | 'respondida';
+
+export interface QuoteRequestRow {
+  id: string;
+  axisProjectId: string;
+  projectCode: string;
+  projectName: string | null;
+  sowVersion: number;
+  sowFilename: string;
+  bidTemplateVersion: number | null;
+  bidTemplateFilename: string | null;
+  notes: string | null;
+  requestedByEmail: string | null;
+  requestedAt: string;
+  startedAt: string | null;
+  status: QuoteRequestStatus;
+  budgetId: string | null;
+  currentRevision: { id: string; number: number; status: RevisionStatus } | null;
+  draftRevisionId: string | null;
+}
+
 export interface Revision {
   id: string;
   number: number;
@@ -190,6 +253,7 @@ export interface Revision {
   inputs: BudgetInputs;
   result: BudgetResult | null;
   costVisible: boolean;
+  sow: RevisionSow | null;
   workflow: RevisionWorkflowInfo;
   revisions: Array<{ id: string; number: number; status: RevisionStatus }>;
   updatedAt: string;
@@ -219,3 +283,12 @@ const TRANSITION_PATH: Record<Exclude<WorkflowAction, 'discard'>, string> = {
 /** Passo do fluxo da revisão (§3.1); `reason` é obrigatório ao devolver e ao perder. */
 export const transitionRevision = (id: string, action: Exclude<WorkflowAction, 'discard'>, reason?: string) =>
   api<Revision>(`/revisions/${id}/${TRANSITION_PATH[action]}`, { method: 'POST', body: JSON.stringify(reason ? { reason } : {}) });
+
+export const listQuoteRequests = () => api<QuoteRequestRow[]>('/quote-requests');
+export const startQuote = (id: string) => api<{ revisionId: string; sowImported: boolean; sowError: string | null }>(`/quote-requests/${id}/start`, { method: 'POST', body: '{}' });
+/** Sem corpo: baixa a SOW do pedido de cotação mais recente do projeto; `text`: lê o texto colado. */
+export const importSow = (revisionId: string, body: { quoteRequestId?: string; text?: string }) =>
+  api<RevisionSow>(`/revisions/${revisionId}/sow/import`, { method: 'POST', body: JSON.stringify(body) });
+export const updateSowCables = (revisionId: string, cables: Array<{ type: string; lengthM: number; quantity: number; fibers?: number }>) =>
+  api<RevisionSow>(`/revisions/${revisionId}/sow/cables`, { method: 'PUT', body: JSON.stringify({ cables }) });
+export const getSowText = (revisionId: string) => api<{ text: string }>(`/revisions/${revisionId}/sow/text`);

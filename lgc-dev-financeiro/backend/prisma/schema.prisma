@@ -314,7 +314,8 @@ model ProjectBudget {
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")
 
-  revisions BudgetRevision[]
+  revisions     BudgetRevision[]
+  quoteRequests QuoteRequest[]
 
   @@unique([axisProjectId, model])
   @@map("project_budgets")
@@ -351,6 +352,7 @@ model BudgetRevision {
   budget       ProjectBudget @relation(fields: [budgetId], references: [id])
   parameterSet ParameterSet  @relation(fields: [parameterSetId], references: [id])
   events       BudgetRevisionEvent[]
+  sow          BudgetRevisionSow?
 
   @@unique([budgetId, number])
   @@index([status])
@@ -374,4 +376,64 @@ model BudgetRevisionEvent {
 
   @@index([revisionId, createdAt])
   @@map("budget_revision_events")
+}
+
+/// Pedido de cotação vindo do Core (`project.quote_requested`, PJ4). A fila do orçamentista; o orçamento
+/// `aws_sow` nasce quando alguém clica "Iniciar cotação".
+model QuoteRequest {
+  id                     String    @id @default(uuid())
+  axisQuoteRequestId     String    @unique @map("axis_quote_request_id")
+  axisProjectId          String    @map("axis_project_id")
+  projectCode            String    @map("project_code")
+  sowDocumentId          String    @map("sow_document_id")
+  sowVersion             Int       @map("sow_version")
+  sowFilename            String    @map("sow_filename")
+  sowContentHash         String    @map("sow_content_hash")
+  /// Nulo só em pedidos anteriores à exigência do Bid Template no Core.
+  bidTemplateDocumentId  String?   @map("bid_template_document_id")
+  bidTemplateVersion     Int?      @map("bid_template_version")
+  bidTemplateFilename    String?   @map("bid_template_filename")
+  bidTemplateContentHash String?   @map("bid_template_content_hash")
+  notes                  String?
+  requestedByEmail       String?   @map("requested_by_email")
+  requestedAt            DateTime  @map("requested_at")
+  eventId                String    @map("event_id")
+  budgetId               String?   @map("budget_id")
+  startedAt              DateTime? @map("started_at")
+  startedBy              String?   @map("started_by")
+  createdAt              DateTime  @default(now()) @map("created_at")
+
+  budget   ProjectBudget?      @relation(fields: [budgetId], references: [id])
+  sowUsage BudgetRevisionSow[]
+
+  @@index([axisProjectId])
+  @@map("quote_requests")
+}
+
+/// SOW lida na revisão (PJ4, §7.1): texto original (P-05: só para budget:write), o que o parser leu e as
+/// linhas de cabo atuais (com as correções do orçamentista). Só muda com a revisão em rascunho.
+model BudgetRevisionSow {
+  revisionId     String   @id @map("revision_id")
+  quoteRequestId String?  @map("quote_request_id")
+  /// core_pdf (baixado do Core) ou texto (colado)
+  source         String
+  sowDocumentId  String?  @map("sow_document_id")
+  sowVersion     Int?     @map("sow_version")
+  pages          Int?
+  rawText        String   @map("raw_text")
+  header         Json
+  devices        Json
+  /// Linhas lidas pelo parser, para comparar com as corrigidas.
+  parsedCables   Json     @map("parsed_cables")
+  cables         Json
+  warnings       Json
+  importedAt     DateTime @default(now()) @map("imported_at")
+  importedBy     String   @map("imported_by")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  updatedBy      String   @map("updated_by")
+
+  revision     BudgetRevision @relation(fields: [revisionId], references: [id])
+  quoteRequest QuoteRequest?  @relation(fields: [quoteRequestId], references: [id])
+
+  @@map("budget_revision_sow")
 }

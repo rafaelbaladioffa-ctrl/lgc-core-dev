@@ -57,6 +57,50 @@ export function toMasterRecord(env: Envelope): MasterRecord | null {
   }
 }
 
+/** Chaves do estado do projeto em `project.*` (cadastros §10 do Core); o resto do payload não vai para o cache. */
+const PROJECT_STATE_KEYS = [
+  'project_id',
+  'code',
+  'name',
+  'status',
+  'client_id',
+  'cost_center_id',
+  'cost_center_code',
+  'cost_center_name',
+  'responsible_collaborator_id',
+  'planned_start_date',
+  'planned_end_date',
+];
+
+/** Pedido de cotação do Core (integracao-core-financeiro §4) → linha da fila do orçamentista. */
+export function toQuoteRequest(env: Envelope) {
+  const p = env.payload;
+  const str = (k: string) => (typeof p[k] === 'string' && p[k] !== '' ? (p[k] as string) : null);
+  const int = (k: string) => (typeof p[k] === 'number' && Number.isInteger(p[k]) ? (p[k] as number) : null);
+  const required = <T>(k: string, v: T | null): T => {
+    if (v === null) throw new BadRequestException(`${k} ausente no pedido de cotação.`);
+    return v;
+  };
+  const requestedAt = str('requested_at');
+  return {
+    axisQuoteRequestId: required('quote_request_id', str('quote_request_id')),
+    axisProjectId: required('project_id', str('project_id')),
+    projectCode: required('code', str('code')),
+    sowDocumentId: required('sow_document_id', str('sow_document_id')),
+    sowVersion: required('sow_version', int('sow_version')),
+    sowFilename: str('sow_filename') ?? 'SOW',
+    sowContentHash: required('sow_content_hash', str('sow_content_hash')),
+    bidTemplateDocumentId: str('bid_template_document_id'),
+    bidTemplateVersion: int('bid_template_version'),
+    bidTemplateFilename: str('bid_template_filename'),
+    bidTemplateContentHash: str('bid_template_content_hash'),
+    notes: str('notes'),
+    requestedByEmail: str('requested_by_email'),
+    requestedAt: requestedAt && !Number.isNaN(Date.parse(requestedAt)) ? new Date(requestedAt) : new Date(env.occurred_at),
+    eventId: env.event_id,
+  };
+}
+
 /**
  * Receptor do webhook do Core (especificação §2.3):
  *  - assinatura HMAC-SHA256 do corpo bruto (`X-Axis-Signature: sha256=<hex>`), comparação em tempo constante;
@@ -138,9 +182,25 @@ export class AxisWebhookService {
   }
 
   private async handle(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed' | 'ignored' | 'out_of_order'> {
+    // Documento novo: o Financeiro baixa quando precisa (pelo pedido de cotação); não é estado do projeto.
+    if (env.event_type === 'project.document_added') return 'ignored';
+    if (env.event_type === 'project.quote_requested') return this.handleQuoteRequested(tx, env);
     const master = toMasterRecord(env);
     if (!master) return 'ignored';
     return (await this.upsertMaster(tx, master, new Date(env.occurred_at))) ? 'processed' : 'out_of_order';
+  }
+
+  /**
+   * Pedido de cotação: atualiza o projeto no cache (o evento traz o estado completo) e põe o pedido na fila.
+   * Reentrega do mesmo pedido não duplica (único por `axis_quote_request_id`).
+   */
+  private async handleQuoteRequested(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed'> {
+    const request = toQuoteRequest(env);
+    const state = Object.fromEntries(Object.entries(env.payload).filter(([k]) => PROJECT_STATE_KEYS.includes(k)));
+    const master = toMasterRecord({ ...env, event_type: 'project.updated', payload: state });
+    if (master) await this.upsertMaster(tx, master, new Date(env.occurred_at));
+    await tx.quoteRequest.upsert({ where: { axisQuoteRequestId: request.axisQuoteRequestId }, create: request, update: {} });
+    return 'processed';
   }
 
   /** Aplica só se o evento for mais novo que o guardado; mescla campos parciais. Devolve false se descartado. */

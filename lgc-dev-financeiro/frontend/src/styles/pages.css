@@ -409,3 +409,13 @@ td.nowrap {
 .workflow-reason { display: flex; flex-direction: column; gap: var(--space-2); }
 .workflow-reason textarea { width: 100%; min-height: 64px; resize: vertical; }
 .workflow-history { margin: var(--space-2) 0 0; padding-left: var(--space-4); display: flex; flex-direction: column; gap: var(--space-2); }
+
+/* SOW da revisão (PJ4): cabeçalho lido, cabos por tipo e linhas para conferência. */
+.sow { display: flex; flex-direction: column; gap: var(--space-3); margin-bottom: var(--space-4); }
+.sow h3 { margin: var(--space-2) 0 0; }
+.sow-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-2) var(--space-3); margin: 0; }
+.sow-grid dt { color: var(--text-muted); font-size: 0.8rem; }
+.sow-grid dd { margin: 0; overflow-wrap: anywhere; }
+.sow-grid__full { grid-column: 1 / -1; }
+.sow-text { max-height: 360px; overflow: auto; white-space: pre-wrap; font-size: 0.8rem; }
+.sow input { width: 100%; min-width: 70px; }

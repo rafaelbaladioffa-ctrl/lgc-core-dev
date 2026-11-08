@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
-import { CreateBudgetDto, RevisionTransitionDto, SimulateRevisionDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
+import { CreateBudgetDto, ImportSowDto, RevisionTransitionDto, SimulateRevisionDto, UpdateBudgetDto, UpdateRevisionDto, UpdateSowCablesDto } from './budget-inputs.dto.js';
+import { SowService } from './sow/sow.service.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
 
@@ -59,9 +60,52 @@ export class BudgetsController {
   }
 }
 
+/** Fila de pedidos de cotação vindos do Core (PJ4, integracao-core-financeiro §4). */
+@Controller('quote-requests')
+export class QuoteRequestsController {
+  constructor(private readonly sow: SowService) {}
+
+  @Get()
+  @RequirePermissions('budget:read')
+  list() {
+    return this.sow.listQuoteRequests();
+  }
+
+  /** Abre (ou cria) o orçamento aws_sow do projeto e importa a SOW do pedido. */
+  @Post(':id/start')
+  @HttpCode(200)
+  @RequirePermissions('budget:write')
+  start(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.sow.startQuote(id, user);
+  }
+}
+
 @Controller('revisions')
 export class RevisionsController {
-  constructor(private readonly budgets: BudgetsService) {}
+  constructor(
+    private readonly budgets: BudgetsService,
+    private readonly sow: SowService,
+  ) {}
+
+  // SOW da revisão (§7.1). Só muda em rascunho; o texto original é do cliente (P-05).
+  @Post(':id/sow/import')
+  @HttpCode(200)
+  @RequirePermissions('budget:write')
+  importSow(@Param('id', ParseUUIDPipe) id: string, @Body() dto: ImportSowDto, @CurrentUser() user: AuthenticatedUser) {
+    return dto.text !== undefined ? this.sow.importText(id, dto.text, user) : this.sow.importFromCore(id, { quoteRequestId: dto.quoteRequestId }, user);
+  }
+
+  @Put(':id/sow/cables')
+  @RequirePermissions('budget:write')
+  updateSowCables(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateSowCablesDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.sow.updateCables(id, dto.cables, user);
+  }
+
+  @Get(':id/sow/text')
+  @RequirePermissions('budget:write')
+  sowText(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    return this.sow.getText(id, user);
+  }
 
   @Get(':id')
   @RequirePermissions('budget:read')
