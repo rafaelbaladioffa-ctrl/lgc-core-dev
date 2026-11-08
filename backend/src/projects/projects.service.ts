@@ -1,10 +1,10 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, ProjectStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from '../integration/outbox.service.js';
 import { CreateProjectDto } from './dto/create-project.dto.js';
 import { UpdateProjectDto } from './dto/update-project.dto.js';
 import { UpdateProjectStatusDto } from './dto/update-project-status.dto.js';
-import { ProjectStatus } from '@prisma/client';
 
 /** Allowed forward transitions for the proposal → delivery lifecycle. */
 const ALLOWED_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
@@ -13,6 +13,43 @@ const ALLOWED_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
   em_execucao: ['encerrado'],
   encerrado: [],
 };
+
+const SNAPSHOT_INCLUDE = {
+  costCenter: { select: { id: true, code: true, name: true } },
+} satisfies Prisma.ProjectInclude;
+
+type ProjectWithCostCenter = Prisma.ProjectGetPayload<{ include: typeof SNAPSHOT_INCLUDE }>;
+
+/** `AAAA-MM-DD` → Date em UTC (coluna `DATE`); `null` apaga; `undefined` mantém. */
+function toDateOnly(value: string | null | undefined): Date | null | undefined {
+  if (value === undefined || value === null) return value;
+  return new Date(`${value}T00:00:00Z`);
+}
+
+function formatDateOnly(value: Date | null): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
+
+/**
+ * Estado completo do projeto enviado em todo evento `project.*`. Os satélites (Financeiro,
+ * Logística) guardam o último snapshot no cache, então cada evento precisa trazer tudo.
+ * Contrato: docs/dominio/cadastros.md §10.
+ */
+export function projectEventPayload(project: ProjectWithCostCenter): Record<string, unknown> {
+  return {
+    project_id: project.id,
+    code: project.code,
+    name: project.name,
+    status: project.status,
+    client_id: project.clientId,
+    cost_center_id: project.costCenterId,
+    cost_center_code: project.costCenter.code,
+    cost_center_name: project.costCenter.name,
+    responsible_collaborator_id: project.responsibleCollaboratorId,
+    planned_start_date: formatDateOnly(project.plannedStartDate),
+    planned_end_date: formatDateOnly(project.plannedEndDate),
+  };
+}
 
 @Injectable()
 export class ProjectsService {
@@ -23,7 +60,10 @@ export class ProjectsService {
 
   async create(dto: CreateProjectDto) {
     const client = await this.prisma.client.findUnique({ where: { id: dto.clientId } });
-    if (!client) throw new BadRequestException('Client not found');
+    if (!client) throw new BadRequestException('Cliente não encontrado.');
+    const plannedStartDate = toDateOnly(dto.plannedStartDate);
+    const plannedEndDate = toDateOnly(dto.plannedEndDate);
+    this.assertDateOrder(plannedStartDate ?? null, plannedEndDate ?? null);
 
     return this.prisma.$transaction(async (tx) => {
       // nextval() on a native Postgres sequence is atomic: concurrent requests each get a
@@ -31,24 +71,23 @@ export class ProjectsService {
       // even under simultaneous creation (see PLANNING.md 5.9 and migration 20261030000000).
       const rows = await tx.$queryRaw<Array<{ nextval: bigint }>>`SELECT nextval('project_proposal_seq') AS nextval`;
       const proposalSequence = Number(rows[0].nextval);
-      const code = this.buildCode(client.code, proposalSequence);
+      const code = buildProjectCode(client.code, proposalSequence, new Date());
 
       const project = await tx.project.create({
         data: {
           code,
+          name: dto.name,
           clientId: dto.clientId,
           costCenterId: dto.costCenterId,
           responsibleCollaboratorId: dto.responsibleCollaboratorId,
+          plannedStartDate,
+          plannedEndDate,
           status: dto.status ?? 'proposta',
           proposalSequence,
         },
+        include: SNAPSHOT_INCLUDE,
       });
-      await this.outbox.record(tx, 'project.created', {
-        project_id: project.id,
-        code: project.code,
-        status: project.status,
-        client_id: project.clientId,
-      });
+      await this.outbox.record(tx, 'project.created', projectEventPayload(project));
       return project;
     });
   }
@@ -59,15 +98,36 @@ export class ProjectsService {
 
   async findOne(id: string) {
     const project = await this.prisma.project.findUnique({ where: { id } });
-    if (!project) throw new NotFoundException('Project not found');
+    if (!project) throw new NotFoundException('Projeto não encontrado.');
     return project;
   }
 
   async update(id: string, dto: UpdateProjectDto) {
-    await this.findOne(id);
-    return this.prisma.project.update({
-      where: { id },
-      data: { costCenterId: dto.costCenterId, responsibleCollaboratorId: dto.responsibleCollaboratorId },
+    const current = await this.findOne(id);
+    const plannedStartDate = toDateOnly(dto.plannedStartDate);
+    const plannedEndDate = toDateOnly(dto.plannedEndDate);
+    this.assertDateOrder(
+      plannedStartDate === undefined ? current.plannedStartDate : plannedStartDate,
+      plannedEndDate === undefined ? current.plannedEndDate : plannedEndDate,
+    );
+
+    return this.prisma.$transaction(async (tx) => {
+      const project = await tx.project.update({
+        where: { id },
+        data: {
+          name: dto.name,
+          costCenterId: dto.costCenterId,
+          responsibleCollaboratorId: dto.responsibleCollaboratorId,
+          plannedStartDate,
+          plannedEndDate,
+        },
+        include: SNAPSHOT_INCLUDE,
+      });
+      await this.outbox.record(tx, 'project.updated', {
+        ...projectEventPayload(project),
+        changed_fields: Object.keys(dto).filter((k) => (dto as Record<string, unknown>)[k] !== undefined),
+      });
+      return project;
     });
   }
 
@@ -75,34 +135,57 @@ export class ProjectsService {
     const project = await this.findOne(id);
     const allowed = ALLOWED_TRANSITIONS[project.status];
     if (!allowed.includes(dto.status)) {
-      throw new BadRequestException(`Cannot transition project from "${project.status}" to "${dto.status}"`);
+      throw new BadRequestException(`Não é possível mudar o projeto de "${project.status}" para "${dto.status}".`);
     }
     return this.prisma.$transaction(async (tx) => {
-      const updated = await tx.project.update({ where: { id }, data: { status: dto.status } });
+      const updated = await tx.project.update({ where: { id }, data: { status: dto.status }, include: SNAPSHOT_INCLUDE });
       await this.outbox.record(tx, 'project.status_changed', {
-        project_id: updated.id,
-        code: updated.code,
-        status: updated.status,
+        ...projectEventPayload(updated),
+        previous_status: project.status,
       });
       return updated;
     });
   }
 
+  /**
+   * Exclusão física só para proposta sem requisições: depois disso o projeto já pode ter
+   * orçamento no Financeiro ou movimentação na Logística, e o caminho é encerrar.
+   */
   async remove(id: string) {
-    await this.findOne(id);
-    await this.prisma.project.delete({ where: { id } });
+    const project = await this.prisma.project.findUnique({
+      where: { id },
+      include: { ...SNAPSHOT_INCLUDE, _count: { select: { requests: true } } },
+    });
+    if (!project) throw new NotFoundException('Projeto não encontrado.');
+    if (project.status !== 'proposta') {
+      throw new ConflictException('Só é possível excluir projeto em proposta. Encerre o projeto.');
+    }
+    if (project._count.requests > 0) {
+      throw new ConflictException('O projeto tem requisições vinculadas. Encerre o projeto em vez de excluir.');
+    }
+    await this.prisma.$transaction(async (tx) => {
+      await tx.project.delete({ where: { id } });
+      // Os satélites tratam qualquer `project.*` pelo `status`; `encerrado` marca inativo no cache.
+      await this.outbox.record(tx, 'project.deleted', { ...projectEventPayload(project), status: 'encerrado', deleted: true });
+    });
   }
 
-  private async nextProposalSequence(): Promise<number> {
-    const rows = await this.prisma.$queryRaw<Array<{ nextval: bigint }>>`SELECT nextval('project_proposal_seq') AS nextval`;
-    return Number(rows[0].nextval);
+  private assertDateOrder(start: Date | null, end: Date | null): void {
+    if (start && end && end < start) {
+      throw new BadRequestException('A conclusão prevista não pode ser antes do início previsto.');
+    }
   }
+}
 
-  private buildCode(clientCode: number, proposalSequence: number): string {
-    const now = new Date();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const year = String(now.getFullYear()).slice(-2);
-    const proposal = String(proposalSequence).padStart(3, '0');
-    return `PROP-${clientCode}.${proposal}-${month}${year}`;
-  }
+/**
+ * `PROP-{código do cliente}.{seq}-{MMAA}`, com mês e ano no fuso de São Paulo (não no fuso do
+ * processo: em container UTC, um projeto criado depois das 21h do último dia do mês ganhava o
+ * mês seguinte).
+ */
+export function buildProjectCode(clientCode: number, proposalSequence: number, now: Date): string {
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', month: '2-digit', year: '2-digit' }).formatToParts(now);
+  const month = parts.find((p) => p.type === 'month')?.value ?? '';
+  const year = parts.find((p) => p.type === 'year')?.value ?? '';
+  const proposal = String(proposalSequence).padStart(3, '0');
+  return `PROP-${clientCode}.${proposal}-${month}${year}`;
 }

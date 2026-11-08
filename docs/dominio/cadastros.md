@@ -70,7 +70,7 @@ Criar/editar papel **não** gera auditoria nem evento. Não há exclusão de pap
 |---|---|
 | `admin` | todas as permissões do catálogo |
 | `rh` | leitura de setor/CC/cargo/jornada; `collaborator:create/read/read_sensitive/update/delete`; `certification:*`; `request:create/read/comment/approve`; `delegation:create/read`; `user:create/read/update/reset_password` |
-| `gestor` | leitura de setor/CC/cargo/jornada/certificação/cliente; `collaborator:read/update`; `project:create/read/update`; `request_category:read`; `request:create/read/update/assign/approve/comment`; `delegation:create/read` |
+| `gestor` | leitura de setor/CC/cargo/jornada/certificação/cliente; `collaborator:read/update`; `project:create/read/update/read_documents`; `request_category:read`; `request:create/read/update/assign/approve/comment`; `delegation:create/read` |
 | `tecnico` | `sector:read`, `collaborator:read`, `certification:read`, `request:create/read/update/comment` |
 | `analista_suprimentos` | `sector:read`, `collaborator:read`, `request_category:read`, `request:create/read/update/assign/comment` |
 | `colaborador` | `sector:read`, `collaborator:read`, `request:create/read/comment` |
@@ -111,7 +111,9 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 
 **Divergência com o planning:** `responsible_collaborator_id` existe no schema, no DTO e no formulário, mas não está no planning §5.6.
 
-**Endpoints:** `POST /cost-centers` (`cost_center:create`), `GET /cost-centers`, `GET /cost-centers/:id` (`cost_center:read`, incluem setor e responsável), `PUT /cost-centers/:id` (`cost_center:update`), `DELETE /cost-centers/:id` (`cost_center:delete`). Sem auditoria, sem eventos.
+**Endpoints:** `POST /cost-centers` (`cost_center:create`), `GET /cost-centers`, `GET /cost-centers/:id` (`cost_center:read`, incluem setor e responsável), `PUT /cost-centers/:id` (`cost_center:update`), `DELETE /cost-centers/:id` (`cost_center:delete`). Auditoria: `create_cost_center`, `update_cost_center`, `delete_cost_center`.
+
+**Eventos de outbox** (desde 2026-11-07, para o rateio do Financeiro): `cost_center.created` e `cost_center.updated`, sempre com o estado completo: `cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`, `active`. A exclusão emite `cost_center.updated` com `active: false`.
 
 **Frontend:** `/cost-centers`, `/cost-centers/new`, `/cost-centers/:id/edit`.
 
@@ -234,22 +236,54 @@ O planning previa `cost_center_id` e flags de provisionamento no `collaborator.c
 
 ## 10. Projetos
 
-**Campos-chave** (`projects`): `code` (único, gerado), `client_id`, `cost_center_id`, `responsible_collaborator_id`, `status` (`proposta`, `aprovado`, `em_execucao`, `encerrado`; default `proposta`), `proposal_sequence`.
+**Campos-chave** (`projects`): `code` (único, gerado), `name`, `client_id`, `cost_center_id`, `responsible_collaborator_id`, `planned_start_date` e `planned_end_date` (`DATE`, opcionais), `status` (`proposta`, `aprovado`, `em_execucao`, `encerrado`; default `proposta`), `proposal_sequence`.
 
 **Regras** ([projects.service.ts](../../backend/src/projects/projects.service.ts)):
 
-- Código `PROP-{código do cliente}.{seq}-{MMAA}`: `seq = nextval('project_proposal_seq')`, global (não por cliente), com 3 dígitos (`padStart(3,'0')`); `MMAA` do momento da criação. Ex.: `PROP-100.001-1126`.
-- O mês/ano vem de `new Date()` no **fuso do processo** do backend. Não há `TZ` definido no `docker-compose.yml`; em container UTC, um projeto criado após 21:00 (horário de Brasília) do último dia do mês recebe o mês seguinte.
+- Código `PROP-{código do cliente}.{seq}-{MMAA}`: `seq = nextval('project_proposal_seq')`, global (não por cliente), com 3 dígitos (`padStart(3,'0')`); `MMAA` do momento da criação **em `America/Sao_Paulo`** (antes vinha do fuso do processo). Ex.: `PROP-100.001-1126`.
+- Nome (até 200 caracteres) obrigatório na API para criar e editar; a edição não aceita apagar o nome. A coluna é opcional no banco: projetos criados antes de 2026-11-07 ficam sem nome até alguém editar (a lista mostra "Sem nome — editar" e um indicador "Sem nome").
+- Datas previstas em `AAAA-MM-DD`; a conclusão não pode ser antes do início (`400` e `CHECK` no banco). Na edição, `null` apaga a data.
+- O cliente não muda depois de criado (faz parte do código).
 - Transições de status permitidas: `proposta → aprovado | encerrado`; `aprovado → em_execucao | encerrado`; `em_execucao → encerrado`; `encerrado` é final. Outras → `400`.
 - A criação aceita `status` arbitrário (não passa pela máquina de transição).
-- `PUT /projects/:id` só altera `cost_center_id` e `responsible_collaborator_id`; não emite evento nem audita.
-- `DELETE /projects/:id` é exclusão física.
+- `PUT /projects/:id` altera nome, centro de custo, responsável e datas previstas.
+- `DELETE /projects/:id` é exclusão física e só vale para projeto em `proposta` sem requisições; nos outros casos responde `409` e o caminho é encerrar o projeto.
 
-**Endpoints:** `POST /projects` (`project:create`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` e `PUT /projects/:id/status` (`project:update`), `DELETE /projects/:id` (`project:delete`). Sem auditoria.
+**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`), `DELETE /projects/:id` (`project:delete`, `delete_project`).
 
-**Eventos de outbox:** `project.created` (`project_id`, `code`, `status`, `client_id`); `project.status_changed` (`project_id`, `code`, `status`).
+**Eventos de outbox.** Todo evento `project.*` leva o estado completo do projeto, para o cache dos satélites (o Financeiro usa nome e centro de custo no orçamento e no rateio — decisão P-07 da especificação de Projetos do Financeiro):
 
-**Frontend:** `/projects` (lista com troca de status na linha), `/projects/new`, `/projects/dashboard`. **Não existe `/projects/:id/edit`**: `PUT /projects/:id` e `DELETE /projects/:id` não têm tela.
+`project_id`, `code`, `name`, `status`, `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`, `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`).
+
+| Evento | Quando | Campos extras |
+|---|---|---|
+| `project.created` | criação | — |
+| `project.updated` | `PUT /projects/:id` | `changed_fields` |
+| `project.status_changed` | `PUT /projects/:id/status` | `previous_status` |
+| `project.deleted` | exclusão de proposta | `deleted: true`; `status` vai como `encerrado` para os satélites marcarem o projeto inativo sem mudança do lado deles |
+
+### 10.1 Documentos do projeto (SOW)
+
+A SOW do cliente fica anexada ao projeto do Core e é consumida pelo módulo Projetos do Financeiro (importação da SOW, §7.1 da especificação de Projetos do Financeiro).
+
+- Tabela `project_documents`: `project_id`, `kind` (hoje só `sow`), `version`, `filename` (nome original sem caminho, só para exibição), `mime_type`, `size_bytes`, `content_hash` (SHA-256), `content` (`BYTEA`), `uploaded_by_user_id`, `created_at`. Único por (`project_id`, `kind`, `version`).
+- **Versões:** cada envio do mesmo tipo cria a versão seguinte; nenhuma versão é sobrescrita nem apagada. A mais recente é a vigente. Os documentos só somem com a exclusão do projeto (que só vale para proposta sem requisições).
+- **Arquivo:** mesmas regras dos anexos de requisição ([attachment-security.ts](../../backend/src/requests/attachment-security.ts)): tipo detectado pelos bytes (PDF, PNG, JPG e ZIP, que cobre DOCX/XLSX), executáveis bloqueados, até 25MB, conteúdo em base64 no corpo JSON. **Não há antivírus de verdade.**
+- **Permissões:** enviar exige `project:update`; listar e baixar exige `project:read_documents` (nova; dada a `admin` e `gestor` pela migração `20261123000001_projetos_documentos` e pelo seed), porque a SOW é documento do cliente.
+
+| Método | Rota | Permissão | Auditoria |
+|---|---|---|---|
+| POST | `/projects/:id/documents` (`kind`, `filename`, `contentBase64`) | `project:update` | `upload_project_document` |
+| GET | `/projects/:id/documents` (metadados, sem conteúdo) | `project:read_documents` | — |
+| GET | `/projects/:id/documents/:documentId/content` | `project:read_documents` | `download_project_document` |
+
+O download devolve o arquivo com `Content-Disposition` (nome original) e `X-Content-SHA256`.
+
+**Evento `project.document_added`** (na mesma transação do envio): `project_id`, `code`, `document_id`, `kind`, `version`, `filename`, `mime_type`, `size_bytes`, `content_hash`, `uploaded_at`. Não leva o conteúdo.
+
+**Satélites (API key):** `GET /api/v1/integration/projects/:id/documents` e `GET /api/v1/integration/projects/:id/documents/:documentId/content`. Só respondem ao satélite que **assina** `project.document_added`; os outros recebem `403`. O Financeiro também pode baixar com o token do usuário (rotas acima), respeitando `project:read_documents`.
+
+**Frontend:** `/projects` (lista com nome, prazo previsto, troca de status na linha e exclusão de propostas), `/projects/new` (SOW opcional, enviada logo depois de criar o projeto; se o envio falhar, abre a edição com o aviso), `/projects/:id/edit` (o nome na lista abre a edição; seção "SOW do cliente" com envio de nova versão, lista de versões e download), `/projects/dashboard`. A seleção de projeto na nova requisição mostra `código — nome`.
 
 ---
 

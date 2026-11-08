@@ -1,7 +1,9 @@
-import { Controller, Get, NotFoundException, Param, Query, UseGuards } from '@nestjs/common';
+import { Controller, ForbiddenException, Get, NotFoundException, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
+import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { SatelliteApiKeyGuard } from './guards/satellite-api-key.guard.js';
+import { SatelliteApiKeyGuard, type SatelliteRequest } from './guards/satellite-api-key.guard.js';
+import { PROJECT_DOCUMENT_EVENT, contentDisposition } from '../projects/project-documents.service.js';
 import { SatelliteThrottlerGuard } from './guards/satellite-throttler.guard.js';
 import type { CollaboratorStatus } from '@prisma/client';
 
@@ -99,6 +101,53 @@ export class IntegrationQueryController {
       this.prisma.project.count({ where }),
     ]);
     return { data, meta: { page: p, per_page: pp, total } };
+  }
+
+  /**
+   * Documentos do projeto (SOW). Só para satélites assinantes de `project.document_added`: a SOW é
+   * documento do cliente e não entra na consulta geral de dados não sensíveis.
+   */
+  @Get('projects/:id/documents')
+  async listProjectDocuments(@Param('id') id: string, @Req() req: SatelliteRequest) {
+    await this.assertDocumentSubscriber(req);
+    const project = await this.prisma.project.findUnique({ where: { id }, select: { id: true } });
+    if (!project) throw new NotFoundException('Project not found');
+    const data = await this.prisma.projectDocument.findMany({
+      where: { projectId: id },
+      orderBy: [{ kind: 'asc' }, { version: 'desc' }],
+      select: { id: true, projectId: true, kind: true, version: true, filename: true, mimeType: true, sizeBytes: true, contentHash: true, createdAt: true },
+    });
+    return { data };
+  }
+
+  @Get('projects/:id/documents/:documentId/content')
+  async getProjectDocumentContent(
+    @Param('id') id: string,
+    @Param('documentId') documentId: string,
+    @Req() req: SatelliteRequest,
+    @Res() res: Response,
+  ) {
+    await this.assertDocumentSubscriber(req);
+    const document = await this.prisma.projectDocument.findFirst({
+      where: { id: documentId, projectId: id },
+      select: { filename: true, mimeType: true, content: true, contentHash: true },
+    });
+    if (!document) throw new NotFoundException('Document not found');
+    res.set({
+      'Content-Type': document.mimeType,
+      'Content-Disposition': contentDisposition(document.filename),
+      'X-Content-SHA256': document.contentHash,
+    });
+    res.send(document.content);
+  }
+
+  private async assertDocumentSubscriber(req: SatelliteRequest): Promise<void> {
+    const subscription = await this.prisma.integrationSubscription.findUnique({
+      where: { satelliteId_eventType: { satelliteId: req.satellite.id, eventType: PROJECT_DOCUMENT_EVENT } },
+    });
+    if (!subscription) {
+      throw new ForbiddenException(`O satélite precisa assinar ${PROJECT_DOCUMENT_EVENT} para ler documentos de projeto.`);
+    }
   }
 
   @Get('sectors')

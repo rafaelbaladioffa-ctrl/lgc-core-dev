@@ -5,6 +5,7 @@ import { UpdateCostCenterDto } from './dto/update-cost-center.dto.js';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard.js';
 import { PermissionsGuard } from '../rbac/permissions.guard.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
+import { AuditAction } from '../audit/audit-action.decorator.js';
 
 @Controller('cost-centers')
 @UseGuards(JwtAuthGuard, PermissionsGuard)
@@ -13,6 +14,7 @@ export class CostCentersController {
 
   @Post()
   @RequirePermissions('cost_center:create')
+  @AuditAction({ action: 'create_cost_center', resourceType: 'cost_center' })
   create(@Body() dto: CreateCostCenterDto) {
     return this.costCentersService.create(dto);
   }
@@ -31,6 +33,7 @@ export class CostCentersController {
 
   @Put(':id')
   @RequirePermissions('cost_center:update')
+  @AuditAction({ action: 'update_cost_center', resourceType: 'cost_center', resourceIdParam: 'id' })
   update(@Param('id') id: string, @Body() dto: UpdateCostCenterDto) {
     return this.costCentersService.update(id, dto);
   }
@@ -38,6 +41,7 @@ export class CostCentersController {
   @Delete(':id')
   @HttpCode(204)
   @RequirePermissions('cost_center:delete')
+  @AuditAction({ action: 'delete_cost_center', resourceType: 'cost_center', resourceIdParam: 'id' })
   remove(@Param('id') id: string) {
     return this.costCentersService.remove(id);
   }

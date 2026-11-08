@@ -24,7 +24,7 @@ interface OptionSourceData {
 function optionLabel(source: RequestFieldOptionsSource, item: Project | CollaboratorSafe | Client | CostCenter | JobTitle): string {
   switch (source) {
     case 'projects':
-      return (item as Project).code;
+      return (item as Project).name ? `${(item as Project).code} — ${(item as Project).name}` : (item as Project).code;
     case 'collaborators':
       return (item as CollaboratorSafe).fullName;
     case 'clients':
