@@ -299,3 +299,18 @@ AXIS_WEBHOOK_MAX_AGE_HOURS = int(os.getenv("AXIS_WEBHOOK_MAX_AGE_HOURS") or 72)
 AXIS_API_URL = os.getenv("AXIS_API_URL", "").rstrip("/")
 AXIS_API_KEY = os.getenv("AXIS_API_KEY", "")
 AXIS_API_TIMEOUT = int(os.getenv("AXIS_API_TIMEOUT") or 15)
+
+# --- Field -> Core (PT-08; docs/integracao-core-field.md §5) --------------------------------
+# Segredo com que o Field assina os eventos `field.project.*` (X-Field-Signature = HMAC-SHA256 do corpo).
+# É o segredo HMAC cadastrado no Core para o satélite Field. Vazio = os eventos ficam na fila (outbox) sem envio.
+AXIS_OUTBOUND_SECRET = os.getenv("AXIS_OUTBOUND_SECRET", "")
+AXIS_OUTBOUND_TIMEOUT = int(os.getenv("AXIS_OUTBOUND_TIMEOUT") or 10)
+# Depois de N falhas o evento vira `dead` (aparece no admin; `axis_outbox_dispatch --retry-dead` reabre).
+AXIS_OUTBOUND_MAX_ATTEMPTS = int(os.getenv("AXIS_OUTBOUND_MAX_ATTEMPTS") or 12)
+# Tentativa de envio logo após o commit (além do comando agendado). Desligue em testes.
+AXIS_OUTBOUND_IMMEDIATE = os.getenv("AXIS_OUTBOUND_IMMEDIATE", "1").lower() not in ("0", "false", "no")
+# Plano da SOW e envio imediato do outbox rodam em thread depois do commit (não seguram a resposta). 0 = na hora (testes).
+AXIS_BACKGROUND_TASKS = os.getenv("AXIS_BACKGROUND_TASKS", "1").lower() not in ("0", "false", "no")
+# Tempo máximo para baixar o PDF da SOW no Core (s) e tamanho máximo aceito (MB).
+AXIS_SOW_DOWNLOAD_TIMEOUT = int(os.getenv("AXIS_SOW_DOWNLOAD_TIMEOUT") or 30)
+AXIS_SOW_MAX_MB = int(os.getenv("AXIS_SOW_MAX_MB") or 25)

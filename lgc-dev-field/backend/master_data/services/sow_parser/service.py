@@ -238,7 +238,7 @@ def _draft_from_line(line, context):
     return draft
 
 
-def _run_parsing(sow_import):
+def _run_parsing(sow_import, use_ai=True):
     from master_data.models import SowParsedItem
 
     sow_import.status = "PROCESSING"
@@ -261,7 +261,7 @@ def _run_parsing(sow_import):
         ai_model_label = ""
         ai_mode = "DETERMINISTIC_ONLY"
         ai_error_code = None
-        ai_parser = get_ai_sow_parser()
+        ai_parser = get_ai_sow_parser() if use_ai else None
         if ai_parser is not None:
             ai_provider_label = os.getenv("AI_PROVIDER", "openrouter").strip().lower()
             try:
@@ -356,9 +356,11 @@ def _run_parsing(sow_import):
         return []
 
 
-def process_sow_import(sow_import):
+def process_sow_import(sow_import, use_ai=True):
     """Primeira execução do parser sobre `sow_import.source_text`. Só
-    permitida uma vez (ver reprocess_sow_import para rodar de novo)."""
+    permitida uma vez (ver reprocess_sow_import para rodar de novo).
+    `use_ai=False` força o parser determinístico (modo automático da obra
+    vinda do Axis, PA-17: a IA nunca roda sem revisão humana)."""
     if sow_import.parsed_items.exists():
         raise SowProcessingError("Esta importação já foi processada — use 'Reprocessar' para executar novamente.")
     if not (sow_import.source_text or "").strip():
@@ -366,7 +368,7 @@ def process_sow_import(sow_import):
         sow_import.error_message = "Nenhum texto para processar — informe o texto do SOW."
         sow_import.save(update_fields=("status", "error_message", "updated_at"))
         return []
-    return _run_parsing(sow_import)
+    return _run_parsing(sow_import, use_ai=use_ai)
 
 
 def reprocess_sow_import(sow_import):

@@ -466,7 +466,10 @@ class ProjectAdmin(SelectablePageSizeAdminMixin, ModelAdmin):
         "responsible_client__person__name",
     )
     autocomplete_fields = ("client", "site", "project_type", "category", "responsible_cstr", "responsible_client")
-    readonly_fields = ("code", "created_at", "updated_at")
+    readonly_fields = (
+        "code", "created_at", "updated_at", "axis_project_id", "axis_pending_issues", "sow_plan_status", "sow_plan_note",
+        "sow_import", "planned_team",
+    )
     inlines = (RackPositionInline, ProjectTaskInline)
     fieldsets = (
         ("Identificação", {"fields": ("code", "company", "name", "po", "link_count", "status", "is_active")}),
@@ -484,6 +487,13 @@ class ProjectAdmin(SelectablePageSizeAdminMixin, ModelAdmin):
         ("Responsáveis", {"fields": ("responsible_cstr", "responsible_client")}),
         ("Cronograma", {"fields": (("planned_start", "planned_end"), ("actual_start", "actual_end"))}),
         ("Detalhes", {"fields": ("description", "notes")}),
+        (
+            "Integração Axis",
+            {
+                "fields": ("axis_project_id", "axis_pending_issues", "sow_plan_status", "sow_plan_note", "sow_import", "planned_team"),
+                "description": "Preenchido quando a obra veio do projeto aprovado no Axis (somente leitura).",
+            },
+        ),
         (
             "Rack Position",
             {

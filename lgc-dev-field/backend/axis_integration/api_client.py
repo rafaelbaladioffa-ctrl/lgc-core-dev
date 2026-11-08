@@ -104,3 +104,59 @@ class AxisApiClient:
             if not rows or page * per_page >= total:
                 return
             page += 1
+
+
+class AxisDocumentTooLarge(AxisApiError):
+    pass
+
+
+def download_project_document(project_axis_id, document_id, *, timeout=None, max_bytes=None, client=None):
+    """Baixa o conteúdo de um documento do projeto no Core (a SOW em PDF).
+
+    `GET {AXIS_API_URL}/integration/projects/:id/documents/:documentId/content` com a API key do satélite.
+    Devolve `(bytes, nome_do_arquivo, tipo_mime)`. Levanta `AxisApiError` (inclusive `AxisApiNotFound` e
+    `AxisDocumentTooLarge`) com mensagem em pt-BR, sem nunca incluir a chave."""
+    from email.message import Message
+    from urllib.parse import unquote
+
+    client = client or AxisApiClient(timeout=timeout or settings.AXIS_SOW_DOWNLOAD_TIMEOUT)
+    limit = max_bytes or settings.AXIS_SOW_MAX_MB * 1024 * 1024
+    path = f"projects/{project_axis_id}/documents/{document_id}/content"
+    url = f"{client.base_url}/integration/{path}"
+    try:
+        response = client.session.get(
+            url,
+            headers={"Authorization": f"Bearer {client.api_key}", "Accept": "*/*"},
+            timeout=client.timeout,
+            stream=True,
+        )
+    except requests.RequestException as exc:
+        raise AxisApiError(f"Falha ao baixar a SOW do Core: {exc.__class__.__name__}") from exc
+    try:
+        if response.status_code == 404:
+            raise AxisApiNotFound("A SOW não foi encontrada no Core (documento removido ou de outro projeto).")
+        if response.status_code in (401, 403):
+            raise AxisApiError("O Core recusou a API key ao baixar a SOW (confira AXIS_API_KEY).")
+        if response.status_code >= 400:
+            raise AxisApiError(f"O Core respondeu {response.status_code} ao baixar a SOW.")
+        declared = response.headers.get("Content-Length")
+        if declared and declared.isdigit() and int(declared) > limit:
+            raise AxisDocumentTooLarge(f"A SOW tem {int(declared) // (1024 * 1024)} MB; o limite é {limit // (1024 * 1024)} MB.")
+        chunks, size = [], 0
+        try:
+            for chunk in response.iter_content(chunk_size=64 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise AxisDocumentTooLarge(f"A SOW passa do limite de {limit // (1024 * 1024)} MB.")
+                chunks.append(chunk)
+        except requests.RequestException as exc:
+            raise AxisApiError(f"Falha ao baixar a SOW do Core: {exc.__class__.__name__}") from exc
+        content = b"".join(chunks)
+        if not content:
+            raise AxisApiError("O Core devolveu a SOW vazia.")
+        message = Message()
+        message["content-disposition"] = response.headers.get("Content-Disposition", "")
+        filename = unquote(message.get_filename() or "") or f"sow-{document_id}.pdf"
+        return content, filename, response.headers.get("Content-Type", "")
+    finally:
+        response.close()

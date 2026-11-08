@@ -49,12 +49,19 @@ O Django cria o banco `test_<POSTGRES_DB>` para os testes; nunca rode testes apo
 
 ## Estado da integração com o Core
 
-Os cadastros do Core chegam ao Field (F2/F3, app `backend/axis_integration`); login pelo Core (F1), obra a partir
-do Core (F4) e retorno ao Core (F5) ainda não existem. Detalhes e decisões: [../docs/integracao-core-field.md](../docs/integracao-core-field.md).
+Os cadastros do Core chegam ao Field (F2/F3, app `backend/axis_integration`), a obra nasce do projeto aprovado no Core
+com a SOW processada sozinha (F4) e o Field avisa o Core de criação, início, avanço e conclusão (F5); o login pelo Core
+(F1) ainda não existe. Detalhes e decisões: [../docs/integracao-core-field.md](../docs/integracao-core-field.md).
 
 - **Webhook** `POST /api/v1/webhooks/axis`: HMAC-SHA256 em `X-Axis-Signature`, janela anti-replay, deduplicação por
-  `event_id` na mesma transação. Atualiza só vínculos `axis_*_id` e um cache (`AxisMasterRecord`); não cria obra e
-  não sobrescreve dado de negócio do Field.
+  `event_id` na mesma transação. Os cadastros atualizam só vínculos `axis_*_id` e um cache (`AxisMasterRecord`) e não
+  sobrescrevem dado de negócio do Field; `project.approved` cria a obra (`planning`, com `planned_team` e pendências
+  visíveis se faltar par de cliente, site ou responsável).
+- **SOW automática:** depois do commit, baixa o PDF no Core, extrai o texto (`pypdf`) e roda o Fluxo Guiado com o
+  parser determinístico (sem IA): sem aviso, gera e envia as tarefas ao projeto; com aviso, para na etapa pendente e
+  notifica o responsável (`Project.sow_plan_status`).
+- **Eventos ao Core** (`field.project.created/started/progress/completed`): outbox na mesma transação, assinados com
+  `AXIS_OUTBOUND_SECRET` (`X-Field-Signature`), com retry e backoff.
 - **Casamento:** cliente por CNPJ (senão nome normalizado), colaborador por e-mail/matrícula, site por cliente + código.
   Sem par único, o registro fica sem vínculo e aparece no relatório; nada é apagado.
 - **Carga inicial e relatório dos sem par:**
@@ -63,10 +70,25 @@ do Core (F4) e retorno ao Core (F5) ainda não existem. Detalhes e decisões: [.
 docker compose run --rm field-backend python manage.py axis_sync
 ```
 
-- **Variáveis** (`.env.example`): `AXIS_WEBHOOK_SECRET`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`. Sem
-  `AXIS_WEBHOOK_SECRET` o receptor responde 503.
+- **Rotinas agendadas** (cron do servidor):
 
-O restante do sistema (login, usuários, projetos e obras) continua independente do Core por enquanto.
+```bash
+docker compose exec -T field-backend python manage.py axis_outbox_dispatch   # a cada minuto
+```
+
+```bash
+docker compose exec -T field-backend python manage.py axis_progress_snapshot # 1x por dia
+```
+
+```bash
+docker compose exec -T field-backend python manage.py axis_sow_plan          # a cada 10 min: retoma SOW pendente
+```
+
+- **Variáveis** (`.env.example`): `AXIS_WEBHOOK_SECRET`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`,
+  `AXIS_OUTBOUND_SECRET` (segredo HMAC do satélite Field no Core) e os ajustes `AXIS_OUTBOUND_*`, `AXIS_SOW_*`. Sem
+  `AXIS_WEBHOOK_SECRET` o receptor responde 503; sem `AXIS_OUTBOUND_SECRET` os eventos ficam na fila.
+
+O restante do sistema (login, usuários e as obras criadas à mão) continua independente do Core por enquanto.
 
 ## Identidade visual
 

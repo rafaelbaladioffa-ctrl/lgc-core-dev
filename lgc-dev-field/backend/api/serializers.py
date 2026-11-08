@@ -1560,7 +1560,14 @@ class ProjectSerializer(ClientScopedRelationsMixin, serializers.ModelSerializer)
             "untracked_tasks_count",
             "tracking_rate",
             "progress_percent",
+            "axis_project_id",
+            "axis_pending_issues",
+            "planned_team",
+            "sow_plan_status",
+            "sow_plan_note",
         )
+        # Vêm da integração com o Axis (PT-08); a tela só mostra.
+        read_only_fields = ("axis_project_id", "axis_pending_issues", "planned_team", "sow_plan_status", "sow_plan_note")
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client_id else None
