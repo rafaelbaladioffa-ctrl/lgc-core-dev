@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { call } from '../lib/api';
 import { fmtDateTime, fmtQty } from '../lib/format';
 import { EditLocation, NewLocation, Policies } from './AdminForms';
+import { Warehouses } from './WarehouseForm';
 import { DataTable, useLoad, type Column } from '../ui';
 
 interface Loc { id: string; code: string; name: string | null; level: string; status: string; blockedReason: string | null; isVirtual: boolean; capacityKind: string | null; capacityValue: string | null; restrictedAccess: boolean }
@@ -13,16 +14,17 @@ const DIR: Record<string, string> = { INBOUND: 'Entrada (do Axis)', OUTBOUND: 'S
 const MSG: Record<string, string> = { RECEIVED: 'Recebida', PROCESSED: 'Processada', IGNORED: 'Ignorada', FAILED: 'Com falha', PENDING: 'Pendente', DELIVERED: 'Entregue' };
 
 export function Admin({ warehouseId, canIntegration, canWrite = false, canPolicy = false }: { warehouseId?: string; canIntegration: boolean; canWrite?: boolean; canPolicy?: boolean }) {
-  const [part, setPart] = useState<'loc' | 'pol' | 'int'>('loc');
+  const [part, setPart] = useState<'alm' | 'loc' | 'pol' | 'int'>('loc');
   return (
     <section>
       <h1>Administração</h1>
       <div className="toolbar">
+        <button className={part === 'alm' ? 'btn' : 'btn ghost'} onClick={() => setPart('alm')}>Almoxarifados</button>
         <button className={part === 'loc' ? 'btn' : 'btn ghost'} onClick={() => setPart('loc')}>Endereços</button>
         <button className={part === 'pol' ? 'btn' : 'btn ghost'} onClick={() => setPart('pol')}>Parâmetros de reposição</button>
         {canIntegration && <button className={part === 'int' ? 'btn' : 'btn ghost'} onClick={() => setPart('int')}>Integração com o Axis</button>}
       </div>
-      {part === 'pol' ? <Policies warehouseId={warehouseId} canWrite={canPolicy} /> : part === 'int' && canIntegration ? <Integration /> : <Locations warehouseId={warehouseId} canWrite={canWrite} />}
+      {part === 'alm' ? <Warehouses canWrite={canWrite} /> : part === 'pol' ? <Policies warehouseId={warehouseId} canWrite={canPolicy} /> : part === 'int' && canIntegration ? <Integration /> : <Locations warehouseId={warehouseId} canWrite={canWrite} />}
     </section>
   );
 }

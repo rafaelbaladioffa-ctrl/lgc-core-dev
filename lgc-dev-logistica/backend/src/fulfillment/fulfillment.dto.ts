@@ -44,6 +44,11 @@ export class CancelRequestDto {
   reason!: string;
 }
 
+export class AssignWarehouseDto {
+  @IsUUID('4', { message: 'Almoxarifado inválido.' })
+  warehouseId!: string;
+}
+
 export class ListFulfillmentQuery {
   @IsOptional() @IsEnum(FulfillmentStatus, { message: 'Status inválido.' }) status?: FulfillmentStatus;
   @IsOptional() @IsString() @MaxLength(80) axisRequestId?: string;

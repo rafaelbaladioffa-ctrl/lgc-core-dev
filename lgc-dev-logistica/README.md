@@ -39,7 +39,7 @@ npm run test:e2e:setup && npm run test:e2e   # testes em banco SEPARADO (.env.te
 
 ## Sprint 3 — disponibilidade, atendimento e reservas
 - `GET /materials/:id/availability`, `POST /materials/availability:batch`, `GET /material-categories`, `GET /warehouses/:id/stock` (físico, reservado, bloqueado, disponível, projetado).
-- `POST /fulfillment-orders` (idempotente por requisição+versão), `GET`, `/:id/reserve`, `/:id/cancel-request`, `POST /reservations/expire`. Reserva FEFO/FIFO atômica (`reserved_qty` ≤ `quantity` por CHECK), versão nova substitui a anterior se não houve separação.
+- `POST /fulfillment-orders` (idempotente por requisição+versão), `GET`, `/:id/reserve`, `/:id/warehouse` (define o almoxarifado de uma ordem que chegou sem ele e reserva), `/:id/cancel-request`, `POST /reservations/expire`. Reserva FEFO/FIFO atômica (`reserved_qty` ≤ `quantity` por CHECK), versão nova substitui a anterior se não houve separação.
 - Adaptador `ticket.status_changed` (categorias de requisição de material, status `aberto`/`cancelado`) e `material_request.*` nativo → `src/integration/material-request.adapter.ts`. **O contrato do payload do ticket é uma suposição a confirmar com o Axis core** (documentado no arquivo).
 - Erros de negócio carregam `code` (`AXIS_REFERENCE_INVALID`, `REQUEST_VERSION_CONFLICT`, `UNIT_CONVERSION_ERROR`…).
 

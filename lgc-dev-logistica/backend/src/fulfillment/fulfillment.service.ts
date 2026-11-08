@@ -38,6 +38,9 @@ export function isOwnOrder(order: Pick<FulfillmentOrder, 'requesterAxisId' | 're
   return order.recipientAxisId !== null && ownIds(user).includes(order.recipientAxisId);
 }
 
+/** Situações em que a ordem ainda aceita reserva e, portanto, a definição do almoxarifado. */
+const ASSIGNABLE: FulfillmentStatus[] = ['RECEBIDA', 'EM_ANALISE', 'RESERVADA_PARCIAL', 'AGUARDANDO_ESTOQUE', 'AGUARDANDO_INFORMACAO'];
+
 @Injectable()
 export class FulfillmentService {
   constructor(
@@ -292,6 +295,27 @@ export class FulfillmentService {
   async create(dto: CreateFulfillmentDto, user: AuthenticatedUser) {
     const { order, replayed } = await this.prisma.$transaction((tx) => this.createFromRequest(tx, dto, user));
     return { ...(await this.load(order.id, null)), replayed };
+  }
+
+  /**
+   * Almoxarifado de atendimento definido depois da criação (a ordem nasceu sem `warehouse_code` e sem
+   * `DEFAULT_WAREHOUSE_CODE`). Troca só enquanto não há reserva ativa; em seguida roda a reserva normal.
+   */
+  async assignWarehouse(id: string, warehouseId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      const order = await tx.fulfillmentOrder.findUnique({ where: { id }, include: { items: { include: { reservations: { where: { status: 'ATIVA' } } } } } });
+      if (!order) throw new NotFoundException('Ordem de atendimento não encontrada.');
+      if (!ASSIGNABLE.includes(order.status)) throw new ConflictException(`A ordem está em ${order.status}; o almoxarifado só pode ser definido antes da separação.`);
+      if (order.warehouseId !== warehouseId && order.items.some((i) => i.reservations.length > 0)) {
+        throw new ConflictException('A ordem já tem reserva em outro almoxarifado. Peça o cancelamento e reenvie a requisição para trocar.');
+      }
+      const wh = await tx.warehouse.findUnique({ where: { id: warehouseId } });
+      if (!wh) throw new NotFoundException('Almoxarifado não encontrado.');
+      if (wh.status !== 'ATIVO') throw new UnprocessableEntityException(`O almoxarifado ${wh.code} não está ativo.`);
+      await tx.fulfillmentOrder.update({ where: { id }, data: { warehouseId } });
+      await this.reserve(tx, id);
+    });
+    return this.load(id, null);
   }
 
   async reserveOrder(id: string) {

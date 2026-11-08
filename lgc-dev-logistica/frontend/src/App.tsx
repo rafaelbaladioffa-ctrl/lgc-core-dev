@@ -13,6 +13,7 @@ import { Transfers } from './screens/Transfers';
 import { Returns } from './screens/Returns';
 import { Dashboard } from './screens/Dashboard';
 import { Fulfillment } from './screens/Fulfillment';
+import { NewWarehouseForm } from './screens/WarehouseForm';
 import { Replenishment } from './screens/Replenishment';
 import { Admin } from './screens/Admin';
 import { cameraSupported, startCamera } from './lib/scanner';
@@ -97,9 +98,9 @@ export function App() {
   const [launchError, setLaunchError] = useState('');
   const exchanging = useRef(false);
   const [perms, setPerms] = useState<string[] | null>(null);
+  const [newWh, setNewWh] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => { try { return localStorage.getItem('axis_theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; } });
   useEffect(() => { document.documentElement.setAttribute('data-theme', theme); try { localStorage.setItem('axis_theme', theme); } catch { /* sem armazenamento */ } }, [theme]);
-  useEffect(() => { if (settings.token && settings.warehouseId) api.me().then((m) => setPerms(m.permissions)).catch(() => setPerms(null)); }, [settings.token, settings.warehouseId]);
 
   // Entrada pelo "Abrir" do Axis: troca o token curto (90 s) por uma sessão da Logística antes de qualquer outra chamada.
   useEffect(() => {
@@ -114,6 +115,8 @@ export function App() {
 
   // O token pode ser renovado dentro do api; o App recebe o novo par e a fila segue usando a sessão corrente.
   useEffect(() => { bindSession(settings, setSettings); }, [settings]);
+  // Depois do bindSession: os efeitos rodam na ordem em que são declarados, e sem sessão o /me falha calado.
+  useEffect(() => { if (settings.token) api.me().then((m) => setPerms(m.permissions)).catch(() => setPerms(null)); }, [settings.token, settings.warehouseId]);
   const queue = useMemo(
     () => new OfflineQueue(idbStore, async (o) => {
       try { return await api.batch(o); } catch (e) { if (e instanceof ApiError && e.status === 401) setExpired(true); throw e; }
@@ -193,7 +196,9 @@ export function App() {
           {whState === 'ready' && warehouses.length === 0 && (
             <div className="axis-alert" role="status">
               <strong>Nenhum almoxarifado disponível para o seu usuário.</strong>
-              <p className="hint">Peça ao administrador da Logística para liberar o seu acesso a um almoxarifado (Gestão de acessos) ou para cadastrar um.</p>
+              {perms?.includes('warehouse:write')
+                ? <p className="hint">Cadastre o primeiro almoxarifado abaixo para começar.</p>
+                : <p className="hint">Peça ao administrador da Logística para liberar o seu acesso a um almoxarifado (Gestão de acessos) ou para cadastrar um.</p>}
               <p className="hint">Informe este identificador ao administrador: <code>{decodeJwt(settings.token)?.sub ?? '—'}</code></p>
               <button className="btn ghost" onClick={() => setWhReload((n) => n + 1)}>Atualizar</button>
             </div>
@@ -201,6 +206,9 @@ export function App() {
           {whState === 'ready' && warehouses.length > 0 && whFilter && warehouses.every((w) => !`${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())) && <p className="hint">Nenhum almoxarifado encontrado para essa busca.</p>}
           <input className="inp" aria-label="Buscar almoxarifado" placeholder="Buscar por código ou nome" value={whFilter} onChange={(e) => setWhFilter(e.target.value)} />
           {warehouses.filter((w) => `${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())).slice(0, 50).map((w) => <button key={w.id} className="btn block" onClick={() => { const s = { ...settings, warehouseId: w.id }; saveSettings(s); setSettings(s); }}>{w.code} — {w.name}</button>)}
+          {whState === 'ready' && perms?.includes('warehouse:write') && (newWh
+            ? <NewWarehouseForm onCancel={() => setNewWh(false)} onDone={(w) => { setNewWh(false); const s = { ...settings, warehouseId: w.id }; saveSettings(s); setSettings(s); }} />
+            : <button className="btn ghost" onClick={() => setNewWh(true)}>Novo almoxarifado</button>)}
           <button className="btn ghost" onClick={logout}>Sair</button>
         </div>
       </AuthLayout>
@@ -246,7 +254,7 @@ export function App() {
           {tab === 'trf' && <Transfers warehouseId={settings.warehouseId} />}
           {tab === 'dev' && <Returns warehouseId={settings.warehouseId} canCustody={perms?.includes('custody:execute') ?? false} />}
           {tab === 'pan' && <Dashboard warehouseId={settings.warehouseId} />}
-          {tab === 'atd' && <Fulfillment />}
+          {tab === 'atd' && <Fulfillment canManage={perms?.includes('fulfillment:manage') ?? false} />}
           {tab === 'rep' && <Replenishment warehouseId={settings.warehouseId} canManage={perms?.includes('replenishment:manage') ?? false} canAck={perms?.includes('alert:read') ?? false} />}
           {tab === 'adm' && <Admin warehouseId={settings.warehouseId} canIntegration={perms?.includes('integration:configure') ?? false} canWrite={perms?.includes('warehouse:write') ?? false} canPolicy={perms?.includes('policy:write') ?? false} />}
           {!boot && (tab === 'sep' || tab === 'arm' || tab === 'inv') && <p className="hint">Sem dados deste almoxarifado ainda. Conecte-se uma vez para baixar as tarefas.</p>}

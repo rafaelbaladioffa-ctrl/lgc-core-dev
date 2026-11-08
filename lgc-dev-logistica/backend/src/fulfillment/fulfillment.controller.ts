@@ -1,13 +1,17 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { CurrentUser } from '../auth/current-user.decorator.js';
+import { RbacService } from '../rbac/rbac.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
-import { CancelRequestDto, CreateFulfillmentDto, ListFulfillmentQuery } from './fulfillment.dto.js';
+import { AssignWarehouseDto, CancelRequestDto, CreateFulfillmentDto, ListFulfillmentQuery } from './fulfillment.dto.js';
 import { FulfillmentService } from './fulfillment.service.js';
 
 @Controller()
 export class FulfillmentController {
-  constructor(private readonly fulfillment: FulfillmentService) {}
+  constructor(
+    private readonly fulfillment: FulfillmentService,
+    private readonly rbac: RbacService,
+  ) {}
 
   /** Recebe requisição aprovada do Axis (13.2). Idempotente por (axisRequestId, requestVersion). */
   @Post('fulfillment-orders')
@@ -35,6 +39,15 @@ export class FulfillmentController {
   @RequirePermissions('fulfillment:manage')
   reserve(@Param('id', ParseUUIDPipe) id: string) {
     return this.fulfillment.reserveOrder(id);
+  }
+
+  /** Define o almoxarifado de uma ordem que chegou sem ele e já tenta reservar. Só antes de haver reserva ativa. */
+  @Post('fulfillment-orders/:id/warehouse')
+  @HttpCode(200)
+  @RequirePermissions('fulfillment:manage')
+  async assignWarehouse(@Param('id', ParseUUIDPipe) id: string, @Body() dto: AssignWarehouseDto, @CurrentUser() user: AuthenticatedUser) {
+    await this.rbac.assertWarehouseAccess(user, dto.warehouseId);
+    return this.fulfillment.assignWarehouse(id, dto.warehouseId);
   }
 
   @Post('fulfillment-orders/:id/cancel-request')

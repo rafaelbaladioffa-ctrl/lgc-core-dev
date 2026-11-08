@@ -681,6 +681,9 @@ atendimento. Payload:
 - **Romaneio:** a expedição nasce com `shipments.destination` = texto do destino da ordem; `pack` ou `dispatch` com `destination` o
   substituem (o site do Axis continua na ordem). A tela de Atendimento mostra o destino da ordem.
 - **Origem e prazo:** `warehouse_code` nulo usa o almoxarifado padrão (`DEFAULT_WAREHOUSE_CODE`); `needed_by` define a validade da reserva.
+  Sem nenhum dos dois, a ordem fica `AGUARDANDO_INFORMACAO` e o almoxarifado é definido depois em
+  `POST /fulfillment-orders/:id/warehouse` (`fulfillment:manage` e acesso ao almoxarifado), que grava e já reserva. Só vale antes
+  da separação e sem reserva ativa em outro almoxarifado.
 - **Falta de material (PA-11):** a ordem fica `AGUARDANDO_ESTOQUE` (ou `RESERVADA_PARCIAL`); não há compra automática. O `fulfillment.created`
   já informa, por item, `reserved` e `shortage`.
 - **Entrega direta ao site (PA-12):** a baixa `SAIDA_ENTREGA` acontece na confirmação da entrega, com `cost_center_id` e `project_id` da
