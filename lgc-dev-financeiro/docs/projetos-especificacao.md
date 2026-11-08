@@ -555,9 +555,10 @@ Contrato completo em [integracao-core-financeiro.md §4](../../docs/integracao-c
 
 **Materiais da devolução (PT-05 do plano ponta a ponta, PA-08).** Cada material da revisão tem
 `logisticsMaterialCode` (e `logisticsMaterialId`, preenchido na escolha), guardados nas `inputs` da revisão
-(JSON, sem migração). O orçamentista escolhe o item numa busca no catálogo da Logística
-(`GET /logistics-materials?search=`, que o servidor repassa a `GET /integration/materials?search=` da
-Logística com `LOGISTICA_API_KEY`). Regras:
+(JSON, sem migração). O orçamentista informa o código e a tela confere no catálogo da Logística
+(`GET /logistics-materials?code=`, que o servidor repassa a `GET /integration/materials?codes=` da Logística
+com `LOGISTICA_API_KEY`; só material ativo é aceito). A rota do PT-04 busca só por código exato, sem texto:
+busca por nome exigiria um parâmetro `search` nela (decisão da coordenação dos PTs). Regras:
 - **Aprovar o envio recusa** a revisão se algum material com quantidade > 0 não tem código (a mensagem
   lista os itens). Vale para `aws_sow` e `generico`. Material avulso do catálogo próprio também precisa do
   código da Logística.

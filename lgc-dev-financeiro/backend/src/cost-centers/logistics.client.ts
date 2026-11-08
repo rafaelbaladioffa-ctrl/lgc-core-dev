@@ -41,24 +41,23 @@ export class LogisticsClient {
     }
     if (!res.ok) throw new BadGatewayException(`A Logística recusou a consulta (HTTP ${res.status}).`);
     const body = (await res.json().catch(() => null)) as unknown;
-    if (!Array.isArray(body)) throw new BadGatewayException('Resposta inesperada da Logística.');
+    if (body === null || typeof body !== 'object') throw new BadGatewayException('Resposta inesperada da Logística.');
     return body as T;
   }
 
   /**
-   * Busca no catálogo ativo da Logística por código ou descrição (`GET /integration/materials?search=`, PT-04).
-   * Só devolve id, código, descrição e unidade.
+   * Materiais pelos códigos (`GET /integration/materials?codes=A,B`, PT-04: até 200 códigos; resposta
+   * `{ items, notFound }`). Só volta material ativo, com id, código, descrição e unidade: o custo médio que a
+   * Logística também devolve fica de fora de propósito. A rota não busca por texto; o orçamentista informa o código.
    */
-  async searchMaterials(search: string, fetchFn: typeof fetch = fetch): Promise<LogisticsMaterial[]> {
-    const rows = await this.get<Array<Record<string, unknown>>>(`/integration/materials?search=${encodeURIComponent(search)}&limit=20`, fetchFn);
-    return rows.map(toLogisticsMaterial).filter((m): m is LogisticsMaterial => m !== null);
-  }
-
-  /** Materiais pelos códigos (`GET /integration/materials?codes=A,B`); código inexistente simplesmente não volta. */
   async materialsByCodes(codes: string[], fetchFn: typeof fetch = fetch): Promise<LogisticsMaterial[]> {
     if (codes.length === 0) return [];
-    const rows = await this.get<Array<Record<string, unknown>>>(`/integration/materials?codes=${encodeURIComponent(codes.join(','))}`, fetchFn);
-    return rows.map(toLogisticsMaterial).filter((m): m is LogisticsMaterial => m !== null);
+    const body = await this.get<{ items?: unknown }>(`/integration/materials?codes=${encodeURIComponent(codes.join(','))}`, fetchFn);
+    if (!Array.isArray(body.items)) throw new BadGatewayException('Resposta inesperada da Logística.');
+    return (body.items as Array<Record<string, unknown>>)
+      .filter((row) => row.active !== false)
+      .map(toLogisticsMaterial)
+      .filter((m): m is LogisticsMaterial => m !== null);
   }
 
   consumption(month: string, fetchFn: typeof fetch = fetch) {
@@ -76,5 +75,5 @@ export function toLogisticsMaterial(row: Record<string, unknown>): LogisticsMate
   const id = text(row.id);
   const code = text(row.code);
   if (!id || !code) return null;
-  return { id, code, description: text(row.description) ?? text(row.shortDescription) ?? code, unit: text(row.unit) ?? text(row.uom) };
+  return { id, code, description: text(row.shortDescription) ?? text(row.description) ?? code, unit: text(row.unit) };
 }

@@ -411,4 +411,4 @@ export interface LogisticsMaterial {
   description: string;
   unit: string | null;
 }
-export const searchLogisticsMaterials = (search: string) => api<LogisticsMaterial[]>(`/logistics-materials?search=${encodeURIComponent(search)}`);
+export const findLogisticsMaterialByCode = (code: string) => api<LogisticsMaterial[]>(`/logistics-materials?code=${encodeURIComponent(code)}`);
