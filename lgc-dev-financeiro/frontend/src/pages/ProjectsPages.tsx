@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { createBudget, getProject, listProjects, newRevision, PROJECT_STATUS, REVISION_STATUS, syncProjects, updateBudget, type BudgetHeader, type CoreProject, type DateSource } from '../lib/budgets';
+import { createBudget, getProject, listProjects, newRevision, PROJECT_STATUS, REVISION_STATUS, startQuote, syncProjects, updateBudget, type BudgetHeader, type CoreProject, type DateSource } from '../lib/budgets';
 import { formatPercent } from '../lib/decimal';
 import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
@@ -103,7 +103,14 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
                     <td>{p.client?.name ?? '—'}</td>
                     <td>{p.status ? (PROJECT_STATUS[p.status] ?? p.status) : '—'}</td>
                     <td className="nowrap">{formatPeriod(p.plannedStartDate, p.plannedEndDate)}</td>
-                    <td>{rev ? <Badge tone={REVISION_STATUS[rev.status].tone}>{`R${rev.number} · ${REVISION_STATUS[rev.status].label}`}</Badge> : <span className="muted">{canWrite ? 'sem orçamento' : '—'}</span>}</td>
+                    <td>
+                      {rev ? <Badge tone={REVISION_STATUS[rev.status].tone}>{`R${rev.number} · ${REVISION_STATUS[rev.status].label}`}</Badge> : <span className="muted">{canWrite ? 'sem orçamento' : '—'}</span>}
+                      {p.quoteRequest && !p.quoteRequest.started && (
+                        <div className="cell-sub">
+                          <Badge tone="warning">pedido de cotação do Axis Core</Badge>
+                        </div>
+                      )}
+                    </td>
                     <td className="num">{rev ? formatBRL(rev.revenue) : '—'}</td>
                     {canSeeCost && <td className="num">{rev?.profitOnCost ? formatPercent(rev.profitOnCost) : '—'}</td>}
                   </tr>
@@ -120,6 +127,13 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
   );
 }
 
+const MODEL_LABEL: Record<string, string> = { aws_sow: 'Cotação AWS (SOW e Bid Template)', generico: 'Orçamento genérico' };
+
+/**
+ * Projeto do Core no Financeiro. Com pedido de cotação do Core, a ação principal é "Iniciar cotação" (orçamento
+ * aws_sow com a SOW, o Bid Template, cabos e equipe sugeridos); o orçamento genérico fica como opção secundária.
+ * Todos os orçamentos do projeto aparecem, a cotação AWS primeiro.
+ */
 export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite: boolean; canSeeCost: boolean }) {
   const { data, error, loading, reload } = useLoad(() => getProject(id), [id], 'Não foi possível carregar o projeto.');
   const [busy, setBusy] = useState(false);
@@ -139,9 +153,10 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
 
   if (error) return <ErrorAlert message={error} onRetry={reload} />;
   if (loading || !data) return <p className="muted">Carregando…</p>;
-  const budget = data.budgets[0];
-  // Nova revisão só sem rascunho, sem revisão em aprovação e antes de ganhar (a ganha é a linha de base).
-  const hasDraft = budget?.revisions.some((r) => r.status === 'rascunho' || r.status === 'em_aprovacao' || r.status === 'ganha');
+  const latestRequest = data.quoteRequests[0] ?? null;
+  const awsBudget = data.budgets.find((b) => b.model === 'aws_sow');
+  const genericBudget = data.budgets.find((b) => b.model === 'generico');
+  const blocksNew = (b: (typeof data.budgets)[number]) => b.revisions.some((r) => r.status === 'rascunho' || r.status === 'em_aprovacao' || r.status === 'ganha');
 
   return (
     <>
@@ -149,18 +164,20 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
         title={data.name ? `${data.code} — ${data.name}` : data.code}
         back={{ href: '/projetos', label: 'Projetos' }}
         actions={
-          canWrite &&
-          (budget ? (
-            !hasDraft && (
-              <button className="btn btn-primary" type="button" disabled={busy} onClick={() => run(() => newRevision(budget.id))}>
-                Nova revisão
-              </button>
-            )
-          ) : (
-            <button className="btn btn-primary" type="button" disabled={busy} onClick={() => run(() => createBudget(data.axisProjectId))}>
-              {busy ? 'Criando…' : 'Criar orçamento'}
-            </button>
-          ))
+          canWrite && (
+            <>
+              {latestRequest && (
+                <button className="btn btn-primary" type="button" disabled={busy} onClick={() => run(() => startQuote(latestRequest.id))}>
+                  {busy ? 'Abrindo…' : awsBudget ? 'Continuar cotação' : 'Iniciar cotação'}
+                </button>
+              )}
+              {!genericBudget && (
+                <button className={latestRequest ? 'btn btn-ghost' : 'btn btn-primary'} type="button" disabled={busy} onClick={() => run(() => createBudget(data.axisProjectId))}>
+                  {latestRequest ? 'Orçamento genérico (sem SOW)' : busy ? 'Criando…' : 'Criar orçamento'}
+                </button>
+              )}
+            </>
+          )
         }
       >
         <p className="muted">
@@ -178,9 +195,35 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
           {w}
         </p>
       ))}
-      {!budget && <p className="card muted">Este projeto ainda não tem orçamento.{canWrite ? ' Clique em "Criar orçamento" para montar a primeira revisão com os parâmetros vigentes.' : ''}</p>}
-      {budget && (
-        <section className="card table-card">
+      {latestRequest && (
+        <p className={`alert ${latestRequest.started ? 'alert-success' : 'alert-warning'}`} role="status">
+          Pedido de cotação do Axis Core em {formatDateTime(latestRequest.requestedAt)}
+          {latestRequest.requestedByEmail ? ` por ${latestRequest.requestedByEmail}` : ''} — SOW v{latestRequest.sowVersion}
+          {latestRequest.bidTemplateVersion ? ` e Bid Template v${latestRequest.bidTemplateVersion}` : ''}.
+          {latestRequest.notes ? ` Recado: “${latestRequest.notes}”.` : ''}{' '}
+          {latestRequest.started
+            ? 'A cotação AWS já foi iniciada.'
+            : 'Use "Iniciar cotação": o Financeiro lê a SOW e o Bid Template e já sugere os cabos e a equipe. O orçamento genérico não usa a SOW e não volta para o Core.'}
+        </p>
+      )}
+      {data.budgets.length === 0 && (
+        <p className="card muted">
+          Este projeto ainda não tem orçamento.
+          {canWrite ? (latestRequest ? ' Clique em "Iniciar cotação".' : ' Clique em "Criar orçamento" para montar a primeira revisão com os parâmetros vigentes.') : ''}
+        </p>
+      )}
+      {data.budgets.map((budget) => (
+        <section key={budget.id} className="card table-card">
+          <div className="workflow-head">
+            <h2>
+              {MODEL_LABEL[budget.model] ?? budget.model} {budget.model === 'generico' && latestRequest && <Badge tone="neutral">não volta para o Core</Badge>}
+            </h2>
+            {canWrite && !blocksNew(budget) && (
+              <button className="btn btn-ghost btn-sm" type="button" disabled={busy} onClick={() => run(() => newRevision(budget.id))}>
+                Nova revisão
+              </button>
+            )}
+          </div>
           <BudgetHeaderCard budgetId={budget.id} header={budget} project={data} canWrite={canWrite} onSaved={reload} />
           <table className="table">
             <thead>
@@ -214,7 +257,7 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
             </tbody>
           </table>
         </section>
-      )}
+      ))}
     </>
   );
 }

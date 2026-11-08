@@ -133,15 +133,20 @@ export class BudgetsService {
   // -------------------------------------------------------------------------
 
   async listProjects(user: AuthenticatedUser) {
-    const [projects, clients, budgets] = await Promise.all([
+    const [projects, clients, budgets, requests] = await Promise.all([
       this.prisma.axisMasterCache.findMany({ where: { kind: 'PROJECT' }, orderBy: { code: 'desc' } }),
       this.prisma.axisMasterCache.findMany({ where: { kind: 'CLIENT' }, select: { axisId: true, name: true, code: true } }),
       this.prisma.projectBudget.findMany({
         include: { revisions: { where: { status: { not: 'descartada' } }, orderBy: { number: 'desc' }, select: { id: true, number: true, status: true, revenue: true, profit: true, profitOnCost: true } } },
       }),
+      this.prisma.quoteRequest.findMany({ orderBy: { requestedAt: 'desc' }, select: { id: true, axisProjectId: true, requestedAt: true, budgetId: true } }),
     ]);
     const clientById = new Map(clients.map((c) => [c.axisId, c]));
-    const budgetByProject = new Map(budgets.map((b) => [b.axisProjectId, b]));
+    // Projeto com cotação AWS e orçamento genérico mostra a cotação AWS (é a que segue para o Core).
+    const budgetByProject = new Map<string, (typeof budgets)[number]>();
+    for (const b of budgets) if (!budgetByProject.has(b.axisProjectId) || b.model === 'aws_sow') budgetByProject.set(b.axisProjectId, b);
+    const requestByProject = new Map<string, (typeof requests)[number]>();
+    for (const r of requests) if (!requestByProject.has(r.axisProjectId)) requestByProject.set(r.axisProjectId, r);
     const cost = canSeeCost(user);
     const lastSync = await this.prisma.axisMasterCache.aggregate({ where: { kind: 'PROJECT' }, _max: { syncedAt: true } });
     return {
@@ -151,9 +156,11 @@ export class BudgetsService {
         const project = projectInfo(p, clientById.get(str(data.client_id) ?? ''));
         const budget = budgetByProject.get(p.axisId);
         const rev = budget?.revisions[0];
+        const request = requestByProject.get(p.axisId);
         return {
           ...project,
           warnings: coreDivergence(project.status, budget?.revisions.map((r) => r.status) ?? []),
+          quoteRequest: request ? { id: request.id, requestedAt: request.requestedAt, started: !!request.budgetId } : null,
           budget: budget
             ? {
                 id: budget.id,
@@ -178,13 +185,28 @@ export class BudgetsService {
 
   async getProject(axisProjectId: string, user: AuthenticatedUser) {
     const project = await this.project(axisProjectId);
-    const budgets = await this.prisma.projectBudget.findMany({
-      where: { axisProjectId },
-      include: { revisions: { orderBy: { number: 'desc' }, include: { parameterSet: { select: { code: true } } } } },
-    });
+    const [found, requests] = await Promise.all([
+      this.prisma.projectBudget.findMany({
+        where: { axisProjectId },
+        include: { revisions: { orderBy: { number: 'desc' }, include: { parameterSet: { select: { code: true } } } } },
+      }),
+      this.prisma.quoteRequest.findMany({ where: { axisProjectId }, orderBy: { requestedAt: 'desc' } }),
+    ]);
+    // A cotação AWS (pedida pelo Core) vem antes do orçamento genérico.
+    const budgets = [...found].sort((a, b) => Number(b.model === 'aws_sow') - Number(a.model === 'aws_sow') || a.createdAt.getTime() - b.createdAt.getTime());
     const cost = canSeeCost(user);
     return {
       ...project,
+      /** Pedidos de cotação do Core para este projeto (mais novo primeiro): a cotação AWS nasce por eles. */
+      quoteRequests: requests.map((r) => ({
+        id: r.id,
+        requestedAt: r.requestedAt,
+        requestedByEmail: r.requestedByEmail,
+        notes: r.notes,
+        sowVersion: r.sowVersion,
+        bidTemplateVersion: r.bidTemplateVersion,
+        started: !!r.budgetId,
+      })),
       warnings: coreDivergence(project.status, budgets.flatMap((b) => b.revisions.map((r) => r.status))),
       budgets: budgets.map((b) => ({
         id: b.id,

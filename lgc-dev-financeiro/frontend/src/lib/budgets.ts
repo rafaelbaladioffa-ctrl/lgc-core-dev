@@ -44,6 +44,8 @@ export interface BudgetHeader {
 export interface ProjectRow extends CoreProject {
   /** Divergências com o status do projeto no Core (§3.2). */
   warnings: string[];
+  /** Pedido de cotação mais recente do Core para o projeto (a cotação AWS nasce por ele). */
+  quoteRequest: { id: string; requestedAt: string; started: boolean } | null;
   budget:
     | (BudgetHeader & {
         id: string;
@@ -54,6 +56,7 @@ export interface ProjectRow extends CoreProject {
 
 export interface ProjectDetail extends CoreProject {
   warnings: string[];
+  quoteRequests: Array<{ id: string; requestedAt: string; requestedByEmail: string | null; notes: string | null; sowVersion: number; bidTemplateVersion: number | null; started: boolean }>;
   budgets: Array<BudgetHeader & {
     id: string;
     model: string;
