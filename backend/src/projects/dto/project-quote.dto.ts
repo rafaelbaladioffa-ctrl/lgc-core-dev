@@ -161,7 +161,9 @@ export class ReceiveProjectQuoteDto {
   @Type(() => ProjectQuoteMaterialDto)
   materials?: ProjectQuoteMaterialDto[];
 
+  /** Opcional: o modelo generico do Financeiro não tem Bid Template do cliente, logo não tem Bid. */
+  @IsOptional()
   @ValidateNested()
   @Type(() => ProjectQuoteBidFileDto)
-  bid!: ProjectQuoteBidFileDto;
+  bid?: ProjectQuoteBidFileDto;
 }

@@ -126,6 +126,9 @@ Content-Type: application/json
      e `days`; o gerente vai só com `hours`. Função repetida → `400`.
    - A Bid é o **Bid Template do RFQ preenchido** (P-14): o mesmo arquivo anexado no Core, com as
      células de entrada escritas pelo Financeiro. `.xlsx`/`.xlsm`, até 25MB, tipo conferido pelos bytes.
+     **A Bid é opcional:** o modelo `generico` do Financeiro não tem Bid Template do cliente e devolve a
+     cotação sem o campo `bid` (equipe, dias e materiais). No Core, as colunas `bid_*` ficam todas nulas ou
+     todas preenchidas (CHECK no banco). Baixar a Bid de uma cotação sem Bid → `404`.
    - **Materiais** (`materials[]`, opcional no Core para não quebrar cotações antigas; o Financeiro sempre
      envia e **recusa aprovar o envio** de material sem código da Logística, decisão PA-08 do
      [plano do projeto aprovado](plano-projeto-aprovado-ponta-a-ponta.md)): `material_code` é o `Material.code`
@@ -137,11 +140,14 @@ Content-Type: application/json
      (`logistics_material_id` fica nulo até a consulta à Logística do PT-06).
    - **Idempotência:** mesma `external_revision_id` com a mesma Bid **e os mesmos materiais** devolve a
      cotação já gravada (`201` com o mesmo `id`); com outra Bid ou outros materiais → `409` (revisão aprovada
-     não muda; mande nova revisão). Cotação antiga sem materiais reenviada sem materiais continua idempotente.
+     não muda; mande nova revisão). **Sem Bid** não há hash para conferir: o Core compara o corpo inteiro
+     (equipe, `work_days`, datas previstas, `sow_document_id`, `revision_number` e materiais); qualquer
+     diferença → `409`, e uma revisão gravada com Bid reenviada sem Bid (ou o contrário) também. Cotação
+     antiga sem materiais reenviada sem materiais continua idempotente.
    - Nenhum campo de custo, salário, imposto ou lucro: o DTO recusa campos extras (`400`).
 4. **No Core.** A seção "Cotação do Financeiro" do projeto mostra a situação (`aguardando` /
    `recebida`), a revisão vigente, dias, pessoas em campo, horas, equipe por função, a **lista de
-   materiais** da revisão e o download da Bid; as revisões anteriores ficam como "Substituída". Detalhe: [dominio/cadastros.md §10.2](dominio/cadastros.md#102-cotação-pelo-financeiro).
+   materiais** da revisão e o download da Bid (cotação sem Bid mostra "Sem Bid (orçamento genérico)"); as revisões anteriores ficam como "Substituída". Detalhe: [dominio/cadastros.md §10.2](dominio/cadastros.md#102-cotação-pelo-financeiro).
 
 **Cadastro do satélite:** a API key entregue ao cadastrar vai em `AXIS_API_KEY` do Financeiro (download
 da SOW e do Bid Template e envio da cotação). O Financeiro precisa assinar `project.*`, `project.document_added` e

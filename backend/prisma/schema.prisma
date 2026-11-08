@@ -484,11 +484,12 @@ model ProjectQuote {
   totalHours         Decimal              @map("total_hours") @db.Decimal(12, 2)
   approvedAt         DateTime?            @map("approved_at")
   approvedByEmail    String?              @map("approved_by_email")
-  bidFilename        String               @map("bid_filename")
-  bidMimeType        String               @map("bid_mime_type")
-  bidSizeBytes       Int                  @map("bid_size_bytes")
-  bidContentHash     String               @map("bid_content_hash")
-  bidContent         Bytes                @map("bid_content")
+  /// A Bid é opcional (o modelo generico do Financeiro não tem): ou as cinco colunas bid_* vêm preenchidas ou nenhuma (CHECK no banco).
+  bidFilename        String?              @map("bid_filename")
+  bidMimeType        String?              @map("bid_mime_type")
+  bidSizeBytes       Int?                 @map("bid_size_bytes")
+  bidContentHash     String?              @map("bid_content_hash")
+  bidContent         Bytes?               @map("bid_content")
   receivedAt         DateTime             @default(now()) @map("received_at")
   /// Materiais a enviar ao site, com o código da Logística. Nunca traz preço nem custo.
   materials          ProjectQuoteMaterial[]

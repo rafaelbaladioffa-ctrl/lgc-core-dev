@@ -216,6 +216,93 @@ describe('ProjectQuotesService.receive — materiais', () => {
   });
 });
 
+describe('ProjectQuotesService.receive — cotação sem Bid (modelo generico)', () => {
+  const semBid = () => {
+    const dto = receiveDto({ materials: MATERIALS });
+    delete (dto as Partial<ReceiveProjectQuoteDto>).bid;
+    return dto;
+  };
+  /** Cotação já gravada sem Bid, igual à que semBid() manda. */
+  const gravada = (over: Record<string, unknown> = {}) =>
+    quoteRow({
+      bidFilename: null,
+      bidMimeType: null,
+      bidSizeBytes: null,
+      bidContentHash: null,
+      sowDocumentId: 'sow-2',
+      workDays: new Prisma.Decimal(10),
+      plannedStartDate: new Date('2026-12-01T00:00:00Z'),
+      plannedEndDate: new Date('2026-12-12T00:00:00Z'),
+      team: normalizeTeam(semBid()).lines,
+      materials: [storedMaterial('RED-CAB-0123', 'Cabo óptico 12F', 'm', '1200'), storedMaterial('RED-CON-0007', 'Conector LC', 'un', '48')],
+      ...over,
+    });
+
+  it('aceita a cotação sem Bid e grava as cinco colunas da Bid nulas', async () => {
+    const { service, prisma } = fixture();
+    const quote = await service.receive('p-1', 'sat-1', semBid());
+    const data = prisma.projectQuote.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ bidFilename: null, bidMimeType: null, bidSizeBytes: null, bidContentHash: null, bidContent: null });
+    expect(data.materials.create).toHaveLength(2);
+    expect(quote).toMatchObject({ bidFilename: null, bidContentHash: null });
+  });
+
+  it('repetida idêntica devolve a cotação gravada, sem criar outra', async () => {
+    const { service, prisma } = fixture({ existing: gravada() });
+    const quote = await service.receive('p-1', 'sat-1', semBid());
+    expect(prisma.projectQuote.create).not.toHaveBeenCalled();
+    expect(quote.id).toBe('q-1');
+  });
+
+  it('repetida com materiais diferentes → 409', async () => {
+    const { service } = fixture({ existing: gravada() });
+    const dto = semBid();
+    dto.materials = [MATERIALS[0], { ...MATERIALS[1], quantity: '49.000' }];
+    await expect(service.receive('p-1', 'sat-1', dto)).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('repetida com equipe, dias, datas ou SOW diferentes → 409', async () => {
+    const mudancas: Array<(d: ReceiveProjectQuoteDto) => void> = [
+      (d) => { d.work_days = 11; },
+      (d) => { d.planned_end_date = '2026-12-15'; },
+      (d) => { d.team[0].people = 5; },
+      (d) => { d.team = d.team.slice(0, 2); },
+      (d) => { d.sow_document_id = undefined; },
+      (d) => { d.revision_number = 2; },
+    ];
+    for (const mudar of mudancas) {
+      const { service } = fixture({ existing: gravada() });
+      const dto = semBid();
+      mudar(dto);
+      await expect(service.receive('p-1', 'sat-1', dto)).rejects.toBeInstanceOf(ConflictException);
+    }
+  });
+
+  it('gravada com Bid e reenviada sem Bid (ou o contrário) → 409', async () => {
+    const hash = await XLSX_HASH();
+    const comBid = fixture({ existing: quoteRow({ bidContentHash: hash, materials: gravada().materials }) });
+    await expect(comBid.service.receive('p-1', 'sat-1', semBid())).rejects.toBeInstanceOf(ConflictException);
+    const semBidGravada = fixture({ existing: gravada() });
+    await expect(semBidGravada.service.receive('p-1', 'sat-1', receiveDto({ materials: MATERIALS }))).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('o DTO aceita a cotação sem o campo bid', async () => {
+    const dto = plainToInstance(ReceiveProjectQuoteDtoClass, { external_revision_id: 'rev-1', revision_number: 1, work_days: 10, team: [{ role_key: 'tecnico', role_name: 'Técnico', field_role: true, people: 1, days: 10, hours: 88 }] });
+    expect(await validate(dto, { whitelist: true, forbidNonWhitelisted: true })).toEqual([]);
+  });
+
+  it('download da Bid de cotação sem Bid → 404 em português; com Bid devolve o arquivo', async () => {
+    const { service, prisma } = fixture();
+    prisma.projectQuote.findFirst = vi.fn().mockResolvedValue({ bidFilename: null, bidMimeType: null, bidContent: null, bidContentHash: null });
+    await expect(service.getBid('p-1', 'q-1')).rejects.toThrow('não tem Bid');
+    await expect(service.getBid('p-1', 'q-1')).rejects.toBeInstanceOf(NotFoundException);
+    prisma.projectQuote.findFirst = vi.fn().mockResolvedValue({ bidFilename: 'Bid.xlsx', bidMimeType: 'application/zip', bidContent: XLSX, bidContentHash: 'h' });
+    await expect(service.getBid('p-1', 'q-1')).resolves.toMatchObject({ bidFilename: 'Bid.xlsx' });
+    prisma.projectQuote.findFirst = vi.fn().mockResolvedValue(null);
+    await expect(service.getBid('p-1', 'q-x')).rejects.toBeInstanceOf(NotFoundException);
+  });
+});
+
 describe('normalizeMaterials / sameMaterials', () => {
   it('ausente vira lista vazia; tira espaços e fixa 3 casas', () => {
     expect(normalizeMaterials(undefined)).toEqual([]);

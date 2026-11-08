@@ -99,8 +99,9 @@ export interface ProjectQuote {
   totalHours: number;
   approvedAt: string | null;
   approvedByEmail: string | null;
-  bidFilename: string;
-  bidSizeBytes: number;
+  /** Nulos quando a cotação veio sem Bid (orçamento genérico do Financeiro). */
+  bidFilename: string | null;
+  bidSizeBytes: number | null;
   receivedAt: string;
   satelliteName: string;
   materials: ProjectQuoteMaterial[];

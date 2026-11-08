@@ -71,6 +71,7 @@ export function ProjectQuotes({ projectId, projectStatus }: Props) {
   };
 
   const download = async (quote: ProjectQuote) => {
+    if (!quote.bidFilename) return;
     setError(null);
     try {
       saveBlob(await projectsApi.downloadBid(projectId, quote.id), quote.bidFilename);
@@ -154,9 +155,13 @@ function QuoteCard({ quote, current, onDownload }: { quote: ProjectQuote; curren
         <span className="project-quote-card__title">
           Revisão R{quote.revisionNumber} {current ? <StatusBadge label="Vigente" tone="success" /> : <StatusBadge label="Substituída" tone="default" />}
         </span>
-        <Button type="button" variant="secondary" onClick={() => onDownload(quote)}>
-          Baixar Bid
-        </Button>
+        {quote.bidFilename ? (
+          <Button type="button" variant="secondary" onClick={() => onDownload(quote)}>
+            Baixar Bid
+          </Button>
+        ) : (
+          <span className="project-quotes__hint">Sem Bid (orçamento genérico)</span>
+        )}
       </div>
       <dl className="project-quote-card__grid">
         <div>
@@ -238,7 +243,7 @@ function QuoteCard({ quote, current, onDownload }: { quote: ProjectQuote; curren
       <p className="project-quotes__hint">
         Recebida em {formatDateTime(quote.receivedAt)}
         {quote.approvedByEmail ? ` · envio aprovado por ${quote.approvedByEmail}` : ''}
-        {quote.sowVersion ? ` · cotada com a SOW v${quote.sowVersion}` : ''} · {quote.bidFilename}
+        {quote.sowVersion ? ` · cotada com a SOW v${quote.sowVersion}` : ''} {quote.bidFilename ? ` · ${quote.bidFilename}` : ''}
       </p>
     </article>
   );
