@@ -1,7 +1,8 @@
 # Plano: do projeto aprovado à obra no Field
 
-Escrito em 2026-11-08. **É planejamento: nada daqui está implementado.** O código fica para sessões
-com o Sonnet 5.5, um pacote de trabalho (PT) por sessão (§7).
+Escrito em 2026-11-08 como planejamento. **Situação em 2026-11-08 (fim do dia): PT-01 a PT-11 implementados**
+na branch `integracao/ponta-a-ponta` (sem push) e ensaiados ponta a ponta (PT-12, abaixo). Cada PT foi feito
+numa sessão do Sonnet 5.5 (§7).
 
 Objetivo do dono do produto: cadastrar o projeto no Core, cotar no Financeiro e, quando o cliente
 aprovar o orçamento, disparar tudo sozinho:
@@ -329,6 +330,21 @@ Depende de PT-03 e PT-07.
   (5 técnicos + 1 supervisor) → aprovar → aprovar requisição no CC → expedir e entregar na Logística →
   obra com tarefas no Field → apontar horas → conferir no CC o realizado de material e mão de obra.
 - Atualizar `docs/README.md`, `arquitetura.md` e marcar este plano como implementado.
+
+**Resultado do ensaio (2026-11-08)**, nos quatro sistemas rodando juntos em bancos `_test` locais, com dados fictícios:
+
+- Passou: cotação genérica com equipe e materiais volta ao Core; aprovação do projeto pela tela cria a requisição
+  (valor estimado pelo custo médio da Logística) e emite `project.approved`; o Financeiro marca a revisão como ganha e
+  lança o comprometido; a gerente do CC aprova pela tela e a Logística recebe a ordem já reservada e com o endereço do
+  site; separação, expedição e entrega encerram a requisição no Core pelos eventos de volta; o Field cria a obra e gera
+  39 tarefas da SOW sem intervenção; o apontamento dos técnicos leva o projeto a `em_execucao` e o avanço aparece na
+  jornada; o Financeiro importa o consumo da Logística e as horas do Field e mostra material e mão de obra realizados.
+- Falha encontrada e corrigida: a cotação do modelo genérico não informava a SOW, e o Field criava a obra sem tarefas
+  (`no_sow`). Agora `project.approved` leva a SOW mais recente do projeto quando a cotação não informa (commit `4580c92`).
+- Observações (não bloqueiam): o frontend do Field ainda não tem o login pelo Core (a F1 existe só no backend);
+  o Financeiro mostra "Cliente não sincronizado" porque `client.*` do Core vai sem nome; o avanço da obra só chega ao
+  Core quando roda `manage.py axis_progress_snapshot` (agendar no servidor); a separação e a expedição na Logística
+  foram feitas pela API do almoxarifado, não pela tela de separação.
 
 ### Dependências
 
