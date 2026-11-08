@@ -10,6 +10,10 @@ describe('mapeamento padrão das roles do Axis', () => {
     expect(perms.has('fulfillment:read_all')).toBe(true);
   });
 
+  it('admin do Axis cadastra almoxarifados e endereços (cadastro mestre)', () => {
+    expect(permsOf('admin').has('warehouse:write')).toBe(true);
+  });
+
   it('a leitura não traz operação: admin continua sem reservar, cancelar, separar ou expedir', () => {
     const perms = permsOf('admin');
     for (const p of ['fulfillment:manage', 'picking:execute', 'shipment:execute', 'stock:post', 'stock:adjust']) expect(perms.has(p)).toBe(false);

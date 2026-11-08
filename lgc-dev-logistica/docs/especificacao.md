@@ -245,7 +245,7 @@ Exemplos de zonas:
 | HSE/Qualidade | inspeciona, bloqueia/libera lotes e consulta certificados conforme escopo |
 | Compras | consulta consumo, falta, reposição e recebimento associado ao pedido |
 | Auditor | leitura de documentos, movimentos e trilha sem alteração |
-| Administrador de catálogo | mantém materiais e parâmetros em fluxo de aprovação |
+| Administrador de catálogo | mantém materiais, almoxarifados, endereços e parâmetros em fluxo de aprovação |
 | Administrador técnico | configura integrações sem acesso automático a operações restritas |
 
 Regras:
