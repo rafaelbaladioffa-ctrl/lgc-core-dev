@@ -1,4 +1,4 @@
-import { buildBidPlan, type BidPlanInput } from './bid-plan.js';
+import { bidUnit, buildBidPlan, type BidPlanInput } from './bid-plan.js';
 import type { AwsQuote } from './aws-quote.js';
 
 /** Plano da Bid no formato da Bid real da LGC (valores fictícios). */
@@ -69,7 +69,7 @@ describe('buildBidPlan', () => {
   });
 
   it('material do catálogo pela referência do cliente; deslocamento por carro/dia; mão de obra pelos códigos padrão', () => {
-    expect(line('free_cleaners').cells).toEqual({ J: 180, M: 2, A: 'Caneta de limpeza', D: 'Marca', E: 'P-1', K: 'ea' });
+    expect(line('free_cleaners').cells).toEqual({ J: 180, M: 2, A: 'Caneta de limpeza', B: 'Material supplied by LGC for the installation: Caneta de limpeza', D: 'Marca', E: 'P-1', K: 'ea' });
     expect(line('transport').cells).toMatchObject({ J: 83.33, M: 12, B: 'Daily round trip to Site Teste: 64 km/day, 2 vehicle(s).' });
     expect(line('T-H-S').cells).toEqual({ J: 80, M: 144, U: '3 x 6 working days x 8 h' });
     expect(line('GF-H-S').cells).toMatchObject({ J: 130, M: 48 });
@@ -100,5 +100,32 @@ describe('buildBidPlan', () => {
   it('função sem linha conhecida pede escolha', () => {
     const out = buildBidPlan(input({ result: { ...input().result, labor: [{ roleKey: 'eletricista', label: 'Eletricista', fieldRole: true, people: 1, hours: '8', billingRate: '50' }] } }));
     expect(out.unmappedRoles).toEqual(['Eletricista']);
+  });
+});
+
+describe('bidUnit', () => {
+  it('converte as unidades do catálogo para a lista do Bid Template', () => {
+    expect(['un', 'UN', 'pç', 'm', 'metro', 'rolo', 'caixa', 'ea', 'kg'].map(bidUnit)).toEqual(['ea', 'ea', 'ea', 'm', 'm', 'roll', 'box', 'ea', 'other']);
+  });
+});
+
+describe('material com referência que não resolveu', () => {
+  it('vira pendência com a explicação', () => {
+    const base = input();
+    const catalog = new Map([['m1', { clientRef: null, refError: 'a referência "Bid linha 999" aponta para a linha 999…', manufacturer: null, partNumber: null, name: 'Caneta de limpeza', unit: 'un' }]]);
+    expect(buildBidPlan({ ...base, catalog }).blockers).toContain('Material "Caneta de limpeza": a referência "Bid linha 999" aponta para a linha 999…');
+  });
+});
+
+describe('condições gerais levam a descrição de uso (coluna B)', () => {
+  it('plataforma, hospedagem e diárias', () => {
+    const base = input();
+    const { plan } = buildBidPlan({
+      ...base,
+      result: { ...base.result, revenue: { travel: '1000.00', platform: '900.00' } },
+      inputs: { ...base.inputs, platform: { days: 3, dailyBilled: '300' }, lodging: { people: 4, nights: 5, nightValue: '150' }, meals: { people: 4, days: 6, dayValue: '60' } },
+    });
+    for (const code of ['equip_rental', 'lodging', 'perdiem']) expect(plan!.lines.find((l) => l.code === code)!.cells.B).toBeTruthy();
+    expect(plan!.lines.find((l) => l.code === 'equip_rental')!.cells).toMatchObject({ J: 300, M: 3 });
   });
 });

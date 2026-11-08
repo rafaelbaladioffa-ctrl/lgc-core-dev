@@ -401,10 +401,14 @@ deslocamento).
   - Linhas com o mesmo código: o modelo pode ter o mesmo part number numa linha com fornecedor definido
     e noutra em "Select". Vale a do fornecedor do perfil ou, sem ele, a que já tem fornecedor; em "Select"
     o fornecedor do perfil é escrito em D.
-  - Materiais da LGC: linha do catálogo de materiais pelo campo "referência no formulário do cliente", com
-    J preço e M quantidade (inteira); linha livre leva também descrição, fabricante, código e unidade.
-  - Condições gerais: deslocamento em *Transportation* (J valor por carro/dia, M diárias, B finalidade),
-    plataforma em *Equipment Rental*, hospedagem em *Lodging* e alimentação em *Per Diem*.
+  - Materiais da LGC: linha do catálogo de materiais pelo campo "referência no formulário do cliente" —
+    o código da coluna C ou o **número da linha**, como a LGC anota ("Bid linha 379"), resolvido no Bid
+    Template do próprio RFQ. J preço e M quantidade (inteira); linha livre leva também descrição,
+    finalidade, fabricante, código e unidade convertida para a lista do modelo (un/pç → `ea`, rolo →
+    `roll`, caixa → `box`, metro → `m`; outra → `other`).
+  - Condições gerais: deslocamento em *Transportation* (J valor por carro/dia, M diárias), plataforma em
+    *Equipment Rental*, hospedagem em *Lodging* e alimentação em *Per Diem*; todas com B finalidade (o
+    modelo acusa erro de validação sem a descrição de uso).
   - Bid KPIs: **"Yes"** na coluna F dos indicadores fora da meta (a Bid real não tem texto de
     justificativa no arquivo; a justificativa fica na revisão).
 - **Regra de conferência do próprio modelo:** a soma das horas T das linhas tem de ser igual às horas

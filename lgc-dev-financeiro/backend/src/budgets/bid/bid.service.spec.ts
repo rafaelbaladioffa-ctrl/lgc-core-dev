@@ -4,7 +4,7 @@ import type { AuditService } from '../../audit/audit.service.js';
 import type { OutboxService } from '../../integration/outbox.service.js';
 import type { AuthenticatedUser } from '../../auth/authenticated-request.js';
 import type { BudgetsService } from '../budgets.service.js';
-import { BidService, uniqueByCode } from './bid.service.js';
+import { BidService, resolveClientRef, uniqueByCode } from './bid.service.js';
 import { CORE_QUOTE_EVENT } from './core-quote.js';
 
 vi.mock('./bid-fill.js', () => ({
@@ -85,5 +85,22 @@ describe('uniqueByCode', () => {
   it('código repetido fica uma vez, na linha que já tem fornecedor (a mesma que o preenchimento usa)', () => {
     const line = (row: number, code: string, supplier: string | null) => ({ row, code, supplier, description: '', category: 'Fiber', subcategory: '', free: false });
     expect(uniqueByCode([line(112, 'A', 'CommScope'), line(113, 'B', 'Select'), line(114, 'B', 'AFL'), line(115, 'C', null)]).map((l) => l.row)).toEqual([112, 114, 115]);
+  });
+});
+
+describe('resolveClientRef', () => {
+  const rows = new Map([[348, 'free_cable_management'], [379, 'free_cleaners'], [508, 'T-H-S']]);
+
+  it('aceita o código da coluna C ou o número da linha, como a LGC anota no catálogo', () => {
+    expect(resolveClientRef('free_cleaners', rows)).toEqual({ code: 'free_cleaners', error: null });
+    expect(resolveClientRef('Bid linha 379', rows)).toEqual({ code: 'free_cleaners', error: null });
+    expect(resolveClientRef('linha 348', rows).code).toBe('free_cable_management');
+    expect(resolveClientRef('379', rows).code).toBe('free_cleaners');
+    expect(resolveClientRef('  ', rows)).toEqual({ code: null, error: null });
+  });
+
+  it('linha sem item ou texto que não é referência explicam o problema', () => {
+    expect(resolveClientRef('Bid linha 999', rows).error).toContain('linha 999 do Bid Template deste RFQ, que não tem item');
+    expect(resolveClientRef('ver planilha', rows).error).toContain('não é um código nem um número de linha');
   });
 });

@@ -7,7 +7,8 @@ import type { AwsQuote, KpiKey } from './aws-quote.js';
  *   de material), T horas, U comentário; linha "Free Entry" também leva A descrição, B finalidade,
  *   D fornecedor, E código e K unidade. Tipos da SOW que caem na mesma linha são somados.
  * - material da LGC: linha do catálogo (campo "referência no formulário do cliente"), J preço, M quantidade.
- * - deslocamento, plataforma, hospedagem e diárias: J valor unitário, M quantidade.
+ * - deslocamento, plataforma, hospedagem e diárias: J valor unitário, M quantidade e B finalidade (o modelo
+ *   recusa condição geral sem a descrição de uso).
  * - mão de obra: J valor hora, M horas.
  * - Bid KPIs: "Yes" nos indicadores fora da meta.
  */
@@ -80,12 +81,29 @@ export interface BidPlanInput {
     lodging?: { people?: number | null; nights?: number | null; nightValue?: string | null };
     meals?: { people?: number | null; days?: number | null; dayValue?: string | null };
   };
-  /** Do catálogo, pelos ids das linhas de material. */
-  catalog: Map<string, { clientRef: string | null; manufacturer: string | null; partNumber: string | null; name: string; unit: string }>;
+  /**
+   * Do catálogo, pelos ids das linhas de material. `clientRef` já resolvido para o código da linha
+   * (o catálogo pode guardar o número da linha, ex.: "Bid linha 379"); `refError` explica quando não deu.
+   */
+  catalog: Map<string, { clientRef: string | null; refError?: string | null; manufacturer: string | null; partNumber: string | null; name: string; unit: string }>;
   profile: { header: BidHeaderProfile; cables: Record<string, CableLineProfile>; roles: Record<string, string> };
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Unidades aceitas pela coluna K do Bid Template (lista `uom` do modelo 3.26). */
+const BID_UNITS = ['m', 'ea', 'ft', 'inch', 'cm', 'pack', 'roll', 'sheet', 'box', 'night', 'day', 'person', 'other'];
+const UNIT_ALIASES: Record<string, string> = {
+  un: 'ea', und: 'ea', unid: 'ea', unidade: 'ea', pc: 'ea', 'pç': 'ea', peca: 'ea', 'peça': 'ea',
+  metro: 'm', metros: 'm', mt: 'm', rolo: 'roll', caixa: 'box', cx: 'box', pacote: 'pack', pct: 'pack', folha: 'sheet',
+};
+
+/** Unidade do catálogo (em português) → unidade aceita pelo Bid Template. */
+export function bidUnit(unit: string | null | undefined): string {
+  const u = (unit ?? '').trim().toLowerCase();
+  if (BID_UNITS.includes(u)) return u;
+  return UNIT_ALIASES[u] ?? 'other';
+}
 const fmt = (n: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(n);
 
 export function buildBidPlan(input: BidPlanInput): { plan: BidPlan | null; blockers: string[]; unmappedCables: string[]; unmappedRoles: string[] } {
@@ -153,6 +171,10 @@ export function buildBidPlan(input: BidPlanInput): { plan: BidPlan | null; block
       blockers.push(`O material avulso "${m.description}" precisa estar no catálogo, com a linha do Bid Template.`);
       continue;
     }
+    if (cat.refError) {
+      blockers.push(`Material "${cat.name}": ${cat.refError}`);
+      continue;
+    }
     if (!cat.clientRef) {
       blockers.push(`Informe a linha do Bid Template ("referência no formulário do cliente") do material "${cat.name}" no catálogo.`);
       continue;
@@ -160,7 +182,9 @@ export function buildBidPlan(input: BidPlanInput): { plan: BidPlan | null; block
     if (!Number.isInteger(qty)) blockers.push(`O Bid Template só aceita quantidade inteira: material "${cat.name}" está com ${m.quantity}.`);
     claim(cat.clientRef, cat.name);
     const cells: Record<string, string | number> = { J: round2(Number(m.billed) / qty), M: qty };
-    if (cat.clientRef.startsWith('free_')) Object.assign(cells, { A: cat.name, D: cat.manufacturer ?? '', E: cat.partNumber ?? '', K: cat.unit });
+    if (cat.clientRef.startsWith('free_')) {
+      Object.assign(cells, { A: cat.name, B: `Material supplied by LGC for the installation: ${cat.name}`, D: cat.manufacturer ?? '', E: cat.partNumber ?? '', K: bidUnit(cat.unit) });
+    }
     lines.push({ code: cat.clientRef, cells, label: `Material: ${cat.name}` });
   }
 
@@ -185,17 +209,17 @@ export function buildBidPlan(input: BidPlanInput): { plan: BidPlan | null; block
   const platformDays = input.inputs.platform?.days ?? 0;
   if ((Number(result.revenue.platform) || 0) > 0 && platformDays > 0) {
     claim(CONDITION_CODES.platform, 'Plataforma');
-    lines.push({ code: CONDITION_CODES.platform, label: 'Plataforma elevatória', cells: { J: Number(input.inputs.platform?.dailyBilled ?? 0), M: platformDays, U: `Mobile elevating work platform: ${platformDays} day(s).` } });
+    lines.push({ code: CONDITION_CODES.platform, label: 'Plataforma elevatória', cells: { J: Number(input.inputs.platform?.dailyBilled ?? 0), M: platformDays, B: 'Mobile elevating work platform (MEWP) rental for cabling at height.', U: `Mobile elevating work platform: ${platformDays} day(s).` } });
   }
   const lodging = input.inputs.lodging;
   if (lodging?.people && lodging.nights && Number(lodging.nightValue) > 0) {
     claim(CONDITION_CODES.lodging, 'Hospedagem');
-    lines.push({ code: CONDITION_CODES.lodging, label: 'Hospedagem', cells: { J: Number(lodging.nightValue), M: lodging.people * lodging.nights, U: `${lodging.people} people x ${lodging.nights} night(s).` } });
+    lines.push({ code: CONDITION_CODES.lodging, label: 'Hospedagem', cells: { J: Number(lodging.nightValue), M: lodging.people * lodging.nights, B: 'Crew lodging near the site.', U: `${lodging.people} people x ${lodging.nights} night(s).` } });
   }
   const meals = input.inputs.meals;
   if (meals?.people && meals.days && Number(meals.dayValue) > 0) {
     claim(CONDITION_CODES.meals, 'Alimentação');
-    lines.push({ code: CONDITION_CODES.meals, label: 'Alimentação (diárias)', cells: { J: Number(meals.dayValue), M: meals.people * meals.days, U: `${meals.people} people x ${meals.days} day(s).` } });
+    lines.push({ code: CONDITION_CODES.meals, label: 'Alimentação (diárias)', cells: { J: Number(meals.dayValue), M: meals.people * meals.days, B: 'Crew per diem (meals) during the works.', U: `${meals.people} people x ${meals.days} day(s).` } });
   }
 
   // Mão de obra.

@@ -42,6 +42,24 @@ export function uniqueByCode(lines: BidTemplateLine[]): BidTemplateLine[] {
   return lines.filter((l) => byCode.get(l.code) === l);
 }
 
+/**
+ * Referência do catálogo ("referência no formulário do cliente") → código da linha no Bid Template da
+ * revisão. Aceita o próprio código da coluna C ou o número da linha ("Bid linha 379", "linha 379", "379"),
+ * que é como a LGC anota hoje. O número vale para a versão do modelo anexada ao RFQ.
+ */
+export function resolveClientRef(ref: string | null, rowCodes: Map<number, string>): { code: string | null; error: string | null } {
+  const value = (ref ?? '').trim();
+  if (!value) return { code: null, error: null };
+  const codes = new Set(rowCodes.values());
+  if (codes.has(value)) return { code: value, error: null };
+  const row = value.match(/^(?:bid\s*)?(?:linha|line|row)?\s*n?[ºo°.]?\s*(\d+)$/i);
+  if (row) {
+    const code = rowCodes.get(Number(row[1]));
+    return code ? { code, error: null } : { code: null, error: `a referência "${value}" aponta para a linha ${row[1]} do Bid Template deste RFQ, que não tem item. Revise o catálogo de materiais.` };
+  }
+  return { code: null, error: `a referência "${value}" não é um código nem um número de linha do Bid Template. Revise o catálogo de materiais.` };
+}
+
 /** Hoje em São Paulo (`AAAA-MM-DD`), a data de envio da proposta. */
 export const todaySaoPaulo = () => new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 
@@ -111,6 +129,11 @@ export class BidService {
 
   /** Linhas da aba Item Selection para escolher no mapeamento (cabos e mão de obra). */
   async templateLines(revisionId: string): Promise<BidTemplateLine[]> {
+    return uniqueByCode(await this.allTemplateLines(revisionId));
+  }
+
+  /** Todas as linhas com código, inclusive as repetidas (o número da linha importa para o catálogo). */
+  private async allTemplateLines(revisionId: string): Promise<BidTemplateLine[]> {
     const editor = await XlsxEditor.load(await this.template(revisionId));
     const rows = await editor.findRows('Item Selection', 'C', (v) => v.trim() !== '' && v !== 'AWS Part Number');
     const out: BidTemplateLine[] = [];
@@ -129,7 +152,7 @@ export class BidService {
         free: code.startsWith('free_'),
       });
     }
-    return uniqueByCode(out);
+    return out;
   }
 
   /** Plano da Bid da revisão com o perfil atual; `blockers` explica o que falta. */
@@ -141,8 +164,13 @@ export class BidService {
     if (!aws?.quote) return { rev, project, aws, plan: null, blockers: aws?.blockers.length ? aws.blockers : ['A cotação AWS ainda não pode ser calculada.'], unmappedCables: [], unmappedRoles: [] };
     const result = rev.result as unknown as BudgetResult;
     const ids = result.materials.map((m) => m.materialId).filter((x): x is string => !!x);
+    const materials = await this.prisma.budgetMaterial.findMany({ where: { id: { in: ids } }, select: { id: true, clientRef: true, manufacturer: true, partNumber: true, name: true, unit: true } });
+    const rowCodes = materials.length ? new Map((await this.allTemplateLines(revisionId)).map((l) => [l.row, l.code])) : new Map<number, string>();
     const catalog = new Map(
-      (await this.prisma.budgetMaterial.findMany({ where: { id: { in: ids } }, select: { id: true, clientRef: true, manufacturer: true, partNumber: true, name: true, unit: true } })).map((m) => [m.id, m]),
+      materials.map((m) => {
+        const ref = resolveClientRef(m.clientRef, rowCodes);
+        return [m.id, { ...m, clientRef: ref.code, refError: ref.error }];
+      }),
     );
     const out = buildBidPlan({
       projectCode: rev.budget.projectCode,
