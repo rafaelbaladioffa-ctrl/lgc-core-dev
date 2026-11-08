@@ -1,0 +1,173 @@
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 400; font-display: swap; src: url("../fonts/manrope-400.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 500; font-display: swap; src: url("../fonts/manrope-500.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 600; font-display: swap; src: url("../fonts/manrope-600.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 700; font-display: swap; src: url("../fonts/manrope-700.ttf") format("truetype"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 800; font-display: swap; src: url("../fonts/manrope-800.ttf") format("truetype"); }
+
+:root {
+    --consultimer-orange: #f58530;
+    --consultimer-orange-strong: #f16023;
+    --consultimer-orange-dark: #da4a13;
+    --consultimer-graphite: #202124;
+    --consultimer-charcoal: #262528;
+}
+
+html, body, button, input, select, textarea {
+    font-family: "Manrope", ui-sans-serif, system-ui, sans-serif !important;
+}
+
+aside {
+    background: linear-gradient(180deg, var(--consultimer-charcoal) 0%, #1d1d1f 100%) !important;
+    border-right-color: rgba(245, 133, 48, 0.2) !important;
+}
+
+aside img {
+    height: auto !important;
+    max-height: 38px !important;
+    max-width: 190px !important;
+    object-fit: contain;
+}
+
+aside a:hover, aside a[aria-current="page"], aside .bg-primary-600 {
+    background-color: rgba(245, 133, 48, 0.14) !important;
+    color: #fff !important;
+}
+
+aside a[aria-current="page"] { box-shadow: inset 3px 0 0 var(--consultimer-orange); }
+h1, h2, h3, h4, h5, h6 { letter-spacing: -0.02em; }
+a:not(aside a):not([class*="text-red"]):hover { color: var(--consultimer-orange-strong); }
+
+/* Hierarquia do menu lateral: módulo > opções */
+#nav-sidebar-apps .module > ol {
+    margin: 0 12px 8px;
+    padding: 0 8px 10px !important;
+}
+
+#nav-sidebar-apps .module:not(:last-child) > ol {
+    border-bottom: 1px solid rgba(116, 116, 116, 0.16);
+}
+
+#nav-sidebar-apps .module h2 a {
+    align-items: center;
+    color: #747474 !important;
+    display: flex;
+    font-size: 10px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.105em;
+    margin: 0 0 5px !important;
+    min-height: 30px;
+    padding: 7px 9px 5px;
+    text-transform: uppercase;
+}
+
+.dark #nav-sidebar-apps .module h2 a { color: #a7a7aa !important; }
+
+#nav-sidebar-apps .module.current-app h2 a {
+    color: var(--consultimer-orange-strong) !important;
+}
+
+#nav-sidebar-apps .module ol ol {
+    gap: 2px !important;
+}
+
+#nav-sidebar-apps .module ol ol a {
+    border-left: 2px solid transparent;
+    border-radius: 6px !important;
+    font-size: 13px;
+    height: 34px !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: 11px !important;
+    padding-right: 10px !important;
+}
+
+#nav-sidebar-apps .module ol ol a:hover {
+    background: rgba(245, 133, 48, 0.07) !important;
+    border-left-color: rgba(245, 133, 48, 0.45);
+}
+
+#nav-sidebar-apps .module ol ol li.current-model > a,
+#nav-sidebar-apps .module ol ol a.active {
+    background: rgba(245, 133, 48, 0.12) !important;
+    border-left-color: var(--consultimer-orange-strong);
+    box-shadow: none !important;
+    color: var(--consultimer-orange-strong) !important;
+    font-weight: 700 !important;
+}
+
+input:focus, textarea:focus, select:focus,
+.select2-container--focus .select2-selection,
+.select2-container--open .select2-selection {
+    border-color: var(--consultimer-orange) !important;
+    box-shadow: 0 0 0 3px rgba(245, 133, 48, 0.16) !important;
+    outline: none !important;
+}
+
+.bg-primary-600, button.bg-primary-600, input.bg-primary-600, a.bg-primary-600 {
+    background: linear-gradient(135deg, var(--consultimer-orange) 0%, var(--consultimer-orange-strong) 100%) !important;
+    border-color: var(--consultimer-orange-strong) !important;
+    box-shadow: 0 4px 12px rgba(241, 96, 35, 0.18);
+}
+
+.bg-primary-600:hover, button.bg-primary-600:hover, input.bg-primary-600:hover, a.bg-primary-600:hover {
+    background: var(--consultimer-orange-dark) !important;
+    box-shadow: 0 6px 16px rgba(241, 96, 35, 0.25);
+}
+
+#changelist-form .border, fieldset, .module, [class*="rounded-default"] {
+    border-color: rgba(116, 116, 116, 0.18);
+}
+
+#result_list thead th, .results thead th {
+    background-color: rgba(245, 133, 48, 0.06);
+    color: var(--consultimer-graphite);
+    font-weight: 700;
+}
+
+.dark #result_list thead th, .dark .results thead th {
+    background-color: rgba(245, 133, 48, 0.08);
+    color: #fff;
+}
+
+#result_list tbody tr, .results tbody tr {
+    transition: background-color 150ms ease, box-shadow 150ms ease;
+}
+
+#result_list tbody tr:hover, .results tbody tr:hover {
+    background-color: rgba(245, 133, 48, 0.055) !important;
+    box-shadow: inset 3px 0 0 var(--consultimer-orange);
+}
+
+nav[aria-label="Breadcrumbs"] a, .breadcrumbs a { color: var(--consultimer-orange-strong) !important; }
+::selection { background: rgba(245, 133, 48, 0.3); }
+
+.select2-container--default .select2-results__option--highlighted[aria-selected] {
+    background-color: var(--consultimer-orange-strong) !important;
+}
+
+.select2-container--default .select2-selection--multiple .select2-selection__choice {
+    background-color: rgba(245, 133, 48, 0.12) !important;
+    border-color: rgba(245, 133, 48, 0.35) !important;
+}
+
+@media (max-width: 767px) { aside img { max-width: 155px !important; } }
+
+/* Corrige o menu de tema (Claro/Escuro/Sistema) do usuário estourando a
+   largura do dropdown: a fonte Manrope, mais larga que a padrão do
+   Unfold, faz os itens flex ("grow") não encolherem por padrão (sem
+   min-width: 0), empurrando o texto "Sistema" para fora do quadrado. */
+.flex.flex-row.gap-1.mb-1.pb-1 > a.grow {
+    min-width: 0;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+}
+
+.flex.flex-row.gap-1.mb-1.pb-1 > a.grow .material-symbols-outlined {
+    margin-right: 4px !important;
+}
+
+.flex.flex-row.gap-1.mb-1.pb-1 > a.grow .leading-none {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

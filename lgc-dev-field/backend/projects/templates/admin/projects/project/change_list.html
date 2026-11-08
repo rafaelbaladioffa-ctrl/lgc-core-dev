@@ -1,0 +1,15 @@
+{% extends "admin/change_list_with_page_size.html" %}
+
+{% block object-tools-items %}
+    {{ block.super }}
+    <a href="{% url 'admin:projects_dashboardproxy_changelist' %}" class="border border-base-200 flex items-center gap-2 px-3 py-2 rounded-default text-sm dark:border-base-700">
+        <span class="material-symbols-outlined md-18">insights</span>
+        Dashboard
+    </a>
+    <a href="{% url 'admin:projects_project_import_csv' %}" class="border border-base-200 flex items-center gap-2 px-3 py-2 rounded-default text-sm dark:border-base-700">
+        Importar CSV
+    </a>
+    <a href="{% url 'admin:projects_project_export_csv' %}" class="bg-primary-600 flex items-center gap-2 px-3 py-2 rounded-default text-sm text-white">
+        Exportar CSV
+    </a>
+{% endblock %}

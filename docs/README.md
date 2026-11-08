@@ -1,6 +1,6 @@
 # Documentação do Axis
 
-Índice da documentação do Core e dos satélites Logística e Financeiro. Reorganizada em 2026-11-07: cada
+Índice da documentação do Core e dos satélites Logística, Financeiro e Field. Reorganizada em 2026-11-07: cada
 documento abaixo foi conferido contra o código da branch `rafaelbaladioffa-ctrl/minhas-atividades`.
 O que descreve código removido ou entregas passadas está em [arquivo/](arquivo/README.md).
 
@@ -40,6 +40,11 @@ O que descreve código removido ou entregas passadas está em [arquivo/](arquivo
 - [../lgc-dev-financeiro/docs/projetos-especificacao.md](../lgc-dev-financeiro/docs/projetos-especificacao.md) — primeiro módulo: orçamento e resultado por projeto, decisões P-01–P-10 e entregas PJ1–PJ6.
 - [../lgc-dev-financeiro/docs/especificacao.md](../lgc-dev-financeiro/docs/especificacao.md) — base do satélite e contas a pagar (frente seguinte), decisões F-01–F-07 e entregas F0–F6.
 - [integracao-core-financeiro.md](integracao-core-financeiro.md) — contratos entre Core e Financeiro e o que falta no Core.
+
+## Field
+
+- [../lgc-dev-field/README.md](../lgc-dev-field/README.md) — satélite de projetos e campo (antigo ERP CSTR, Django), como rodar.
+- [integracao-core-field.md](integracao-core-field.md) — decisões FD-01–FD-04 e plano de integração (nada implementado ainda).
 
 ## Convenções desta pasta
 

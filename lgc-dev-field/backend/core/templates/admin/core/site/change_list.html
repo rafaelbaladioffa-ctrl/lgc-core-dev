@@ -1,0 +1,8 @@
+{% extends "admin/core/csv_buttons_change_list.html" %}
+
+{% block object-tools-items %}
+    {{ block.super }}
+    <a href="{% url 'admin:core_site_map' %}" class="bg-primary-600 flex items-center gap-2 px-3 py-2 rounded-default text-sm text-white" style="text-decoration: none;">
+        Ver Mapa
+    </a>
+{% endblock %}

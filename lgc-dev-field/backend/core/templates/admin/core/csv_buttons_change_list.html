@@ -1,0 +1,15 @@
+{% extends "admin/change_list_with_page_size.html" %}
+
+{% block object-tools-items %}
+    {{ block.super }}
+    <a href="{% url "admin:"|add:opts.app_label|add:"_"|add:opts.model_name|add:"_export_csv" %}"
+       class="border border-primary-600 flex items-center gap-2 px-3 py-2 rounded-default text-primary-600 text-sm"
+       style="text-decoration: none;">
+        Exportar CSV
+    </a>
+    <a href="{% url "admin:"|add:opts.app_label|add:"_"|add:opts.model_name|add:"_import_csv" %}"
+       class="bg-primary-600 flex items-center gap-2 px-3 py-2 rounded-default text-sm text-white"
+       style="text-decoration: none;">
+        Importar CSV
+    </a>
+{% endblock %}

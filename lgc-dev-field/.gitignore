@@ -1,0 +1,23 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+staticfiles/
+media/
+.pytest_cache/
+.coverage
+.idea/
+.vscode/
+node_modules/
+dist/
+backend/output/
+backend/tmp/
+outputs/
+artifacts/*/*.png
+tools/faq-generator/shots/
+tools/faq-generator/*.pdf
+
+
+# Contexto local do Claude Code (infra/acessos) - nunca versionar (repo publico)
+CLAUDE.local.md

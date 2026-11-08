@@ -5,7 +5,7 @@ Leia antes de alterar este repositório. Vale para Claude, Codex e qualquer outr
 ## Contexto
 
 - Axis = ERP interno da LGC Instalações e Projetos. Usuários finais falam português; **toda UI, mensagem de erro e documentação em pt-BR**.
-- Este repo tem o Core (`backend/`, `frontend/`) e os satélites Logística (`lgc-dev-logistica/`) e Financeiro (`lgc-dev-financeiro/`). Cada um tem `package.json` e banco separados.
+- Este repo tem o Core (`backend/`, `frontend/`) e os satélites Logística (`lgc-dev-logistica/`), Financeiro (`lgc-dev-financeiro/`) e Field (`lgc-dev-field/`, projetos e campo, em **Django**). Cada um tem dependências e banco separados.
 - Visão e estado atual: [docs/README.md](docs/README.md). Diagnóstico e riscos: [docs/avaliacao-2026-11-07.md](docs/avaliacao-2026-11-07.md).
 - Padrões obrigatórios e Definition of Done: [docs/diretrizes-desenvolvimento.md](docs/diretrizes-desenvolvimento.md).
 
@@ -56,6 +56,14 @@ cd lgc-dev-financeiro/backend && npx tsc -p tsconfig.build.json --noEmit && npm 
 
 ```bash
 cd lgc-dev-financeiro/frontend && npx tsc -p tsconfig.json --noEmit && npx oxlint src && npm test
+```
+
+```bash
+cd lgc-dev-field/frontend && npx tsc -b && npx vite build
+```
+
+```bash
+cd lgc-dev-field && docker compose run --rm field-backend python manage.py test
 ```
 
 ```bash

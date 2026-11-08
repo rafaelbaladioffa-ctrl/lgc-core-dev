@@ -1,0 +1,82 @@
+# Axis Field — satélite de projetos e campo do Axis (antigo ERP CSTR).
+# Banco PRÓPRIO (nunca o do Core); mesma VPS, containers adicionais.
+name: axis-field
+
+services:
+  field-postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-erp}
+      POSTGRES_USER: ${POSTGRES_USER:-erp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-erp}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-erp} -d ${POSTGRES_DB:-erp}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  field-backend:
+    build:
+      context: .
+      dockerfile: docker/backend/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      POSTGRES_HOST: field-postgres
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backend:/app
+      - static_data:/app/staticfiles
+      - media_data:/app/media
+    depends_on:
+      field-postgres:
+        condition: service_healthy
+
+  field-frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend/Dockerfile
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${FRONTEND_API_URL:-http://localhost:8000/api}
+    ports:
+      - "5176:5173" # 5173 é do Core; 5174 Logística; 5175 Financeiro
+    volumes:
+      - ./frontend:/app
+      - frontend_node_modules:/app/node_modules
+    depends_on:
+      - field-backend
+
+  field-whatsapp-bot:
+    build:
+      context: .
+      dockerfile: docker/whatsapp-bot/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      BOT_API_URL: ${BOT_API_URL:-http://field-backend:8000/api}
+      BOT_API_SECRET: ${WHATSAPP_BOT_SECRET:-}
+    volumes:
+      - whatsapp_auth:/app/auth_info
+    depends_on:
+      - field-backend
+
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1400
+
+volumes:
+  postgres_data:
+  static_data:
+  media_data:
+  frontend_node_modules:
+  whatsapp_auth:

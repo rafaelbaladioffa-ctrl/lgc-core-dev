@@ -1,0 +1,175 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrahead %}
+    {{ block.super }}
+    <link rel="stylesheet" href="{% static 'projects/css/project-overview.css' %}">
+    <script src="{% static 'projects/js/project-overview-tabs.js' %}" defer></script>
+{% endblock %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<div class="project-overview">
+    <header class="project-overview__header">
+        <div>
+            <a class="project-overview__back" href="{{ changelist_url }}">← Projetos</a>
+            <h1>{{ project.code }} — {{ project.name }}</h1>
+            <p>
+                {{ project.client|default:"Cliente não informado" }}
+                <span>·</span>
+                {% if project.site %}{{ project.site.name }}{% else %}Site não informado{% endif %}
+                {% if project.po %}<span>·</span> PO {{ project.po }}{% endif %}
+            </p>
+        </div>
+        <div class="project-overview__actions">
+            <span class="project-overview__status project-overview__status--{{ project.status }}">{{ project.get_status_display }}</span>
+            {% if has_change_permission %}<a class="project-overview__edit" href="{{ change_url }}">Editar Projeto</a>{% endif %}
+        </div>
+    </header>
+
+    <nav class="project-overview__tabs" role="tablist" aria-label="Seções do Projeto">
+        <a class="active" href="#visao-geral" role="tab" data-project-tab="visao-geral" aria-selected="true">Visão Geral</a>
+        <a href="#tarefas" role="tab" data-project-tab="tarefas" aria-selected="false">Tarefas</a>
+        <a href="#equipe" role="tab" data-project-tab="equipe" aria-selected="false">Equipe</a>
+    </nav>
+
+    <section id="visao-geral" class="project-overview__content project-overview__panel" data-project-panel="visao-geral" role="tabpanel">
+        <div class="project-overview__cards">
+            <article class="project-overview__card project-overview__progress">
+                <span>Progresso</span><strong>{{ progress }}%</strong>
+                <div><i style="width: {{ progress }}%"></i></div>
+            </article>
+            <article class="project-overview__card"><span>Tarefas</span><strong>{{ completed_tasks }}/{{ total_tasks }}</strong></article>
+            <article class="project-overview__card"><span>Horas trabalhadas</span><strong>{{ actual_hours }}</strong></article>
+            <article class="project-overview__card"><span>Início previsto</span><strong>{{ project.planned_start|date:"d/m/Y"|default:"—" }}</strong></article>
+            <article class="project-overview__card"><span>Término previsto</span><strong>{{ project.planned_end|date:"d/m/Y"|default:"—" }}</strong></article>
+            <article class="project-overview__card"><span>Tipo de Projeto</span><strong>{{ project.project_type|default:"—" }}</strong></article>
+            <article class="project-overview__card"><span>Categoria</span><strong>{{ project.category|default:"—" }}</strong></article>
+            <article class="project-overview__card"><span>Horas previstas</span><strong>{{ estimated_hours }}</strong></article>
+        </div>
+
+        <div class="project-overview__responsibles">
+            <article><span>Responsável Cliente</span><strong>{{ project.responsible_client|default:"Não informado" }}</strong></article>
+            <article><span>Responsável CSTR</span><strong>{{ project.responsible_cstr|default:"Não informado" }}</strong></article>
+        </div>
+    </section>
+
+    <section id="tarefas" class="project-overview__section project-overview__panel" data-project-panel="tarefas" role="tabpanel" hidden>
+        <nav class="project-overview__subtabs" role="tablist" aria-label="Seções de Tarefas">
+            <a class="active" href="#tarefas-lista" role="tab" data-task-subtab="tarefas-lista" aria-selected="true">Tarefas do Projeto</a>
+            <a href="#tarefas-massa" role="tab" data-task-subtab="tarefas-massa" aria-selected="false">Ações em Massa das Tarefas</a>
+        </nav>
+
+        <div id="tarefas-lista" class="project-overview__subpanel" data-task-subpanel="tarefas-lista">
+            <div class="project-overview__tasks-header">
+                <h2>Tarefas do Projeto</h2>
+                {% if has_change_permission %}<a class="project-overview__task-edit" href="{{ task_add_url }}">+ Adicionar Tarefa</a>{% endif %}
+            </div>
+
+            <div class="project-overview__table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Ordem</th><th>Tarefa</th>{% if project.has_rack_positions %}<th>Rack Position</th>{% endif %}<th>Responsável</th><th>Status</th><th>Horas Trabalhadas</th><th>Editar</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in task_rows %}
+                        <tr>
+                            <td>{{ row.project_task.order }}</td>
+                            <td>{{ row.project_task.display_name }}</td>
+                            {% if project.has_rack_positions %}<td>{{ row.rack_positions_display }}</td>{% endif %}
+                            <td>
+                                <div class="project-overview__task-people">
+                                    {% for collaborator in row.visible_collaborators %}
+                                        <span title="{{ collaborator.name }}">{{ collaborator.name }}</span>
+                                    {% empty %}—{% endfor %}
+                                    {% if row.extra_count %}
+                                        <details class="project-overview__people-more">
+                                            <summary>+{{ row.extra_count }}</summary>
+                                            <div>
+                                                {% for collaborator in row.extra_collaborators %}<span>{{ collaborator.name }}</span>{% endfor %}
+                                            </div>
+                                        </details>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>{{ row.project_task.get_status_display }}</td>
+                            <td>{{ row.worked_hours }}</td>
+                            <td><a class="project-overview__task-edit" href="{{ row.edit_url }}">Editar</a></td>
+                        </tr>
+                        {% empty %}<tr><td colspan="6">Nenhuma tarefa cadastrada.</td></tr>{% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="tarefas-massa" class="project-overview__subpanel" data-task-subpanel="tarefas-massa" hidden>
+            <div class="project-overview__tasks-header">
+                <h2>Ações em Massa das Tarefas</h2>
+            </div>
+            {% if has_change_permission %}
+            <form method="post" action="{{ tasks_bulk_url }}" class="project-overview__bulk-form">
+                {% csrf_token %}
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_task_action.id_for_label }}">{{ bulk_form.bulk_task_action.label }}</label>
+                    {{ bulk_form.bulk_task_action }}
+                </div>
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_tasks.id_for_label }}">{{ bulk_form.bulk_tasks.label }}</label>
+                    {{ bulk_form.bulk_tasks }}
+                    {% if bulk_form.bulk_tasks.errors %}<p class="project-overview__bulk-error">{{ bulk_form.bulk_tasks.errors|join:" " }}</p>{% endif %}
+                </div>
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.add_tasks.id_for_label }}">{{ bulk_form.add_tasks.label }}</label>
+                    {{ bulk_form.add_tasks }}
+                    <p class="project-overview__bulk-hint">Usado apenas quando a Ação em Massa é "Adicionar tarefas ao projeto".</p>
+                    {% if bulk_form.add_tasks.errors %}<p class="project-overview__bulk-error">{{ bulk_form.add_tasks.errors|join:" " }}</p>{% endif %}
+                </div>
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_collaborators.id_for_label }}">{{ bulk_form.bulk_collaborators.label }}</label>
+                    {{ bulk_form.bulk_collaborators }}
+                </div>
+                {% if project.has_rack_positions %}
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_task_rack_positions.id_for_label }}">{{ bulk_form.bulk_task_rack_positions.label }}</label>
+                    {{ bulk_form.bulk_task_rack_positions }}
+                </div>
+                {% endif %}
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_status.id_for_label }}">{{ bulk_form.bulk_status.label }}</label>
+                    {{ bulk_form.bulk_status }}
+                </div>
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_start.id_for_label }}">{{ bulk_form.bulk_start.label }}</label>
+                    {{ bulk_form.bulk_start }}
+                </div>
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_end.id_for_label }}">{{ bulk_form.bulk_end.label }}</label>
+                    {{ bulk_form.bulk_end }}
+                    {% if bulk_form.bulk_end.errors %}<p class="project-overview__bulk-error">{{ bulk_form.bulk_end.errors|join:" " }}</p>{% endif %}
+                </div>
+                <div class="project-overview__bulk-field">
+                    <label for="{{ bulk_form.bulk_estimated_hours.id_for_label }}">{{ bulk_form.bulk_estimated_hours.label }}</label>
+                    {{ bulk_form.bulk_estimated_hours }}
+                </div>
+                <button type="submit" class="project-overview__task-edit"
+                        onclick="return confirm('Aplicar esta ação em massa às tarefas selecionadas?');">
+                    Aplicar
+                </button>
+            </form>
+            {% else %}
+            <p>Você não tem permissão para alterar tarefas deste projeto.</p>
+            {% endif %}
+        </div>
+    </section>
+
+    <section id="equipe" class="project-overview__section project-overview__panel" data-project-panel="equipe" role="tabpanel" hidden>
+        <h2>Equipe</h2>
+        <div class="project-overview__team">
+            {% for collaborator in team %}<span>{{ collaborator.name }}</span>{% empty %}<p>Nenhum colaborador atribuído.</p>{% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Propaga a identidade visual do Core para os satélites (Logística e Financeiro).
+// Propaga a identidade visual do Core para os satélites (Logística, Financeiro e Field).
 // Uso: node scripts/sync-design.mjs [--check]
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 const raiz = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const checar = process.argv.includes('--check');
 const origem = join(raiz, 'frontend');
-const satelites = ['lgc-dev-logistica/frontend', 'lgc-dev-financeiro/frontend'];
+const satelites = ['lgc-dev-logistica/frontend', 'lgc-dev-financeiro/frontend', 'lgc-dev-field/frontend'];
 const estilos = ['axis-tokens.css', 'axis-shell.css'];
 const icones = ['favicon-192.png', 'favicon-512.png', 'apple-touch-icon.png'];
 
