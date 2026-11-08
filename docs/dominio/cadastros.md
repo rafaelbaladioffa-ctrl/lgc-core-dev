@@ -10,6 +10,7 @@ Convenções gerais (valem para todas as entidades):
 - IDs são UUID; `created_at`/`updated_at` em todas as tabelas.
 - Exclusões (`DELETE`) são físicas. Quando há FK apontando para o registro, o Prisma devolve `P2003` e o serviço converte em `409 Conflict`.
 - Eventos de integração são gravados em `integration_outbox` **na mesma transação** da escrita via [OutboxService.record](../../backend/src/integration/outbox.service.ts).
+- Desde 2026-11-08 (onda V1, [mapa-interoperabilidade.md §6](../mapa-interoperabilidade.md#6-contrato-v1-eventos-e-consultas-novos-do-core)) todo evento de cadastro leva o **estado completo** e os campos `name` e `active`: quem recebe pode substituir o cache inteiro. Exclusão sai como `<entidade>.deleted` com `active: false` e `deleted: true`. Todos os tipos que o Core emite estão listados em [event-catalog.ts](../../backend/src/integration/event-catalog.ts), exposto em `GET /integration/event-types` (`integration:read`); a tela de satélite oferece essa lista e edita a assinatura de um satélite já cadastrado (`PATCH /integration/satellites/:id`, `integration:manage`, auditoria `update_satellite_subscriptions`). O teste `event-catalog.spec.ts` falha se um `outbox.record` do código usar um tipo fora do catálogo.
 - Auditoria (`audit_logs`) só é gravada nas rotas com `@AuditAction`, pelo interceptor global [audit-log.interceptor.ts](../../backend/src/audit/audit-log.interceptor.ts), depois da resposta e fora da transação. Não há endpoint de leitura de `audit_logs`.
 
 ---
@@ -43,7 +44,15 @@ Convenções gerais (valem para todas as entidades):
 | POST | `/auth/login`, `/auth/refresh` | pública | — |
 | POST | `/auth/change-password`, `/auth/logout` | autenticado | — |
 
-**Eventos de outbox:** nenhum. O planning (§3.3) previa `user.created`, `user.updated`, `user.disabled`; **não implementados**.
+**Eventos de outbox** (desde 2026-11-08, na mesma transação da escrita; estado completo em todos):
+
+| Evento | Quando |
+|---|---|
+| `user.created` | `POST /users` |
+| `user.updated` | `PUT /users/:id/roles` (usuário ativo); `PUT /users/:id/status` com `active` (reativação) |
+| `user.disabled` | `PUT /users/:id/status` com `disabled`; troca de papéis de usuário desativado |
+
+Payload ([users.service.ts](../../backend/src/users/users.service.ts) `userEventPayload`): `user_id`, `email`, `name` (nome do colaborador; sem colaborador, o e-mail), `status` (`active`/`disabled`), `active` (`status = active`), `collaborator_id` (ou `null`), `roles` (nomes dos papéis). Reset de senha, troca de senha e login não emitem evento. Renomear um papel (`PUT /roles/:id`) não reemite `user.updated` dos usuários dele: o **Reenviar cadastros** atualiza.
 
 **Frontend:** `/users`, `/users/new`, `/users/:id/edit` ([UsersPage](../../frontend/src/pages/UsersPage.tsx), [UserFormPage](../../frontend/src/pages/UserFormPage.tsx)); `/change-password`.
 
@@ -125,7 +134,9 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 
 **Regras** ([job-titles.service.ts](../../backend/src/job-titles/job-titles.service.ts)): nome duplicado → `409`; exclusão com colaboradores vinculados → `409`.
 
-**Endpoints:** `POST/GET/GET :id/PUT :id/DELETE :id` em `/job-titles` com `job_title:create|read|update|delete`. Sem auditoria, sem eventos.
+**Endpoints:** `POST/GET/GET :id/PUT :id/DELETE :id` em `/job-titles` com `job_title:create|read|update|delete`. Sem auditoria.
+
+**Eventos de outbox** (desde 2026-11-08, mesma transação): `job_title.created` e `job_title.updated` com `job_title_id`, `name`, `is_technician`, `active: true`; `job_title.deleted` com `job_title_id`, `name`, `active: false`, `deleted: true`. Exclusão recusada (`409`, colaboradores vinculados) não emite.
 
 **Frontend:** `/job-titles`, `/job-titles/new`, `/job-titles/:id/edit`.
 
@@ -138,6 +149,14 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 **Endpoints:** `POST/GET/GET :id/PUT :id/DELETE :id` em `/work-schedules` com `work_schedule:create|read|update|delete`. Sem auditoria, sem eventos.
 
 **Frontend:** `/work-schedules`, `/work-schedules/new`, `/work-schedules/:id/edit`.
+
+### 6.1 Feriados
+
+**Campos-chave** (`holidays`): `date` (`DATE`, única), `name`. Usados no cálculo de prazo/SLA das requisições.
+
+**Endpoints** ([holidays.controller.ts](../../backend/src/holidays/holidays.controller.ts)): `POST /holidays` (`request_category:create`, auditoria `create_holiday`), `GET /holidays` (`request_category:read`), `DELETE /holidays/:id` (`request_category:create`, auditoria `delete_holiday`). Não há edição.
+
+**Eventos de outbox** (desde 2026-11-08, mesma transação): `holiday.created` com `holiday_id`, `date` (`AAAA-MM-DD`), `name`, `active: true`; `holiday.deleted` com os mesmos campos, `active: false` e `deleted: true`. `holiday.updated` (mesmo payload do `created`) só sai no **Reenviar cadastros**, porque não há edição de feriado.
 
 ## 7. Colaboradores
 
@@ -200,10 +219,12 @@ O seed também cria: setor `ADM` (código legado em texto), cargo `Administrador
 
 | Evento | Quando | Payload |
 |---|---|---|
-| `collaborator.created` | criação | estado: `collaborator_id`, `name`, `status`, `sector_id`, `cost_center_id`, `job_title_id`, `job_title_name`, `admission_date` (`AAAA-MM-DD` ou `null`) |
-| `collaborator.updated` | `PUT` | o mesmo estado + `changed_fields` (chaves do corpo) |
-| `collaborator.offboarded` | `POST /:id/offboard`; `PUT` que muda o status para `desligado` | `collaborator_id`, `offboarded_at` |
+| `collaborator.created` | criação | estado completo (abaixo) |
+| `collaborator.updated` | `PUT` | o estado completo + `changed_fields` (chaves do corpo) |
+| `collaborator.offboarded` | `POST /:id/offboard`; `PUT` que muda o status para `desligado` | o estado completo (com `status: desligado`, `active: false`) + `offboarded_at` |
 | `collaborator.cost_center_changed` | criação com CC, troca de CC, desligamento, reativação com CC | `collaborator_id`, `name`, `job_title_id`, `job_title_name`, `previous_cost_center_id` (ou `null`), `cost_center_id` (`null` no desligamento ou ao limpar), `valid_from` (`AAAA-MM-DD`) |
+
+Estado completo ([collaborators.service.ts](../../backend/src/collaborators/collaborators.service.ts) `collaboratorStatePayload`): `collaborator_id`, `name`, `status`, `active` (`status != desligado`; férias e afastado continuam `true`), `sector_id`, `cost_center_id`, `job_title_id`, `job_title_name`, `job_title_is_technician`, `admission_date` (`AAAA-MM-DD` ou `null`), `email` (corporativo), `matricula`, `phone`, `yellow_badge`, `supervisor_id`, `management_level`. Os campos de `email` em diante e `active` existem desde 2026-11-08 (onda V1). No desligamento pela tela, `collaborator.updated` e `collaborator.offboarded` saem juntos e os dois dizem `desligado`/`active: false`, então a ordem de chegada não importa. Dados sensíveis (CPF, RG, CTPS, PIS, endereço, CNH) não vão nos eventos.
 
 O planning previa flags de provisionamento no `collaborator.created`; não estão no payload.
 
@@ -225,24 +246,29 @@ O planning previa flags de provisionamento no `collaborator.created`; não estã
 
 ## 9. Clientes
 
-**Campos-chave** (`clients`): `code` (inteiro único, gerado), `legal_name`, `cnpj` (único, opcional, até 18 caracteres), `contacts` (JSON), `address` (JSON).
+**Campos-chave** (`clients`): `code` (inteiro único, gerado), `legal_name` (razão social, obrigatória), `trade_name` (nome fantasia), `cnpj` (único, opcional, até 18 caracteres), `phone`, `email`, e o endereço em colunas: `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state` (UF). Nome fantasia, contato e endereço existem desde 2026-11-08 (migração `20261125000000_clientes_dados_cadastrais`) e são opcionais. `contacts` e `address` (JSON) são legados, sem campo na tela.
 
 **Regras** ([clients.service.ts](../../backend/src/clients/clients.service.ts)):
 
 - `code = nextval('client_code_seq')` (`START 100 INCREMENT 100`) → `100`, `200`, `300`…
 - Exclusão com projetos vinculados → `409`.
-- CNPJ não tem validação de dígito verificador nem de formato no backend.
+- CNPJ não tem validação de dígito verificador nem de formato no backend. CNPJ repetido → `409` (`A client with this CNPJ already exists`).
+- Validação: `email` precisa ser e-mail válido; `cep` no formato `00000-000` ou `00000000`; `address_state` com 2 letras (gravada em maiúsculas).
+- Campos opcionais aceitam `null`, que limpa o valor na edição; campo ausente no `PUT` não é alterado. A tela manda campo vazio como `null` (antes, CNPJ vazio ia como `''`).
 
 **Divergências e lacunas:**
 
-- `contacts` é tipado como lista no DTO, mas validado com `@IsObject()`, que no class-validator **rejeita arrays**: enviar uma lista de contatos resulta em `400`. A UI não exercita isso, porque o formulário só tem razão social e CNPJ — contatos e endereço não são editáveis pela tela.
+- `contacts` (legado) é tipado como lista no DTO, mas validado com `@IsObject()`, que no class-validator **rejeita arrays**: enviar uma lista de contatos resulta em `400`. A UI não usa esse campo (telefone e e-mail ficam nas colunas próprias).
 - Sem auditoria em criação/edição/exclusão.
 
 **Endpoints:** `POST /clients` (`client:create`), `GET /clients`, `GET /clients/:id` (`client:read`), `PUT /clients/:id` (`client:update`), `DELETE /clients/:id` (`client:delete`).
 
-**Eventos de outbox:** `client.created` (`client_id`, `code`); `client.updated` (`client_id`, `changed_fields`).
+**Eventos de outbox** (mesma transação da escrita; estado completo desde 2026-11-08, antes só `client_id`/`code`/`changed_fields`):
 
-**Frontend:** `/clients`, `/clients/new`, `/clients/:id/edit`. A edição do cliente tem a seção **Sites** (§9.1).
+- `client.created` e `client.updated` ([clients.service.ts](../../backend/src/clients/clients.service.ts) `clientEventPayload`): `client_id`, `code` (número), `name` (= razão social), `legal_name`, `trade_name`, `cnpj`, `phone`, `email`, `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `active` (`true`; cliente não tem inativação). `client.updated` leva também `changed_fields` (chaves do corpo).
+- `client.deleted` (exclusão, desde 2026-11-08): `client_id`, `code`, `active: false`, `deleted: true`. Exclusão recusada (`409`) não emite.
+
+**Frontend:** `/clients` (lista com razão social, nome fantasia, CNPJ, cidade/UF, telefone e e-mail), `/clients/new`, `/clients/:id/edit`. O formulário tem as seções Dados do cliente, Contato e Endereço; ao completar os 8 dígitos do CEP (ou sair do campo), a tela consulta o ViaCEP direto do navegador e preenche logradouro, bairro, cidade e UF (o "complemento" do ViaCEP é a faixa de numeração da rua e não é copiado), que continuam editáveis. CEP não encontrado ou ViaCEP fora do ar mostram aviso para preencher à mão. Telefone aceita fixo `(00) 0000-0000` e celular `(00) 00000-0000`. A edição do cliente tem a seção **Sites** (§9.1).
 
 ### 9.1 Sites
 
@@ -457,12 +483,12 @@ Linha do tempo **Cotação → Aprovado → Requisição de envio → Obra no Fi
 | Edição de projeto | prevista na convenção de formulário | sem rota de edição no frontend |
 | `cost_centers.responsible_collaborator_id` | não existe | existe (schema, DTO, tela) |
 | Dados sensíveis criptografados | CPF, RG, CTPS, PIS, ASO | CPF, RG, CTPS, PIS; ASO, CNH, telefone e endereço em texto puro |
-| Eventos `user.*` | `user.created/updated/disabled` | não emitidos |
+| Eventos `user.*` | `user.created/updated/disabled` | emitidos desde 2026-11-08 (§1) |
 | Desligamento | `POST /collaborators/:id/offboard` | existe, mas a UI usa `PUT` com `status = desligado` |
 | Permissões | — | `collaborator:delete` seedada sem rota |
 | `users.collaborator_id` | nullable (contas de serviço) | nullable no schema, mas obrigatório no DTO de criação |
 | Auditoria | criação de usuário, troca de role, (des)ativação | implementada para usuários e colaboradores; ausente em papéis, setores, CCs, cargos, jornadas, certificações, clientes e projetos |
-| Contatos/endereço de cliente | JSON editável | sem campo na tela; `contacts` em lista é rejeitado pela validação |
+| Contatos/endereço de cliente | JSON editável | substituídos por colunas próprias (telefone, e-mail, endereço) com campo na tela; os JSON `contacts`/`address` ficaram como legado |
 
 ## 12. Não verificado
 

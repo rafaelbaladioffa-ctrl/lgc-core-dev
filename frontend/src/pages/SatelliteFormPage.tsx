@@ -1,88 +1,137 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { AppLayout } from '../components/layout/AppLayout';
-import { FormSection, sectionStyle } from '../components/layout/FormPage';
-import { integrationApi, type CreateSatelliteInput, type CreateSatelliteResult } from '../api/integration';
-import { translateApiError } from '../utils/apiError';
+import { FormPage, FormSection } from '../components/layout/FormPage';
+import { Button } from '../components/Button';
+import { EventSubscriptionPicker } from '../components/EventSubscriptionPicker';
+import {
+  integrationApi,
+  type CreateSatelliteInput,
+  type CreateSatelliteResult,
+  type EventTypeInfo,
+  type SatelliteDetail,
+} from '../api/integration';
+import { extractApiMessages } from '../utils/apiError';
+import '../styles/satellite-form.css';
 
 const emptyForm: CreateSatelliteInput = { name: '', webhookUrl: '', subscribedEvents: [] };
 
-const EVENT_TYPES = [
-  'collaborator.created',
-  'collaborator.updated',
-  'collaborator.offboarded',
-  'client.created',
-  'client.updated',
-  'project.created',
-  'project.status_changed',
-  'ticket.created',
-  'ticket.status_changed',
-  'ticket.escalated',
-];
-
+/**
+ * Cadastro de satélite (`/integrations/new`) e edição da assinatura de um satélite já cadastrado
+ * (`/integrations/:id/edit`). Os eventos vêm do catálogo do Core (`GET /integration/event-types`).
+ */
 export function SatelliteFormPage() {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const editing = Boolean(id);
   const [form, setForm] = useState<CreateSatelliteInput>(emptyForm);
+  const [satellite, setSatellite] = useState<SatelliteDetail | null>(null);
+  const [catalog, setCatalog] = useState<EventTypeInfo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreateSatelliteResult | null>(null);
 
-  const toggleEvent = (eventType: string) => {
-    setForm((f) => ({
-      ...f,
-      subscribedEvents: f.subscribedEvents.includes(eventType)
-        ? f.subscribedEvents.filter((e) => e !== eventType)
-        : [...f.subscribedEvents, eventType],
-    }));
-  };
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([integrationApi.eventTypes(), id ? integrationApi.get(id) : Promise.resolve(null)])
+      .then(([types, existing]) => {
+        if (cancelled) return;
+        setCatalog(types);
+        if (existing) {
+          setSatellite(existing);
+          setForm((f) => ({ ...f, subscribedEvents: existing.subscribedEvents }));
+        }
+        setLoadError(null);
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(extractApiMessages(err, 'Não foi possível carregar os eventos do Core.')[0]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    if (form.subscribedEvents.length === 0) {
+      setError('Escolha ao menos um evento.');
+      return;
+    }
     try {
-      setCreated(await integrationApi.create(form));
+      if (id) {
+        await integrationApi.updateSubscriptions(id, form.subscribedEvents);
+        navigate('/integrations');
+      } else {
+        setCreated(await integrationApi.create(form));
+      }
     } catch (err) {
-      setError(translateApiError(err, 'Erro ao registrar satélite.'));
+      setError(extractApiMessages(err, editing ? 'Não foi possível salvar a assinatura.' : 'Erro ao registrar satélite.').join(' '));
     }
   };
 
+  const breadcrumb = ['Axis', 'Integrações', editing ? `Assinatura de ${satellite?.name ?? 'satélite'}` : 'Novo satélite'];
+
   if (created) {
     return (
-      <AppLayout breadcrumb={['Axis', 'Integrações', 'Novo satélite']}>
-        <div style={{ ...sectionStyle, maxWidth: 520 }}>
-          <p style={{ fontSize: 13, color: 'var(--danger)', fontWeight: 600 }}>
-            Guarde estas credenciais agora — elas não serão mostradas novamente.
-          </p>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>API Key</label>
-          <code style={{ display: 'block', padding: 8, background: 'var(--bg)', borderRadius: 6, marginBottom: 10, wordBreak: 'break-all' }}>
-            {created.apiKey}
-          </code>
-          <label style={{ fontSize: 12, color: 'var(--text-muted)' }}>HMAC Secret</label>
-          <code style={{ display: 'block', padding: 8, background: 'var(--bg)', borderRadius: 6, wordBreak: 'break-all' }}>{created.hmacSecret}</code>
-          <button
-            onClick={() => navigate('/integrations')}
-            style={{
-              marginTop: 16,
-              width: '100%',
-              background: 'var(--accent)',
-              color: 'var(--accent-contrast)',
-              border: 'none',
-              borderRadius: 6,
-              padding: '9px',
-              fontWeight: 600,
-            }}
-          >
-            Entendi, fechar
-          </button>
+      <AppLayout breadcrumb={breadcrumb}>
+        <div className="satellite-credentials">
+          <FormSection title={`Credenciais de ${created.name}`}>
+            <p className="satellite-credentials-warning">Guarde estas credenciais agora — elas não serão mostradas novamente.</p>
+            <label>API Key</label>
+            <code>{created.apiKey}</code>
+            <label>HMAC Secret</label>
+            <code>{created.hmacSecret}</code>
+            <Button variant="primary" className="satellite-credentials-close" onClick={() => navigate('/integrations')}>
+              Entendi, fechar
+            </Button>
+          </FormSection>
         </div>
       </AppLayout>
     );
   }
 
+  if (loadError) {
+    return (
+      <AppLayout breadcrumb={breadcrumb}>
+        <p role="alert" className="satellite-form-error">
+          {loadError}
+        </p>
+        <Button variant="secondary" onClick={() => navigate('/integrations')}>
+          Voltar para Integrações
+        </Button>
+      </AppLayout>
+    );
+  }
+
   return (
-    <AppLayout breadcrumb={['Axis', 'Integrações', 'Novo satélite']}>
-      <form onSubmit={onSubmit} style={{ maxWidth: 520 }}>
-        <FormSection title="Dados do satélite">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <FormPage
+      breadcrumb={breadcrumb}
+      onSubmit={onSubmit}
+      onCancel={() => navigate('/integrations')}
+      error={error}
+      loading={loading}
+      submitLabel={editing ? 'Salvar assinatura' : 'Registrar satélite'}
+      maxWidth={960}
+    >
+      <FormSection title="Dados do satélite">
+        {satellite ? (
+          <dl className="satellite-form-summary">
+            <dt>Nome</dt>
+            <dd>{satellite.name}</dd>
+            <dt>Webhook</dt>
+            <dd>
+              <code>{satellite.webhookUrl}</code>
+            </dd>
+            <dt>Frontend</dt>
+            <dd>{satellite.frontendUrl ?? '—'}</dd>
+          </dl>
+        ) : (
+          <div className="satellite-form-fields">
             <input placeholder="Nome do satélite" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
             <input placeholder="URL do webhook" value={form.webhookUrl} onChange={(e) => setForm({ ...form, webhookUrl: e.target.value })} required />
             <input
@@ -90,39 +139,20 @@ export function SatelliteFormPage() {
               value={form.frontendUrl ?? ''}
               onChange={(e) => setForm({ ...form, frontendUrl: e.target.value || undefined })}
             />
-            <div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Eventos inscritos</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {EVENT_TYPES.map((eventType) => (
-                  <label key={eventType} style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <input type="checkbox" checked={form.subscribedEvents.includes(eventType)} onChange={() => toggleEvent(eventType)} />
-                    {eventType}
-                  </label>
-                ))}
-              </div>
-            </div>
           </div>
-        </FormSection>
+        )}
+      </FormSection>
 
-        {error && <p style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</p>}
-
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            type="submit"
-            disabled={form.subscribedEvents.length === 0}
-            style={{ background: 'var(--accent)', color: 'var(--accent-contrast)', border: 'none', borderRadius: 6, padding: '10px 20px', fontWeight: 600 }}
-          >
-            Registrar satélite
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate('/integrations')}
-            style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '10px 20px' }}
-          >
-            Cancelar
-          </button>
-        </div>
-      </form>
-    </AppLayout>
+      <FormSection title="Eventos assinados">
+        <p className="satellite-form-hint">
+          O satélite recebe no webhook só os eventos marcados. A mudança vale também para os eventos ainda pendentes de entrega.
+        </p>
+        <EventSubscriptionPicker
+          catalog={catalog}
+          selected={form.subscribedEvents}
+          onChange={(subscribedEvents) => setForm((f) => ({ ...f, subscribedEvents }))}
+        />
+      </FormSection>
+    </FormPage>
   );
 }

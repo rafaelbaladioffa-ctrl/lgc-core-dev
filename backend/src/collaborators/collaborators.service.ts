@@ -30,18 +30,54 @@ type CollaboratorWithRelations = Collaborator & {
 
 const WITH_RELATIONS = { jobTitle: true, workSchedule: true, costCenter: true } as const;
 
-/** Estado do colaborador em `collaborator.created/updated` (docs/integracao-centros-de-custo.md §2). */
-export function collaboratorStatePayload(c: CollaboratorWithRelations): Record<string, unknown> {
+/** Campos que o payload lê: basta o colaborador com o cargo (o reenvio de cadastros não carrega as outras relações). */
+type CollaboratorStateSource = Pick<
+  Collaborator,
+  | 'id'
+  | 'fullName'
+  | 'status'
+  | 'sectorId'
+  | 'costCenterId'
+  | 'jobTitleId'
+  | 'admissionDate'
+  | 'corporateEmail'
+  | 'matricula'
+  | 'phone'
+  | 'yellowBadge'
+  | 'supervisorId'
+  | 'managementLevel'
+> & { jobTitle: Pick<JobTitle, 'name' | 'isTechnician'> };
+
+/**
+ * Estado completo do colaborador em `collaborator.created`, `collaborator.updated` e `collaborator.offboarded`
+ * (este último acrescenta `offboarded_at`). Quem recebe pode substituir o cache inteiro; `active` é
+ * `status != desligado`, então `updated` e `offboarded` dizem o mesmo no desligamento, em qualquer ordem
+ * de chegada. Contrato: docs/dominio/cadastros.md e docs/mapa-interoperabilidade.md §6.
+ */
+export function collaboratorStatePayload(c: CollaboratorStateSource): Record<string, unknown> {
   return {
     collaborator_id: c.id,
     name: c.fullName,
     status: c.status,
+    active: c.status !== 'desligado',
     sector_id: c.sectorId,
     cost_center_id: c.costCenterId,
     job_title_id: c.jobTitleId,
     job_title_name: c.jobTitle.name,
+    job_title_is_technician: c.jobTitle.isTechnician,
     admission_date: dateOnly(c.admissionDate),
+    email: c.corporateEmail,
+    matricula: c.matricula,
+    phone: c.phone,
+    yellow_badge: c.yellowBadge,
+    supervisor_id: c.supervisorId,
+    management_level: c.managementLevel,
   };
+}
+
+/** `collaborator.offboarded`: o estado completo (status desligado, `active: false`) mais a data do desligamento. */
+export function collaboratorOffboardedPayload(c: CollaboratorStateSource & Pick<Collaborator, 'offboardedAt'>): Record<string, unknown> {
+  return { ...collaboratorStatePayload(c), offboarded_at: c.offboardedAt };
 }
 
 export interface CostCenterAllocationView {
@@ -286,7 +322,7 @@ export class CollaboratorsService {
       });
       if (offboarding) {
         await this.closeAllocationOnOffboard(tx, result);
-        await this.outbox.record(tx, 'collaborator.offboarded', { collaborator_id: result.id, offboarded_at: result.offboardedAt });
+        await this.outbox.record(tx, 'collaborator.offboarded', collaboratorOffboardedPayload(result));
       } else if (reactivating) {
         if (nextCostCenterId) await this.openAllocation(tx, result, null, nextCostCenterId, dto.costCenterEffectiveFrom ?? saoPauloToday());
       } else if (costCenterChanged && nextStatus !== 'desligado') {
@@ -368,10 +404,7 @@ export class CollaboratorsService {
         data: { status: 'desligado', offboardedAt: new Date() },
         include: WITH_RELATIONS,
       });
-      await this.outbox.record(tx, 'collaborator.offboarded', {
-        collaborator_id: result.id,
-        offboarded_at: result.offboardedAt,
-      });
+      await this.outbox.record(tx, 'collaborator.offboarded', collaboratorOffboardedPayload(result));
       if (collaborator.status !== 'desligado') await this.closeAllocationOnOffboard(tx, result);
       return result;
     });

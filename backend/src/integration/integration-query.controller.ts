@@ -1,16 +1,38 @@
-import { Controller, ForbiddenException, Get, NotFoundException, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
+import { BadRequestException, Controller, ForbiddenException, Get, NotFoundException, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { Throttle } from '@nestjs/throttler';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SatelliteApiKeyGuard, type SatelliteRequest } from './guards/satellite-api-key.guard.js';
 import { PROJECT_DOCUMENT_EVENT, contentDisposition } from '../projects/project-documents.service.js';
 import { SatelliteThrottlerGuard } from './guards/satellite-throttler.guard.js';
-import type { CollaboratorStatus } from '@prisma/client';
+import type { CollaboratorStatus, Prisma, UserStatus } from '@prisma/client';
 
 function paginate(page?: string, perPage?: string) {
   const pageNum = Math.max(1, Number(page) || 1);
   const perPageNum = Math.min(200, Math.max(1, Number(perPage) || 50));
   return { skip: (pageNum - 1) * perPageNum, take: perPageNum, page: pageNum, perPage: perPageNum };
+}
+
+const USER_SELECT = {
+  id: true,
+  email: true,
+  status: true,
+  collaboratorId: true,
+  userRoles: { select: { role: { select: { name: true } } } },
+} as const satisfies Prisma.UserSelect;
+
+/** Formato de `users/:id` e `users`: `roles` são os nomes dos papéis; `collaborator_id` liga ao colaborador. */
+function userView(user: Prisma.UserGetPayload<{ select: typeof USER_SELECT }>) {
+  return { id: user.id, email: user.email, status: user.status, collaborator_id: user.collaboratorId, roles: user.userRoles.map((ur) => ur.role.name) };
+}
+
+/** `AAAA-MM-DD` opcional da query → Date (coluna `DATE`, meia-noite UTC). Valor inválido responde 400. */
+function dateParam(name: string, value?: string): Date | undefined {
+  if (!value) return undefined;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || Number.isNaN(Date.parse(`${value}T00:00:00Z`))) {
+    throw new BadRequestException(`Parâmetro ${name} inválido: use AAAA-MM-DD.`);
+  }
+  return new Date(`${value}T00:00:00Z`);
 }
 
 /**
@@ -54,12 +76,57 @@ export class IntegrationQueryController {
 
   @Get('users/:id')
   async getUser(@Param('id') id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      select: { id: true, email: true, status: true, userRoles: { select: { role: { select: { name: true } } } } },
-    });
+    const user = await this.prisma.user.findUnique({ where: { id }, select: USER_SELECT });
     if (!user) throw new NotFoundException('User not found');
-    return { id: user.id, email: user.email, status: user.status, roles: user.userRoles.map((ur) => ur.role.name) };
+    return userView(user);
+  }
+
+  /** Usuários de acesso (sem o usuário técnico do sistema), por e-mail. `status` filtra `active`/`disabled`. */
+  @Get('users')
+  async listUsers(
+    @Query('status') status?: UserStatus,
+    @Query('page') page?: string,
+    @Query('per_page') perPage?: string,
+  ) {
+    const { skip, take, page: p, perPage: pp } = paginate(page, perPage);
+    const where: Prisma.UserWhereInput = { status, NOT: { collaborator: { isSystem: true } } };
+    const [rows, total] = await Promise.all([
+      this.prisma.user.findMany({ where, orderBy: { email: 'asc' }, skip, take, select: USER_SELECT }),
+      this.prisma.user.count({ where }),
+    ]);
+    return { data: rows.map(userView), meta: { page: p, per_page: pp, total } };
+  }
+
+  @Get('job-titles')
+  async listJobTitles(@Query('page') page?: string, @Query('per_page') perPage?: string) {
+    const { skip, take, page: p, perPage: pp } = paginate(page, perPage);
+    const [data, total] = await Promise.all([
+      this.prisma.jobTitle.findMany({ orderBy: { name: 'asc' }, skip, take, select: { id: true, name: true, isTechnician: true } }),
+      this.prisma.jobTitle.count(),
+    ]);
+    return { data, meta: { page: p, per_page: pp, total } };
+  }
+
+  /** Feriados do Core; `from` e `to` (`AAAA-MM-DD`, inclusivos) limitam o período. `date` sai em `AAAA-MM-DD`. */
+  @Get('holidays')
+  async listHolidays(
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+    @Query('page') page?: string,
+    @Query('per_page') perPage?: string,
+  ) {
+    const { skip, take, page: p, perPage: pp } = paginate(page, perPage);
+    const gte = dateParam('from', from);
+    const lte = dateParam('to', to);
+    const where: Prisma.HolidayWhereInput = gte || lte ? { date: { gte, lte } } : {};
+    const [rows, total] = await Promise.all([
+      this.prisma.holiday.findMany({ where, orderBy: { date: 'asc' }, skip, take }),
+      this.prisma.holiday.count({ where }),
+    ]);
+    return {
+      data: rows.map((h) => ({ id: h.id, date: h.date.toISOString().slice(0, 10), name: h.name })),
+      meta: { page: p, per_page: pp, total },
+    };
   }
 
   @Get('clients/:id')
@@ -199,9 +266,14 @@ export class IntegrationQueryController {
       id: true,
       fullName: true,
       corporateEmail: true,
+      matricula: true,
+      phone: true,
+      yellowBadge: true,
+      jobTitleId: true,
       jobTitle: { select: { name: true, isTechnician: true } },
       sectorId: true,
       supervisorId: true,
+      managementLevel: true,
       status: true,
     } as const;
   }

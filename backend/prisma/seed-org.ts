@@ -22,11 +22,13 @@ import { PrismaService } from '../dist/prisma/prisma.service.js';
 import { SectorsService } from '../dist/sectors/sectors.service.js';
 import { CostCentersService } from '../dist/cost-centers/cost-centers.service.js';
 import { JobTitlesService } from '../dist/job-titles/job-titles.service.js';
+import { OutboxService } from '../dist/integration/outbox.service.js';
 
 const prisma = new PrismaService();
 const sectorsService = new SectorsService(prisma);
-const costCentersService = new CostCentersService(prisma);
-const jobTitlesService = new JobTitlesService(prisma);
+const outbox = new OutboxService();
+const costCentersService = new CostCentersService(prisma, outbox);
+const jobTitlesService = new JobTitlesService(prisma, outbox);
 
 const ROOT_SECTORS = [
   'Diretoria',

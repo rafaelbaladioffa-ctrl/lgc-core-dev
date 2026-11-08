@@ -108,18 +108,27 @@ não custa nada além da consulta.
 
 ## 6. Core: reenvio dos cadastros (carga inicial do satélite)
 
-O Core só emite `cost_center.*`, `collaborator.*` e `site.*` quando o cadastro muda. Um satélite que passa a assinar esses eventos depois que os cadastros já existem fica com o cache vazio. No Financeiro, isso aparece como "Nenhum centro de custo visível".
+O Core só emite os eventos de cadastro (`cost_center.*`, `collaborator.*`, `client.*`, `site.*`, `project.*`, `user.*`, `job_title.*`, `holiday.*`) quando o cadastro muda. Um satélite que passa a assinar esses eventos depois que os cadastros já existem fica com o cache vazio. No Financeiro, isso aparece como "Nenhum centro de custo visível".
 
 `POST /api/v1/integration/satellites/resync-master-data` (permissão `integration:manage`, auditado como `resync_master_data`), que na tela é o botão **Integrações → Reenviar cadastros**, grava no outbox, numa única transação:
 
 - `cost_center.updated` para cada centro de custo, com o mesmo payload do §1 e `active: true`;
 - `collaborator.updated` para cada colaborador, com o estado do §2;
 - `collaborator.cost_center_changed` para cada alocação **vigente**, com `previous_cost_center_id: null` e o `valid_from` da alocação;
-- `site.updated` para cada site de cliente (ativo ou não), com o estado completo ([cadastros.md §9.1](dominio/cadastros.md#91-sites)); desde 2026-11-08.
+- `client.updated` para cada cliente, com o estado completo ([cadastros.md §9](dominio/cadastros.md#9-clientes)), sem `changed_fields`; desde 2026-11-08 (onda V1). Sai antes dos sites e projetos;
+- `site.updated` para cada site de cliente (ativo ou não), com o estado completo ([cadastros.md §9.1](dominio/cadastros.md#91-sites)); desde 2026-11-08;
+- `project.updated` para cada projeto (qualquer status), com o estado completo de `project.*` ([cadastros.md §10](dominio/cadastros.md#10-projetos)); desde 2026-11-08 (onda V1);
+- `user.updated` para cada usuário ativo e `user.disabled` para cada desativado, com o payload de [cadastros.md §1](dominio/cadastros.md#1-usuários-login); o usuário técnico "Axis (automático)" fica de fora; desde 2026-11-08 (onda V1);
+- `job_title.updated` para cada cargo ([cadastros.md §5](dominio/cadastros.md#5-cargos)); desde 2026-11-08 (onda V1);
+- `holiday.updated` para cada feriado ([cadastros.md §6.1](dominio/cadastros.md#61-feriados)); desde 2026-11-08 (onda V1).
+
+Colaboradores e usuários do sistema (`is_system`) não são reenviados. O colaborador vai com o estado completo da onda V1 (`active`, `email`, `matricula`, `supervisor_id`, `management_level`, `job_title_is_technician`…): um desligado chega com `status: desligado` e `active: false`, então o reenvio não reativa ninguém em quem lê `active` ou `status`.
+
+A transação do reenvio aceita até 120 s (o padrão de 5 s não basta para a base inteira, um insert no outbox por cadastro).
 
 Os eventos vão a todos os satélites inscritos em cada tipo. Quem recebe trata como atualização, e reenviar de novo não duplica nada: o Financeiro substitui a alocação aberta que começa na mesma data. O histórico de alocações já encerradas não é reenviado.
 
-Resposta: `{ "costCenters": n, "collaborators": n, "allocations": n, "sites": n }`.
+Resposta: `{ "costCenters": n, "collaborators": n, "allocations": n, "sites": n, "clients": n, "projects": n, "users": n, "jobTitles": n, "holidays": n }`. A tela mostra todas as contagens na mensagem de confirmação.
 
 ## 7. Field → Financeiro: horas reais por técnico e projeto
 

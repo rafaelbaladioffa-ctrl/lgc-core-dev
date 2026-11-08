@@ -4,16 +4,37 @@ export interface Client {
   id: string;
   code: number;
   legalName: string;
+  tradeName: string | null;
   cnpj: string | null;
+  phone: string | null;
+  email: string | null;
+  cep: string | null;
+  addressStreet: string | null;
+  addressNumber: string | null;
+  addressComplement: string | null;
+  addressDistrict: string | null;
+  addressCity: string | null;
+  addressState: string | null;
+  /** Legado: JSON livre, sem campo na tela. */
   contacts: Array<{ name: string; phone?: string; email?: string }> | null;
+  /** Legado: JSON livre, sem campo na tela. */
   address: Record<string, unknown> | null;
 }
 
+/** Campos opcionais: `null` limpa o valor na edição. */
 export interface CreateClientInput {
   legalName: string;
-  cnpj?: string;
-  contacts?: Array<{ name: string; phone?: string; email?: string }>;
-  address?: Record<string, unknown>;
+  tradeName?: string | null;
+  cnpj?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  cep?: string | null;
+  addressStreet?: string | null;
+  addressNumber?: string | null;
+  addressComplement?: string | null;
+  addressDistrict?: string | null;
+  addressCity?: string | null;
+  addressState?: string | null;
 }
 
 export const clientsApi = {

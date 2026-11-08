@@ -36,7 +36,17 @@ export function ClientsPage() {
       filterable: true,
       filterValue: (c) => c.legalName,
     },
+    { key: 'tradeName', header: 'Nome fantasia', render: (c) => c.tradeName ?? '—', filterable: true, filterValue: (c) => c.tradeName ?? '' },
     { key: 'cnpj', header: 'CNPJ', render: (c) => c.cnpj ?? '—', filterable: true, filterValue: (c) => c.cnpj ?? '' },
+    {
+      key: 'city',
+      header: 'Cidade/UF',
+      render: (c) => (c.addressCity ? `${c.addressCity}${c.addressState ? `/${c.addressState}` : ''}` : '—'),
+      filterable: true,
+      filterValue: (c) => `${c.addressCity ?? ''} ${c.addressState ?? ''}`,
+    },
+    { key: 'phone', header: 'Telefone', render: (c) => c.phone ?? '—' },
+    { key: 'email', header: 'E-mail', render: (c) => c.email ?? '—', filterable: true, filterValue: (c) => c.email ?? '' },
   ];
 
   return (
