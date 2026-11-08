@@ -264,7 +264,7 @@ Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado
 
 **Endpoints** ([sites.controller.ts](../../backend/src/sites/sites.controller.ts)): `GET /sites` (filtros `?clientId=` e `?active=true|false`) e `GET /sites/:id` (`site:read`), `POST /sites` (`site:create`, auditado como `create_site`), `PUT /sites/:id` (`site:update`, auditado como `update_site`).
 
-**Permissões:** `site:read`, `site:create`, `site:update` (não existe `site:delete`). A migração `20261126000000_sites` e o [seed.ts](../../backend/prisma/seed.ts) dão cada uma aos papéis que já têm a permissão equivalente de clientes: `admin` (todas) e `gestor` (`site:read`, pois só tem `client:read`).
+**Permissões:** `site:read`, `site:create`, `site:update` (não existe `site:delete`). A migração `20261126000001_sites` e o [seed.ts](../../backend/prisma/seed.ts) dão cada uma aos papéis que já têm a permissão equivalente de clientes: `admin` (todas) e `gestor` (`site:read`, pois só tem `client:read`).
 
 **Eventos de outbox** (mesma transação da escrita; estado completo em todos): `site.created` e `site.updated` (este traz também `changed_fields`), com `site_id`, `client_id`, `code`, `name`, `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`, `longitude`, `active`. Inativar vai como `site.updated` com `active: false`. O botão **Integrações → Reenviar cadastros** também reenvia todos os sites como `site.updated` ([integracao-centros-de-custo.md §6](../integracao-centros-de-custo.md#6-core-reenvio-dos-cadastros-carga-inicial-do-satélite)).
 
@@ -398,7 +398,7 @@ equipe por função, **lista de materiais** com código, descrição, unidade e 
 
 ## 12. Não verificado
 
-- Drift das tabelas `bpm_*` (ver [arquitetura.md](../arquitetura.md)). `migrate deploy` em banco vazio foi exercitado em 2026-11-08 num banco `_test` e aplicou todas as migrações, inclusive `20261126000000_sites`, sem diferença para o schema.
+- Drift das tabelas `bpm_*` (ver [arquitetura.md](../arquitetura.md)). `migrate deploy` em banco vazio foi exercitado em 2026-11-08 num banco `_test` e aplicou todas as migrações, inclusive `20261126000001_sites`, sem diferença para o schema.
 - Se o `OutboxDispatcherService` entrega os eventos acima a satélites reais em produção.
 - Testes automatizados: não há testes de backend nem de frontend cobrindo os cadastros (só `test/a24-auth-refresh-password.e2e-spec.ts` cobre refresh/troca de senha). Exceção: sites e o site do projeto têm testes de serviço com Prisma simulado (`sites.service.spec.ts`, `projects.service.spec.ts`).
 - Sites: o trecho de permissões da migração foi testado no banco `_test` (concede aos papéis certos e reaplicar não duplica). **Não** foram exercitados com HTTP real nem no navegador: `/sites`, `/integration/sites`, o `PermissionsGuard` nas rotas novas e as telas (seção Sites do cliente, formulário do site, seletor no projeto).
