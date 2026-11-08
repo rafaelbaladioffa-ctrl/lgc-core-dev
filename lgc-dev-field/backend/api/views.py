@@ -271,6 +271,16 @@ class RegistryViewSet(CSVExportImportMixin, viewsets.ModelViewSet):
             queryset = queryset.order_by(ordering)
         return self.apply_client_scope(queryset)
 
+    def perform_destroy(self, instance):
+        # MI-02: cadastro casado com o Axis Core é inativado/excluído no Core (voltaria no próximo evento).
+        from rest_framework.exceptions import ValidationError
+
+        from core.axis_lock import is_axis_linked
+
+        if is_axis_linked(instance):
+            raise ValidationError({"detail": "Mantido no Axis Core: inative ou exclua este cadastro no Core."})
+        super().perform_destroy(instance)
+
     def apply_client_scope(self, queryset):
         user = self.request.user
         if self.client_scope_mode == "client":

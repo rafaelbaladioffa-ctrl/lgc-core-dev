@@ -1,7 +1,8 @@
 import json
 
 from django import forms
-from django.contrib import admin
+from django.contrib import admin, messages
+from django.contrib.admin.utils import unquote
 from django.contrib.admin.widgets import AutocompleteSelect
 from django.db import models
 from django.template.response import TemplateResponse
@@ -17,11 +18,13 @@ from .access_scope import (
     user_can_access_category,
 )
 from .admin_mixins import CSVImportExportMixin, SelectablePageSizeAdminMixin
+from .axis_lock import PERSON_FIELDS, is_axis_linked, model_locked_fields
 from .models import (
     Category,
     Client,
     Collaborator,
     Company,
+    Holiday,
     JobTitle,
     Notification,
     Person,
@@ -93,6 +96,26 @@ class CompanyAdmin(DenyClientScopedAdminMixin, CSVImportExportMixin, PhoneMaskAd
     readonly_fields = ("created_at", "updated_at")
 
 
+class AxisLockedAdminMixin:
+    """MI-02: no registro casado com o Axis Core os campos que o Core manda (`core/axis_lock.py`) ficam somente
+    leitura, com o aviso "Mantido no Axis Core". Registro sem vínculo continua editável."""
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = tuple(super().get_readonly_fields(request, obj))
+        return fields + tuple(f for f in model_locked_fields(obj) if f not in fields)
+
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        if request.method == "GET":
+            obj = self.get_object(request, unquote(object_id))
+            if is_axis_linked(obj):
+                self.message_user(
+                    request,
+                    "Mantido no Axis Core: os dados que vêm do Core estão bloqueados aqui e devem ser alterados no Core.",
+                    messages.INFO,
+                )
+        return super().change_view(request, object_id, form_url, extra_context)
+
+
 class CompanyScopedAdmin(CSVImportExportMixin, PhoneMaskAdminMixin, SelectablePageSizeAdminMixin, ModelAdmin):
     list_filter = ("company", "is_active")
     readonly_fields = ("created_at", "updated_at")
@@ -106,7 +129,7 @@ class RegionAdmin(ModelAdmin):
 
 
 @admin.register(Site)
-class SiteAdmin(CSVImportExportMixin, PhoneMaskAdminMixin, SelectablePageSizeAdminMixin, ModelAdmin):
+class SiteAdmin(AxisLockedAdminMixin, CSVImportExportMixin, PhoneMaskAdminMixin, SelectablePageSizeAdminMixin, ModelAdmin):
     change_list_template = "admin/core/site/change_list.html"
 
     def get_queryset(self, request):
@@ -272,6 +295,10 @@ class CollaboratorAdminForm(forms.ModelForm):
             self.fields["phone"].initial = person.phone
             self.fields["company"].initial = person.company_id
             self.fields["user"].initial = person.user_id
+        if self.instance and self.instance.axis_collaborator_id:
+            for name in PERSON_FIELDS:  # MI-02: nome, e-mail e telefone vêm do Axis Core
+                self.fields[name].disabled = True
+                self.fields[name].help_text = "Mantido no Axis Core."
 
     def save(self, commit=True):
         instance = super().save(commit=False)
@@ -296,7 +323,7 @@ class CollaboratorAdminForm(forms.ModelForm):
 
 
 @admin.register(Collaborator)
-class CollaboratorAdmin(DenyClientScopedAdminMixin, CSVImportExportMixin, PhoneMaskAdminMixin, SelectablePageSizeAdminMixin, ModelAdmin):
+class CollaboratorAdmin(AxisLockedAdminMixin, DenyClientScopedAdminMixin, CSVImportExportMixin, PhoneMaskAdminMixin, SelectablePageSizeAdminMixin, ModelAdmin):
     form = CollaboratorAdminForm
     list_display = ("registration", "yellow_badge", "person_name", "job_title", "manager", "person_company", "person_email", "is_active")
     list_filter = ("person__company", "is_active")
@@ -339,7 +366,7 @@ class CollaboratorAdmin(DenyClientScopedAdminMixin, CSVImportExportMixin, PhoneM
 
 
 @admin.register(JobTitle)
-class JobTitleAdmin(DenyClientScopedAdminMixin, CompanyScopedAdmin):
+class JobTitleAdmin(AxisLockedAdminMixin, DenyClientScopedAdminMixin, CompanyScopedAdmin):
     list_display = ("name", "company", "is_active", "updated_at")
     search_fields = ("name", "description")
 
@@ -605,7 +632,7 @@ class TaskAdmin(DenyClientScopedAdminMixin, CSVImportExportMixin, SelectablePage
 
 
 @admin.register(Client)
-class ClientAdmin(CompanyScopedAdmin):
+class ClientAdmin(AxisLockedAdminMixin, CompanyScopedAdmin):
     list_display = ("legal_name", "trade_name", "tax_id", "company", "city", "state", "is_active")
     list_filter = ("company", "person_type", "state", "is_active")
     search_fields = ("legal_name", "trade_name", "tax_id", "email", "phone")
@@ -684,6 +711,20 @@ class ResponsibleClientInline(TabularInline):
 
 
 ClientAdmin.inlines = (ResponsibleClientInline,)
+
+
+@admin.register(Holiday)
+class HolidayAdmin(DenyClientScopedAdminMixin, ModelAdmin):
+    """Feriados do Axis Core (contagem de dias úteis do Painel de Sites). Os que vêm do Core ficam só leitura."""
+
+    list_display = ("date", "name", "is_active", "axis_holiday_id")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    readonly_fields = ("axis_holiday_id", "created_at", "updated_at")
+
+    def get_readonly_fields(self, request, obj=None):
+        fields = tuple(super().get_readonly_fields(request, obj))
+        return fields + (("date", "name", "is_active") if obj is not None and obj.axis_holiday_id else ())
 
 
 @admin.register(Notification)

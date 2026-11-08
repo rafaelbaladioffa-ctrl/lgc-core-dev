@@ -6,11 +6,12 @@ from django.utils import timezone
 
 from . import handlers
 from .api_client import ID_KEYS, RESOURCES, AxisApiClient, AxisApiError, AxisApiNotFound, normalize_core_row
-from .matching import link_record, pick
+from .apply import sync_record
+from .matching import LINKED, pick
 from .models import AxisMasterRecord
 
-# Ordem importa: o site só casa depois do cliente.
-DEFAULT_RESOURCES = ["clients", "collaborators", "users", "projects", "cost-centers", "sites"]
+# Ordem importa: o site só casa depois do cliente; o colaborador usa o cargo; o usuário vem depois do colaborador.
+DEFAULT_RESOURCES = ["job-titles", "clients", "collaborators", "users", "projects", "cost-centers", "sites", "holidays"]
 
 
 def _snapshot_active(kind: str, data: dict, current: bool) -> bool:
@@ -36,7 +37,7 @@ def store_snapshot(kind: str, row: dict, fetched_at) -> AxisMasterRecord | None:
     newer_event = record.source_occurred_at and record.source_occurred_at > fetched_at
     record.data = {**data, **(record.data or {})} if newer_event else {**(record.data or {}), **data}
     merged = record.data
-    record.code = str(pick(merged, "code", "short_code", default=record.code or ""))[:100]
+    record.code = str(pick(merged, "code", "short_code", "matricula", "date", default=record.code or ""))[:100]
     record.name = str(pick(merged, "name", "full_name", "legal_name", default=record.name or ""))[:255]
     if not newer_event:
         record.active = _snapshot_active(kind, data, record.active)
@@ -46,24 +47,25 @@ def store_snapshot(kind: str, row: dict, fetched_at) -> AxisMasterRecord | None:
 
 
 def run_sync(resources=None, client: AxisApiClient | None = None, log=lambda message: None) -> dict:
-    """Baixa os cadastros do Core, guarda no cache e casa o que for possível. Não apaga nada.
+    """Baixa os cadastros do Core, guarda no cache, casa, cria o que falta (MI-01) e aplica os campos do Core. Não apaga nada.
 
-    Devolve `{recurso: {"lidos": n, "vinculados": n} | {"erro": texto}}`. Recurso inexistente no Core (ex.: `sites`
+    Devolve `{recurso: {"lidos": n, "vinculados": n, "criados": n} | {"erro": texto}}`. Recurso inexistente no Core (ex.: `sites`
     antes do PT-01 entrar no ar) vira "indisponível" e não interrompe os demais."""
     client = client or AxisApiClient()
     summary = {}
     for resource in resources or DEFAULT_RESOURCES:
         kind = RESOURCES[resource]
         fetched_at = timezone.now()
-        read = linked = 0
+        read = linked = created = 0
         try:
             for row in client.iter_all(resource):
                 record = store_snapshot(kind, row, fetched_at)
                 if record is None:
                     continue
                 read += 1
-                _obj, result = link_record(record)
-                linked += result == "linked"
+                _obj, result = sync_record(record)
+                linked += result in (LINKED, "created")
+                created += result == "created"
         except AxisApiNotFound:
             summary[resource] = {"indisponivel": True}
             log(f"{resource}: indisponível no Core (rota não encontrada).")
@@ -72,6 +74,6 @@ def run_sync(resources=None, client: AxisApiClient | None = None, log=lambda mes
             summary[resource] = {"erro": str(exc)}
             log(f"{resource}: {exc}")
             continue
-        summary[resource] = {"lidos": read, "vinculados": linked}
-        log(f"{resource}: {read} lidos, {linked} com vínculo.")
+        summary[resource] = {"lidos": read, "vinculados": linked, "criados": created}
+        log(f"{resource}: {read} lidos, {linked} com vínculo ({created} criados no Field).")
     return summary

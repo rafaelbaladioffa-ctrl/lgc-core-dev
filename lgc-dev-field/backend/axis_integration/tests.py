@@ -174,7 +174,8 @@ class ClientMatchingTests(WebhookBase):
         self.assertEqual(response.status_code, 200)
         field_client.refresh_from_db()
         self.assertEqual(str(field_client.axis_client_id), axis_id)
-        self.assertEqual(field_client.legal_name, "Razão Social Antiga")  # dado de negócio não é sobrescrito
+        self.assertEqual(field_client.legal_name, "Outro Nome Ltda")  # MI-02: o Core manda nos campos dele
+        self.assertEqual(Client.objects.count(), 1)  # casou, não criou
 
     def test_evento_magro_do_core_e_completado_pela_api_de_consulta(self):
         field_client = self.make_client(tax_id="12.345.678/0001-90")
@@ -207,13 +208,12 @@ class ClientMatchingTests(WebhookBase):
 
     def test_sem_cnpj_casa_por_nome_normalizado(self):
         field_client = self.make_client(legal_name="Açaí & Filhos S.A.", tax_id="")
+        self.assertNotEqual(normalize_name("ACAI e FILHOS LTDA"), normalize_name(field_client.legal_name))  # "&" ≠ "e"
         axis_id = str(uuid.uuid4())
-        self.post("client.updated", {"client_id": axis_id, "name": "ACAI e FILHOS LTDA"})
-        field_client.refresh_from_db()
-        self.assertIsNone(field_client.axis_client_id)  # "&" vs "e" não é o mesmo nome: sem par
         self.post("client.updated", {"client_id": axis_id, "name": "acai filhos"})
         field_client.refresh_from_db()
         self.assertEqual(str(field_client.axis_client_id), axis_id)
+        self.assertEqual(Client.objects.count(), 1)
 
     def test_nome_ambiguo_fica_sem_vinculo_e_aparece_no_relatorio(self):
         self.make_client(legal_name="Cliente Repetido Ltda", tax_id="")
@@ -225,10 +225,13 @@ class ClientMatchingTests(WebhookBase):
         self.assertEqual([r["axis_id"] for r in report["core_without_field"]["client"]], [axis_id])
         self.assertEqual(len(report["field_without_core"]["client"]), 2)
 
-    def test_cliente_sem_par_nao_cria_nem_apaga_nada(self):
+    def test_cliente_sem_par_e_criado_na_empresa_padrao_sem_mexer_nos_outros(self):
         existing = self.make_client(tax_id="99.999.999/0001-99")
-        self.post("client.created", {"client_id": str(uuid.uuid4()), "name": "Cliente Novo", "cnpj": "11222333000181"})
-        self.assertEqual(Client.objects.count(), 1)
+        axis_id = str(uuid.uuid4())
+        self.post("client.created", {"client_id": axis_id, "name": "Cliente Novo", "cnpj": "11222333000181"})
+        self.assertEqual(Client.objects.count(), 2)
+        created = Client.objects.get(axis_client_id=axis_id)
+        self.assertEqual((created.legal_name, created.tax_id, created.company), ("Cliente Novo", "11.222.333/0001-81", self.company))
         existing.refresh_from_db()
         self.assertIsNone(existing.axis_client_id)
 
@@ -277,7 +280,7 @@ class CollaboratorTests(WebhookBase):
         collaborator.refresh_from_db()
         self.assertEqual(str(collaborator.axis_collaborator_id), axis_id)
 
-    def test_desligamento_so_marca_o_cache_e_nao_mexe_no_colaborador_do_field(self):
+    def test_desligamento_inativa_o_colaborador_do_field(self):
         collaborator = self.make_collaborator(email="a@lgc.com.br")
         axis_id = str(uuid.uuid4())
         self.post("collaborator.created", {"collaborator_id": axis_id, "name": "A", "email": "a@lgc.com.br",
@@ -286,7 +289,8 @@ class CollaboratorTests(WebhookBase):
                   occurred_at=timezone.now() + timedelta(seconds=1))
         self.assertFalse(AxisMasterRecord.objects.get(axis_id=axis_id).active)
         collaborator.refresh_from_db()
-        self.assertTrue(collaborator.is_active)
+        self.assertFalse(collaborator.is_active)  # MI-02: desligado no Core = inativo no Field
+        self.assertEqual(collaborator.axis_status, "desligado")
         self.assertEqual(str(collaborator.axis_collaborator_id), axis_id)
 
     def test_centro_de_custo_que_chega_antes_do_vinculo_e_aplicado_ao_casar(self):
@@ -317,7 +321,10 @@ class SiteTests(WebhookBase):
         other.refresh_from_db()
         self.assertEqual(str(site.axis_site_id), payload["site_id"])
         self.assertIsNone(other.axis_site_id)
-        self.assertEqual(site.name, "GRU 53")  # nome e endereço do Field não são sobrescritos
+        self.assertEqual(site.name, "GRU53 Hortolândia")  # MI-02: nome e endereço vêm do Core
+        self.assertEqual(site.code, "GRU53")
+        self.assertTrue(site.manual_coordinates)  # coordenada do Core: a geocodificação não sobrescreve
+        self.assertEqual(Site.objects.count(), 2)
 
     def test_site_sem_cliente_fica_sem_vinculo_e_casa_quando_o_cliente_chegar(self):
         client = self.make_client(tax_id="12.345.678/0001-90")
@@ -349,7 +356,8 @@ class SiteTests(WebhookBase):
         self.post("site.created", self.site_payload(client_axis))
         wrong.refresh_from_db()
         self.assertIsNone(wrong.axis_site_id)
-        self.assertEqual(mine.sites.count(), 0)
+        self.assertEqual(wrong.name, "de outro cliente")
+        self.assertEqual(mine.sites.count(), 1)  # MI-01: o site do Core é criado no cliente certo
 
 
 class ProjectAndCostCenterTests(WebhookBase):
@@ -442,11 +450,12 @@ class AxisSyncCommandTests(WebhookBase):
         user.refresh_from_db()
         self.assertEqual(str(user.axis_user_id), u_id)
         self.assertEqual(str(Site.objects.get(code="GRU53").axis_site_id), s_id)
-        self.assertIn("Só no Core", output)
         self.assertIn("Só no Field", output)
         self.assertIn("Sem cliente", output)
         self.assertIn("cliente do site sem par no Field", output)
-        self.assertEqual(Client.objects.count(), 2)  # nada criado nem apagado
+        # MI-01: o cliente que só existia no Core foi criado; nada foi apagado
+        self.assertEqual(Client.objects.count(), 3)
+        self.assertTrue(Client.objects.filter(legal_name="Só no Core", axis_client_id__isnull=False).exists())
 
     def test_recurso_indisponivel_no_core_nao_interrompe_os_demais(self):
         fake = self.FakeClient({"clients": [{"id": str(uuid.uuid4()), "legalName": "A", "cnpj": "1"}]}, missing={"sites"})

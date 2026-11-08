@@ -22,6 +22,11 @@ import Modal from "../ui/Modal";
 import Pagination from "../ui/Pagination";
 import { FilterTh, useColumnFilters } from "../ui/ColumnFilter";
 
+/** Registro casado com o Axis Core (MI-02): não é excluído nem inativado no Field. */
+function isAxisLinked(row: Record<string, unknown>): boolean {
+  return Array.isArray(row.axis_locked_fields) && row.axis_locked_fields.length > 0;
+}
+
 type ApiErrors = Record<string, string[]>;
 
 /** Painel de CRUD genérico e reutilizável — tabela/busca/paginação/
@@ -331,10 +336,16 @@ export default function EntityCrudPanel({
   }
 
   async function handleDelete(row: Record<string, unknown>) {
-    if (!canDelete) return;
+    if (!canDelete || isAxisLinked(row)) return;
     const label = entity.rowLabel(row as never);
     if (!window.confirm(t.crud.excluirConfirm(label))) return;
-    await entity.api.remove(row.id as number);
+    try {
+      await entity.api.remove(row.id as number);
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } };
+      window.alert(axiosErr.response?.data?.detail || t.crud.erroExcluir);
+      return;
+    }
     reload();
   }
 
@@ -401,7 +412,11 @@ export default function EntityCrudPanel({
     }
   }
 
-  const fields = refsLoaded ? entity.fields(refs) : [];
+  // MI-02: no registro casado com o Axis Core, o backend diz quais campos vêm do Core (axis_locked_fields).
+  const lockedFields = editingId && Array.isArray(formValues.axis_locked_fields) ? (formValues.axis_locked_fields as string[]) : [];
+  const fields = (refsLoaded ? entity.fields(refs) : []).map((field) =>
+    lockedFields.includes(field.name) ? { ...field, disabled: true } : field,
+  );
 
   return (
     <div>
@@ -560,7 +575,11 @@ export default function EntityCrudPanel({
                                 <Icon name="playlist_add_check" style={{ fontSize: 14 }} />
                               </button>
                             )}
-                          {entity.disableHardDelete
+                          {isAxisLinked(row) ? (
+                            <span className="btn btn-outline btn-sm" title={t.crud.mantidoNoCore} aria-label={t.crud.mantidoNoCore}>
+                              <Icon name="cloud_sync" style={{ fontSize: 14 }} />
+                            </span>
+                          ) : entity.disableHardDelete
                             ? canChange && (
                                 <button
                                   className="btn btn-outline btn-sm"
@@ -644,6 +663,19 @@ export default function EntityCrudPanel({
           onClose={() => setModalOpen(false)}
           width={620}
         >
+          {lockedFields.length > 0 && (
+            <div
+              role="note"
+              style={{ background: "var(--blue-soft)", color: "var(--blue)", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 12 }}
+            >
+              <strong>{t.crud.mantidoNoCore}.</strong> {t.crud.mantidoNoCoreAviso}
+              {Boolean(formValues.axis_status) && (
+                <div style={{ marginTop: 4 }}>
+                  {t.crud.situacaoNoCore}: {String(formValues.axis_status)}
+                </div>
+              )}
+            </div>
+          )}
           <DynamicForm
             fields={fields}
             values={formValues}

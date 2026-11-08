@@ -16,6 +16,8 @@ RESOURCES = {
     "projects": "project",
     "cost-centers": "cost_center",
     "sites": "site",
+    "job-titles": "job_title",
+    "holidays": "holiday",
 }
 
 
@@ -27,6 +29,8 @@ ID_KEYS = {
     "project": "project_id",
     "cost_center": "cost_center_id",
     "site": "site_id",
+    "job_title": "job_title_id",
+    "holiday": "holiday_id",
 }
 # Dados pessoais de contato do cliente não são necessários para o casamento e não ficam no cache.
 DROP_KEYS = {"client": {"contacts", "address"}}
@@ -42,6 +46,17 @@ def normalize_core_row(kind: str, row: dict) -> dict:
     data = {_snake(k): v for k, v in row.items() if k not in drop}
     if "id" in data:
         data[ID_KEYS[kind]] = data.pop("id")
+    if kind == "collaborator" and isinstance(data.get("job_title"), dict):
+        # `collaborators` devolve o cargo aninhado; o evento usa `job_title_name`/`job_title_is_technician`.
+        job_title = data.pop("job_title")
+        data.setdefault("job_title_name", job_title.get("name"))
+        data.setdefault("job_title_is_technician", job_title.get("isTechnician", job_title.get("is_technician")))
+        if job_title.get("id"):
+            data.setdefault("job_title_id", job_title["id"])
+    if kind == "user" and "roles" in data and isinstance(data["roles"], list):
+        data["roles"] = [r if isinstance(r, str) else (r or {}).get("name", "") for r in data["roles"]]
+    if kind == "holiday" and isinstance(data.get("date"), str):
+        data["date"] = data["date"][:10]  # o Prisma devolve `@db.Date` como ISO com hora
     return data
 
 

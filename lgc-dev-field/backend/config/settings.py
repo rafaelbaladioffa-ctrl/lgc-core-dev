@@ -299,6 +299,9 @@ AXIS_WEBHOOK_MAX_AGE_HOURS = int(os.getenv("AXIS_WEBHOOK_MAX_AGE_HOURS") or 72)
 AXIS_API_URL = os.getenv("AXIS_API_URL", "").rstrip("/")
 AXIS_API_KEY = os.getenv("AXIS_API_KEY", "")
 AXIS_API_TIMEOUT = int(os.getenv("AXIS_API_TIMEOUT") or 15)
+# Empresa do Field em que entram os clientes, cargos e colaboradores criados a partir do Core (MI-01). Vazia = a
+# primeira empresa ativa (o Core é unidade única, A3).
+AXIS_DEFAULT_COMPANY_ID = int(os.getenv("AXIS_DEFAULT_COMPANY_ID") or 0) or None
 
 # --- Field -> Core (PT-08; docs/integracao-core-field.md §5) --------------------------------
 # Segredo com que o Field assina os eventos `field.project.*` (X-Field-Signature = HMAC-SHA256 do corpo).

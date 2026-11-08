@@ -52,6 +52,8 @@ class AxisMasterRecord(models.Model):
     KIND_PROJECT = "project"
     KIND_COST_CENTER = "cost_center"
     KIND_SITE = "site"
+    KIND_JOB_TITLE = "job_title"
+    KIND_HOLIDAY = "holiday"
     KIND_CHOICES = (
         (KIND_CLIENT, "Cliente"),
         (KIND_COLLABORATOR, "Colaborador"),
@@ -59,6 +61,8 @@ class AxisMasterRecord(models.Model):
         (KIND_PROJECT, "Projeto"),
         (KIND_COST_CENTER, "Centro de custo"),
         (KIND_SITE, "Site"),
+        (KIND_JOB_TITLE, "Cargo"),
+        (KIND_HOLIDAY, "Feriado"),
     )
 
     kind = models.CharField("tipo", max_length=20, choices=KIND_CHOICES)

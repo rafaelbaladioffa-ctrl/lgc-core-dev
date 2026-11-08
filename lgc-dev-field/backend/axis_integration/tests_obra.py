@@ -176,6 +176,26 @@ class ProjectApprovedWebhookTests(ObraBase):
         self.assertTrue(project.axis_pending_issues)
 
     @core_settings()
+    def test_cliente_site_e_responsavel_criados_pelos_eventos_do_core_ficam_na_obra_sem_pendencia(self):
+        """MI-01: cliente, site e técnico novos no Core são criados no Field, e a obra já nasce com eles."""
+        later = timezone.now() + timedelta(seconds=1)
+        self.post("client.created", {"client_id": self.client_id, "code": 9, "name": "Cliente Novo SA",
+                                     "legal_name": "Cliente Novo SA", "cnpj": "11222333000181", "active": True})
+        self.post("site.created", {"site_id": self.site_id, "client_id": self.client_id, "code": "GRU53",
+                                   "name": "GRU53", "latitude": -22.9, "longitude": -47.1, "active": True})
+        self.post("collaborator.created", {
+            "collaborator_id": self.collab_id, "name": "Gestora Nova", "status": "ativo", "email": "gestora@lgc.test",
+            "matricula": "M-55", "job_title_id": str(uuid.uuid4()), "job_title_name": "Coordenadora",
+            "management_level": "coordenador", "job_title_is_technician": False, "supervisor_id": None, "active": True,
+        })
+        with self.captureOnCommitCallbacks(execute=False):
+            self.post("project.approved", self.approved_payload(), occurred_at=later)
+        project = Project.objects.get(axis_project_id=self.project_id)
+        self.assertEqual(project.client.axis_client_id, uuid.UUID(self.client_id))
+        self.assertEqual(project.site.axis_site_id, uuid.UUID(self.site_id))
+        self.assertTrue(all("Cliente" not in issue and "Site" not in issue for issue in project.axis_pending_issues))
+
+    @core_settings()
     def test_site_de_outro_cliente_vira_pendencia(self):
         world = self.make_world()
         other = self.make_client(legal_name="Outro Cliente SA")

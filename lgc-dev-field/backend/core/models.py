@@ -194,6 +194,9 @@ class Site(TimestampedModel):
 class JobTitle(ActiveCompanyModel):
     name = models.CharField("nome", max_length=100, blank=True)
     description = models.TextField("descrição", blank=True)
+    axis_job_title_id = models.UUIDField(
+        "id do cargo no Axis", null=True, blank=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
 
     class Meta:
         verbose_name = "cargo"
@@ -204,7 +207,12 @@ class JobTitle(ActiveCompanyModel):
                 fields=("company", "name"),
                 condition=~models.Q(name=""),
                 name="unique_job_title_name_per_company",
-            )
+            ),
+            models.UniqueConstraint(
+                fields=("company", "axis_job_title_id"),
+                condition=models.Q(axis_job_title_id__isnull=False),
+                name="unique_axis_job_title_per_company",
+            ),
         ]
 
     def __str__(self):
@@ -342,6 +350,11 @@ class Collaborator(TimestampedModel):
     axis_cost_center_id = models.UUIDField(
         "centro de custo no Axis", null=True, blank=True, editable=False, help_text="Centro de custo vigente no Axis Core (cache)."
     )
+    axis_status = models.CharField(
+        "situação no Axis", max_length=20, blank=True, editable=False,
+        help_text="Situação do colaborador no Axis Core (ativo, ferias, afastado, desligado). Só informativo: o Core não "
+        "manda as datas de férias/afastamento, então nenhuma ausência é criada a partir dela.",
+    )
     is_active = models.BooleanField("ativo", default=True)
 
     class Meta:
@@ -380,6 +393,34 @@ class Collaborator(TimestampedModel):
                 errors["yellow_badge"] = "Já existe um colaborador com este Yellow Badge nesta empresa."
         if errors:
             raise ValidationError(errors)
+
+
+class Holiday(TimestampedModel):
+    """Feriado do calendário do Axis Core (evento `holiday.*` e `manage.py axis_sync`).
+
+    O dono é o Core: o Field só guarda a cópia para contar dias úteis (Painel de Sites). Feriado excluído no Core
+    fica inativo aqui, não é apagado."""
+
+    date = models.DateField("data")
+    name = models.CharField("nome", max_length=150, blank=True)
+    is_active = models.BooleanField("ativo", default=True)
+    axis_holiday_id = models.UUIDField(
+        "id do feriado no Axis", null=True, blank=True, unique=True, editable=False, help_text="Vínculo com o cadastro do Axis Core (integração)."
+    )
+
+    class Meta:
+        verbose_name = "feriado"
+        verbose_name_plural = "feriados"
+        ordering = ("date",)
+        indexes = [models.Index(fields=("date",), name="core_holiday_date_idx")]
+
+    def __str__(self):
+        return f"{self.date:%d/%m/%Y} {self.name}".strip()
+
+
+def holiday_dates(start, end):
+    """Datas de feriado ativas entre `start` e `end` (inclusive), para a contagem de dias úteis."""
+    return set(Holiday.objects.filter(is_active=True, date__gte=start, date__lte=end).values_list("date", flat=True))
 
 
 class Responsible(TimestampedModel):

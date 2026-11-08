@@ -20,7 +20,7 @@ from projects.models import Project
 from users.models import User
 
 from . import field_events, sow_plan
-from .matching import link_record
+from .apply import sync_record
 from .models import AxisMasterRecord
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ def _date(value):
 
 
 def _linked(model, field, axis_id, kind):
-    """Objeto do Field com este id do Axis; se ainda não casou, tenta casar pelo cache e procura de novo."""
+    """Objeto do Field com este id do Axis; se ainda não casou, casa (ou cria, MI-01) pelo cache e procura de novo."""
     if axis_id is None:
         return None
     found = model.objects.filter(**{field: axis_id}).first()
@@ -49,7 +49,7 @@ def _linked(model, field, axis_id, kind):
         return found
     record = AxisMasterRecord.objects.filter(kind=kind, axis_id=axis_id).first()
     if record:
-        link_record(record)
+        sync_record(record)
         return model.objects.filter(**{field: axis_id}).first()
     return None
 

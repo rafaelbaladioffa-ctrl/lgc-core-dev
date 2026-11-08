@@ -2,6 +2,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
 from audit.models import AuditLog
+from core.axis_lock import LOCKED_MESSAGE, PERSON_FIELDS, locked_fields
 from core.access_scope import get_scope_for_user, scope_related_queryset
 from core.models import (
     Category,
@@ -101,6 +102,51 @@ class SiteSerializer(serializers.ModelSerializer):
 
 def _get_or_create_person(*, name="", email="", phone="", company=None):
     return get_or_create_person(name=name, email=email, phone=phone, company=company)
+
+
+def _same_value(current, incoming) -> bool:
+    if hasattr(current, "pk") or hasattr(incoming, "pk"):
+        return getattr(current, "pk", current) == getattr(incoming, "pk", incoming)
+    if isinstance(current, str) or isinstance(incoming, str):
+        return str(current or "").strip() == str(incoming or "").strip()
+    return current == incoming
+
+
+class AxisLockedFieldsMixin(serializers.Serializer):
+    """MI-02: registro casado com o Axis Core não aceita mudança nos campos que o Core manda
+    (`core/axis_lock.py`). Valor igual ao atual passa (o formulário manda o registro inteiro) e é descartado;
+    valor diferente é recusado com "Mantido no Axis Core". `axis_locked_fields` diz à tela o que bloquear."""
+
+    axis_locked_fields = serializers.SerializerMethodField()
+
+    def get_axis_locked_fields(self, obj):
+        return list(locked_fields(obj))
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        instance = self.instance
+        locked = locked_fields(instance) if instance is not None else ()
+        if not locked:
+            return attrs
+        errors = {}
+        is_collaborator = instance._meta.model_name == "collaborator"
+        for name in locked:
+            if is_collaborator and name in PERSON_FIELDS:
+                person_data = attrs.get("person") or {}
+                if name not in person_data:
+                    continue
+                if not _same_value(getattr(instance.person, name), person_data[name]):
+                    errors[name] = [LOCKED_MESSAGE]
+                person_data.pop(name)
+                continue
+            if name not in attrs:
+                continue
+            if not _same_value(getattr(instance, name), attrs[name]):
+                errors[name] = [LOCKED_MESSAGE]
+            attrs.pop(name)
+        if errors:
+            raise serializers.ValidationError(errors)
+        return attrs
 
 
 def _update_person_from_data(instance, person_data):
@@ -1344,19 +1390,22 @@ class ConsultimerProjectTypeCrudSerializer(serializers.ModelSerializer):
         return value
 
 
-class JobTitleCrudSerializer(serializers.ModelSerializer):
+class JobTitleCrudSerializer(AxisLockedFieldsMixin, serializers.ModelSerializer):
     company_name = serializers.SerializerMethodField()
 
     class Meta:
         model = JobTitle
-        fields = ("id", "company", "company_name", "name", "description", "is_active", "created_at", "updated_at")
-        read_only_fields = ("created_at", "updated_at")
+        fields = (
+            "id", "company", "company_name", "name", "description", "is_active", "created_at", "updated_at",
+            "axis_job_title_id", "axis_locked_fields",
+        )
+        read_only_fields = ("created_at", "updated_at", "axis_job_title_id")
 
     def get_company_name(self, obj):
         return str(obj.company) if obj.company_id else None
 
 
-class SiteCrudSerializer(ClientScopedRelationsMixin, serializers.ModelSerializer):
+class SiteCrudSerializer(AxisLockedFieldsMixin, ClientScopedRelationsMixin, serializers.ModelSerializer):
     client_name = serializers.SerializerMethodField()
     region_name = serializers.SerializerMethodField()
     region_code = serializers.CharField(source="region.code", read_only=True, default=None)
@@ -1368,8 +1417,9 @@ class SiteCrudSerializer(ClientScopedRelationsMixin, serializers.ModelSerializer
             "id", "client", "client_name", "name", "code", "address", "city", "state",
             "region", "region_name", "region_code", "country",
             "manual_coordinates", "latitude", "longitude", "is_active", "created_at", "updated_at",
+            "axis_site_id", "axis_locked_fields",
         )
-        read_only_fields = ("created_at", "updated_at")
+        read_only_fields = ("created_at", "updated_at", "axis_site_id")
 
     def get_client_name(self, obj):
         return str(obj.client) if obj.client_id else None
@@ -1378,7 +1428,7 @@ class SiteCrudSerializer(ClientScopedRelationsMixin, serializers.ModelSerializer
         return str(obj.region) if obj.region_id else None
 
 
-class ClientCrudSerializer(serializers.ModelSerializer):
+class ClientCrudSerializer(AxisLockedFieldsMixin, serializers.ModelSerializer):
     company_name = serializers.SerializerMethodField()
     number_code = serializers.CharField(read_only=True)
 
@@ -1387,8 +1437,9 @@ class ClientCrudSerializer(serializers.ModelSerializer):
         fields = (
             "id", "number", "number_code", "company", "company_name", "person_type", "legal_name", "trade_name", "tax_id",
             "email", "phone", "address", "city", "state", "notes", "is_active", "created_at", "updated_at",
+            "axis_client_id", "axis_locked_fields",
         )
-        read_only_fields = ("number", "created_at", "updated_at")
+        read_only_fields = ("number", "created_at", "updated_at", "axis_client_id")
 
     def get_company_name(self, obj):
         return str(obj.company) if obj.company_id else None
@@ -1438,7 +1489,7 @@ class ResponsibleCrudSerializer(ClientScopedRelationsMixin, serializers.ModelSer
         return super().update(instance, validated_data)
 
 
-class CollaboratorCrudSerializer(serializers.ModelSerializer):
+class CollaboratorCrudSerializer(AxisLockedFieldsMixin, serializers.ModelSerializer):
     name = serializers.CharField(source="person.name", required=False, allow_blank=True)
     email = serializers.EmailField(source="person.email", required=False, allow_blank=True)
     phone = serializers.CharField(source="person.phone", required=False, allow_blank=True)
@@ -1452,9 +1503,9 @@ class CollaboratorCrudSerializer(serializers.ModelSerializer):
         fields = (
             "id", "company", "company_name", "name", "registration", "yellow_badge", "job_title",
             "job_title_name", "email", "phone", "sites", "manager", "manager_name", "is_active",
-            "created_at", "updated_at",
+            "created_at", "updated_at", "axis_collaborator_id", "axis_status", "axis_locked_fields",
         )
-        read_only_fields = ("created_at", "updated_at")
+        read_only_fields = ("created_at", "updated_at", "axis_collaborator_id", "axis_status")
 
     def get_company_name(self, obj):
         return str(obj.person.company) if obj.person_id and obj.person.company_id else None

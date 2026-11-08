@@ -21,6 +21,8 @@ export interface FieldConfig {
   visibleIf?: (values: FormValues) => boolean;
   /** Mostra o valor em um campo desabilitado (gerado pelo sistema). */
   readOnly?: boolean;
+  /** Campo visível com o valor real, mas sem edição (ex.: "Mantido no Axis Core" no registro casado). */
+  disabled?: boolean;
 }
 
 export type FormValues = Record<string, unknown>;
@@ -74,6 +76,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
           className="input"
           style={{ height: 80 }}
           value={(value as string) ?? ""}
+          disabled={field.disabled}
           placeholder={field.placeholder}
           onChange={(e) => onChange(field.name, e.target.value)}
         />
@@ -81,7 +84,12 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
     case "checkbox":
       return (
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13.5, height: 38 }}>
-          <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(field.name, e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={Boolean(value)}
+            disabled={field.disabled}
+            onChange={(e) => onChange(field.name, e.target.checked)}
+          />
           {field.placeholder || t.form.ativo}
         </label>
       );
@@ -93,6 +101,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
           onChange={(v) => onChange(field.name, v === "" ? null : v)}
           placeholder={field.placeholder || t.form.selecione}
           clearable={!field.required}
+          disabled={field.disabled}
         />
       );
     case "multiselect": {
@@ -101,6 +110,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
         <SearchMultiSelect
           options={(field.options ?? []).map((opt) => ({ value: opt.value, label: opt.label }))}
           value={selected}
+          disabled={field.disabled}
           onChange={(next) => onChange(field.name, next.map((v) => (typeof v === "number" ? v : Number(v))))}
         />
       );
@@ -110,6 +120,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
         <input
           type="number"
           className="input"
+          disabled={field.disabled}
           value={value === null || value === undefined ? "" : String(value)}
           onChange={(e) => onChange(field.name, e.target.value === "" ? null : Number(e.target.value))}
         />
@@ -117,6 +128,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
     case "date":
       return (
         <DateInput
+          disabled={field.disabled}
           value={(value as string) ?? ""}
           onChange={(v) => onChange(field.name, v || null)}
         />
@@ -126,6 +138,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
         <input
           type="datetime-local"
           className="input"
+          disabled={field.disabled}
           value={(value as string) ?? ""}
           onChange={(e) => onChange(field.name, e.target.value || null)}
         />
@@ -135,6 +148,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
         <input
           type="email"
           className="input"
+          disabled={field.disabled}
           value={(value as string) ?? ""}
           placeholder={field.placeholder}
           onChange={(e) => onChange(field.name, e.target.value)}
@@ -146,6 +160,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
           type="text"
           inputMode="tel"
           className="input"
+          disabled={field.disabled}
           value={(value as string) ?? ""}
           placeholder={field.placeholder || "+55 (11) 99999-9999"}
           onChange={(e) => onChange(field.name, formatBrazilPhone(e.target.value))}
@@ -156,6 +171,7 @@ function renderInput(field: FieldConfig, value: unknown, onChange: (name: string
         <input
           type="text"
           className="input"
+          disabled={field.disabled}
           value={(value as string) ?? ""}
           placeholder={field.placeholder}
           onChange={(e) => onChange(field.name, e.target.value)}

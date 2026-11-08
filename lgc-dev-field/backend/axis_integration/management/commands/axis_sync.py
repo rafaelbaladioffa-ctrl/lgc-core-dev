@@ -12,9 +12,10 @@ KIND_LABELS = dict(AxisMasterRecord.KIND_CHOICES)
 
 class Command(BaseCommand):
     help = (
-        "Carga inicial dos cadastros do Axis Core (clientes, colaboradores, usuários, projetos, centros de custo e "
-        "sites) pela API de consulta, casamento com os registros do Field e relatório dos que ficaram sem par. "
-        "Não apaga nem sobrescreve dados de negócio do Field: só grava os vínculos axis_*_id."
+        "Carga inicial dos cadastros do Axis Core (cargos, clientes, colaboradores, usuários, projetos, centros de "
+        "custo, sites e feriados) pela API de consulta, casamento com os registros do Field, criação do que falta "
+        "(MI-01: cliente, site, cargo, técnico/gestor e feriado) e aplicação dos campos do Core aos registros "
+        "vinculados (MI-02). Usuário só é casado e espelha ativo/inativo. Não apaga nada."
     )
 
     def add_arguments(self, parser):
@@ -28,7 +29,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--report-only",
             action="store_true",
-            help="Não consulta o Core: reaplica o casamento ao cache e mostra o relatório dos registros sem par.",
+            help="Não consulta o Core: reaplica casamento, criação e campos do Core a partir do cache e mostra o "
+            "relatório dos registros sem par.",
         )
         parser.add_argument("--json", action="store_true", help="Relatório em JSON (para arquivo ou outra ferramenta).")
         parser.add_argument("--limit", type=int, default=50, help="Máximo de linhas por lista no relatório de texto.")
@@ -75,4 +77,7 @@ class Command(BaseCommand):
                 self.stdout.write(f"  - {row['label']}")
             if len(rows) > limit:
                 self.stdout.write(f"  … e mais {len(rows) - limit} (use --limit ou --json).")
-        self.stdout.write("\nNada foi apagado nem alterado além dos vínculos axis_*_id.")
+        self.stdout.write(
+            "\nNada foi apagado. Os registros vinculados receberam os campos do Core; o que é do Field (sites "
+            "atendidos, regional, observações) não foi alterado."
+        )
