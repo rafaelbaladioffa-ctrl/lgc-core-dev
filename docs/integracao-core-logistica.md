@@ -23,7 +23,8 @@ Fontes: `backend/src/auth`, `backend/src/integration`, `frontend/src/api/logisti
 - **Segredo compartilhado:** `JWT_SECRET` da Logística = `JWT_ACCESS_SECRET` do Core (HS256).
 - A Logística **ignora as permissões do token** e resolve as próprias pelos `roles`, via tabela
   `axis_role_to_logistics_role` (`lgc-dev-logistica/backend/src/rbac/catalog.ts`; o `admin` do Axis vira ADMIN_TECNICO,
-  ADMIN_CATALOGO e AUDITOR, este último para ler todas as ordens de atendimento), mais perfis
+  ADMIN_CATALOGO e AUDITOR: lê todas as ordens de atendimento, completa e reserva as que chegam sem almoxarifado e
+  cadastra almoxarifados), mais perfis
   e almoxarifados atribuídos por usuário.
 - **Login no PWA:** chama `POST {VITE_AXIS_URL}/auth/login` e `/auth/refresh` do Core por CORS. O
   Core precisa listar o domínio do PWA em `CORS_ALLOWED_ORIGINS`.

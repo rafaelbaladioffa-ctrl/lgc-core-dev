@@ -61,7 +61,9 @@ export const ROLES: Array<{ code: string; name: string; description: string; per
   { code: 'AUDITOR', name: 'Auditor', description: 'Leitura de documentos, movimentos e trilha, sem alteração', permissions: [...BASE_READ, 'material:read_cost', 'audit:read', 'rbac:read', 'warehouse:access_all', 'fulfillment:read', 'fulfillment:read_all', 'document:read', 'alert:read', 'dashboard:read', 'purchasing:read'] },
   { code: 'ADMIN_CATALOGO', name: 'Administrador de catálogo', description: 'Mantém materiais, almoxarifados, endereços e parâmetros', permissions: [...BASE_READ, 'material:write', 'material:read_cost', 'uom:write', 'policy:write', 'warehouse:write'] },
   // Administrador técnico: integrações e RBAC, sem acesso automático a operações restritas (seção 6).
-  { code: 'ADMIN_TECNICO', name: 'Administrador técnico', description: 'Configura integrações e acessos', permissions: ['material:set_code', 'uom:read', 'rbac:read', 'rbac:write', 'integration:configure', 'audit:read', 'fulfillment:create', 'alert:read', 'alert:manage', 'reconciliation:manage'] },
+  // Trata as ordens que chegam da integração: cria (fulfillment:create) e completa/reserva/cancela (fulfillment:manage),
+  // ex.: definir o almoxarifado de uma ordem que chegou sem ele. Separação, expedição e estoque continuam fora.
+  { code: 'ADMIN_TECNICO', name: 'Administrador técnico', description: 'Configura integrações e acessos', permissions: ['material:set_code', 'uom:read', 'rbac:read', 'rbac:write', 'integration:configure', 'audit:read', 'fulfillment:create', 'fulfillment:manage', 'alert:read', 'alert:manage', 'reconciliation:manage'] },
 ];
 
 /** Mapeamento inicial das roles do Axis (seed do core) → perfis de Logística; editável depois no banco. */

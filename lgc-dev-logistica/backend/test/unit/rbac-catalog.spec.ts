@@ -14,9 +14,13 @@ describe('mapeamento padrão das roles do Axis', () => {
     expect(permsOf('admin').has('warehouse:write')).toBe(true);
   });
 
-  it('a leitura não traz operação: admin continua sem reservar, cancelar, separar ou expedir', () => {
+  it('admin completa ordens vindas da integração: define almoxarifado, reserva e pede cancelamento', () => {
+    expect(permsOf('admin').has('fulfillment:manage')).toBe(true);
+  });
+
+  it('admin continua sem separar, expedir ou movimentar estoque', () => {
     const perms = permsOf('admin');
-    for (const p of ['fulfillment:manage', 'picking:execute', 'shipment:execute', 'stock:post', 'stock:adjust']) expect(perms.has(p)).toBe(false);
+    for (const p of ['picking:execute', 'shipment:execute', 'stock:post', 'stock:adjust']) expect(perms.has(p)).toBe(false);
   });
 
   it('todo perfil mapeado existe no catálogo', () => {

@@ -246,7 +246,7 @@ Exemplos de zonas:
 | Compras | consulta consumo, falta, reposição e recebimento associado ao pedido |
 | Auditor | leitura de documentos, movimentos e trilha sem alteração |
 | Administrador de catálogo | mantém materiais, almoxarifados, endereços e parâmetros em fluxo de aprovação |
-| Administrador técnico | configura integrações sem acesso automático a operações restritas |
+| Administrador técnico | configura integrações e trata as ordens vindas delas (definir almoxarifado, reservar, pedir cancelamento), sem acesso a separação, expedição ou estoque |
 
 Regras:
 
