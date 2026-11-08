@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ApiError, api, bindSession, hasPendingLauncherToken, loadSettings, saveSettings, takePendingLauncherToken, type Bootstrap, type Settings, type Warehouse } from './lib/api';
 import { LoginError, decodeJwt, exchangeLauncherToken, loginWithAxis, validateLogin } from './lib/auth';
 import { resolveCode, type Scanned } from './lib/codes';
@@ -88,6 +88,7 @@ export function App() {
   const [boot, setBoot] = useState<Bootstrap | null>(null);
   const [ops, setOps] = useState<QueueOp[]>([]);
   const [tab, setTab] = useState<Tab>('sep');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [msg, setMsg] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [whFilter, setWhFilter] = useState('');
@@ -171,63 +172,72 @@ export function App() {
     saveSettings(s); setSettings(s); setBoot(null);
   };
 
-  if (launching) return <main className="page"><p className="hint" role="status">Abrindo pelo Axis…</p></main>;
+  const goTab = (t: Tab) => { setTab(t); setMobileNavOpen(false); };
+
+  if (launching) return <AuthLayout><p className="hint" role="status">Abrindo pelo Axis…</p></AuthLayout>;
   if (!settings.token || expired) {
     return <Login settings={settings} expired={expired} notice={launchError} onLogin={(s) => { saveSettings(s); setSettings(s); setExpired(false); }} />;
   }
   if (!settings.warehouseId) {
     return (
-      <main className="page">
-        <h1>Selecione o almoxarifado</h1>
-        {whState === 'loading' && <p className="hint" role="status">Carregando almoxarifados…</p>}
-        {whState === 'error' && (
-          <div className="card" role="alert">
-            <p className="err">Não foi possível carregar os almoxarifados. Verifique a conexão (é necessária na primeira vez).</p>
-            <button className="btn" onClick={() => setWhReload((n) => n + 1)}>Tentar de novo</button>
-          </div>
-        )}
-        {whState === 'ready' && warehouses.length === 0 && (
-          <div className="card" role="status">
-            <strong>Nenhum almoxarifado disponível para o seu usuário.</strong>
-            <p className="hint">Peça ao administrador da Logística para liberar o seu acesso a um almoxarifado (Gestão de acessos) ou para cadastrar um.</p>
-            <p className="hint">Informe este identificador ao administrador: <code>{decodeJwt(settings.token)?.sub ?? '—'}</code></p>
-            <button className="btn ghost" onClick={() => setWhReload((n) => n + 1)}>Atualizar</button>
-          </div>
-        )}
-        {whState === 'ready' && warehouses.length > 0 && whFilter && warehouses.every((w) => !`${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())) && <p className="hint">Nenhum almoxarifado encontrado para essa busca.</p>}
-        <input className="inp" aria-label="Buscar almoxarifado" placeholder="Buscar por código ou nome" value={whFilter} onChange={(e) => setWhFilter(e.target.value)} />
-        {warehouses.filter((w) => `${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())).slice(0, 50).map((w) => <button key={w.id} className="btn block" onClick={() => { const s = { ...settings, warehouseId: w.id }; saveSettings(s); setSettings(s); }}>{w.code} — {w.name}</button>)}
-        <button className="btn ghost" onClick={logout}>Sair</button>
-      </main>
+      <AuthLayout wide>
+        <div className="axis-login__stack">
+          <h1>Selecione o almoxarifado</h1>
+          {whState === 'loading' && <p className="hint" role="status">Carregando almoxarifados…</p>}
+          {whState === 'error' && (
+            <div className="axis-alert axis-alert--danger" role="alert">
+              <p className="err">Não foi possível carregar os almoxarifados. Verifique a conexão (é necessária na primeira vez).</p>
+              <button className="btn block" onClick={() => setWhReload((n) => n + 1)}>Tentar de novo</button>
+            </div>
+          )}
+          {whState === 'ready' && warehouses.length === 0 && (
+            <div className="axis-alert" role="status">
+              <strong>Nenhum almoxarifado disponível para o seu usuário.</strong>
+              <p className="hint">Peça ao administrador da Logística para liberar o seu acesso a um almoxarifado (Gestão de acessos) ou para cadastrar um.</p>
+              <p className="hint">Informe este identificador ao administrador: <code>{decodeJwt(settings.token)?.sub ?? '—'}</code></p>
+              <button className="btn ghost" onClick={() => setWhReload((n) => n + 1)}>Atualizar</button>
+            </div>
+          )}
+          {whState === 'ready' && warehouses.length > 0 && whFilter && warehouses.every((w) => !`${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())) && <p className="hint">Nenhum almoxarifado encontrado para essa busca.</p>}
+          <input className="inp" aria-label="Buscar almoxarifado" placeholder="Buscar por código ou nome" value={whFilter} onChange={(e) => setWhFilter(e.target.value)} />
+          {warehouses.filter((w) => `${w.code} ${w.name}`.toLowerCase().includes(whFilter.toLowerCase())).slice(0, 50).map((w) => <button key={w.id} className="btn block" onClick={() => { const s = { ...settings, warehouseId: w.id }; saveSettings(s); setSettings(s); }}>{w.code} — {w.name}</button>)}
+          <button className="btn ghost" onClick={logout}>Sair</button>
+        </div>
+      </AuthLayout>
     );
   }
 
+  const visibleNav = NAV_ITEMS.filter((i) => !i.permission || perms === null || perms.includes(i.permission));
+  const roles = (decodeJwt(settings.token) as { roles?: string[] } | null)?.roles;
   return (
-    <div className="shell">
-      <header className="topbar">
-        <div className="topbar-brand">
-          <img src="/axis_logo_white.svg" alt="Axis" height={22} />
-          <span className="badge-app">Logística</span>
-        </div>
-        <div className="topbar-search"><input aria-label="Buscar" placeholder="Buscar..." /></div>
-        <div className="topbar-right">
-          <span className={`dot ${online ? 'on' : 'off'}`} title={online ? 'Online' : 'Offline'} />
-          <button className="chip" onClick={() => setTab('sync')} title="Notificações e pendências">🔔 {pending > 0 ? pending : ''}{problems > 0 ? ` · ${problems}!` : ''}</button>
-          <button className="chip" onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))} title="Alternar tema" aria-label="Alternar tema">{theme === 'light' ? '☾' : '☀'}</button>
-          <span className="avatar" title={settings.userEmail}>{initials(settings.userEmail)}</span>
+    <div className="axis-app-shell">
+      <header className="axis-app-topbar">
+        <div className="axis-app-topbar-brand"><img src="/brand-industrial/axis-logo-dark.svg" alt="Axis ERP + SGI" /></div>
+        <span className="axis-product-tag">Logística</span>
+        <button className="axis-mobile-nav-toggle" aria-label={mobileNavOpen ? 'Fechar menu' : 'Abrir menu'} aria-controls="axis-app-sidebar" aria-expanded={mobileNavOpen} onClick={() => setMobileNavOpen((open) => !open)}>{mobileNavOpen ? '×' : '☰'}</button>
+        <div className="axis-app-topbar-search"><input aria-label="Buscar" placeholder="Buscar..." /></div>
+        <div className="axis-app-topbar-actions">
+          <span className={`axis-badge ${online ? 'axis-badge--success' : 'axis-badge--warning'}`} role="status" title={online ? 'Online' : 'Offline: as leituras ficam salvas neste aparelho'}>{online ? 'Online' : 'Offline'}</span>
+          <button className={problems > 0 ? 'axis-topbar-button has-problem' : 'axis-topbar-button'} onClick={() => goTab('sync')} title="Notificações e pendências">🔔 {pending > 0 ? pending : ''}{problems > 0 ? ` · ${problems}!` : ''}</button>
+          <button className="axis-topbar-button" onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))} title="Alternar tema" aria-label="Alternar tema">{theme === 'light' ? '☾' : '☀'}</button>
+          <div className="axis-app-user" title={settings.userEmail}><span className="axis-app-avatar">{initials(settings.userEmail)}</span><div><strong>{settings.userEmail}</strong>{roles && roles.length > 0 && <small>{roles.join(', ')}</small>}</div></div>
+          <button className="axis-topbar-button axis-logout" onClick={logout}>Sair</button>
         </div>
       </header>
-      <div className="shell-body">
-        <aside className="sidebar">
+      <div className="axis-app-body">
+        <aside id="axis-app-sidebar" className={`axis-app-sidebar${mobileNavOpen ? ' axis-app-sidebar-open' : ''}`}>
           <nav aria-label="Menu">
-            {NAV_ITEMS.filter((i) => !i.permission || perms === null || perms.includes(i.permission)).map((i) => (
-              <button key={i.key} className={tab === i.key ? 'nav-item active' : 'nav-item'} onClick={() => setTab(i.key)}>
-                <span aria-hidden className="nav-ico">{i.icon}</span>{i.label}
+            {visibleNav.map((i) => (
+              <button key={i.key} aria-current={tab === i.key ? 'page' : undefined} onClick={() => goTab(i.key)}>
+                <span aria-hidden className="axis-nav-icon">{i.icon}</span>{i.label}
               </button>
             ))}
           </nav>
+          <div className="axis-sidebar-footer"><img src="/brand-industrial/axis-symbol.svg" alt="" /><span>Axis Logística</span></div>
         </aside>
-        <main className="page">
+        <div className="axis-app-content">
+        <nav className="axis-breadcrumb" aria-label="breadcrumb"><strong>Logística</strong><span>/</span><strong>{NAV_ITEMS.find((i) => i.key === tab)?.label}</strong></nav>
+        <main className="axis-app-main">
           <ErrorBoundary resetKey={tab}>
           {msg && <p className="notice" role="status">{msg}</p>}
           {tab === 'cat' && <Catalog warehouseId={settings.warehouseId} canWrite={perms?.includes('material:write') ?? false} canReadCost={perms?.includes('material:read_cost') ?? false} />}
@@ -246,12 +256,34 @@ export function App() {
           {tab === 'sync' && <SyncPanel ops={ops} syncing={syncing} onSync={sync} queue={queue} refresh={refreshOps} onChangeWarehouse={() => { const s = { ...settings, warehouseId: undefined }; saveSettings(s); setSettings(s); setBoot(null); }} onLogout={logout} email={settings.userEmail} />}
           </ErrorBoundary>
         </main>
+        </div>
       </div>
-      <nav className="tabs">
+      <nav className="tabs" aria-label="Atalhos">
         {NAV_ITEMS.filter((i) => !['pan', 'cat', 'est', 'rec', 'trf', 'dev', 'atd', 'rep', 'adm'].includes(i.key)).map((i) => (
-          <button key={i.key} className={tab === i.key ? 'tab active' : 'tab'} onClick={() => setTab(i.key)}>{i.label}</button>
+          <button key={i.key} className={tab === i.key ? 'tab active' : 'tab'} aria-current={tab === i.key ? 'page' : undefined} onClick={() => goTab(i.key)}>{i.label}</button>
         ))}
       </nav>
+    </div>
+  );
+}
+
+/** Layout das telas fora do shell (login, entrada pelo Axis, escolha do almoxarifado): o mesmo `.axis-login` do Core. */
+function AuthLayout({ children, wide }: { children: ReactNode; wide?: boolean }) {
+  return (
+    <div className="axis-login">
+      <div className="axis-login__panel">
+        <img src="/brand-industrial/axis-app-icon.svg" alt="" width={52} height={52} className="axis-login__icon" />
+        <h1>Axis Logística</h1>
+        <p className="axis-login__lead">Separação, armazenagem e inventário do almoxarifado, inclusive sem conexão.</p>
+      </div>
+      <main className="axis-login__side">
+        <div className={wide ? 'axis-login__card axis-login__card--wide' : 'axis-login__card'}>
+          <img src="/brand-industrial/axis-logo-light.svg" alt="Axis ERP + SGI" className="axis-login__logo axis-login__logo--light" />
+          <img src="/brand-industrial/axis-logo-dark.svg" alt="Axis ERP + SGI" className="axis-login__logo axis-login__logo--dark" />
+          <strong className="axis-login__title">Axis Logística</strong>
+          {children}
+        </div>
+      </main>
     </div>
   );
 }
@@ -291,12 +323,11 @@ function Login({ settings, expired, notice, onLogin }: { settings: Settings; exp
   };
 
   return (
-    <main className="page">
-      <h1>Axis Logística</h1>
+    <AuthLayout>
       <p className="hint">Entre com o mesmo e-mail e senha do Axis.</p>
-      {notice && <p className="notice" role="alert">{notice}</p>}
-      {expired && <p className="notice" role="status">Sua sessão expirou. Entre de novo — as leituras pendentes continuam salvas neste aparelho.</p>}
-      <form onSubmit={submit} noValidate className="card">
+      {notice && <p className="axis-alert axis-alert--danger" role="alert">{notice}</p>}
+      {expired && <p className="axis-alert axis-alert--warning" role="status">Sua sessão expirou. Entre de novo — as leituras pendentes continuam salvas neste aparelho.</p>}
+      <form onSubmit={submit} noValidate className="axis-login__form">
         <label className="lbl" htmlFor="email">E-mail <span aria-hidden="true">*</span></label>
         <input id="email" className="inp" type="email" autoComplete="username" inputMode="email" autoCapitalize="none" required aria-required="true" aria-invalid={!!errors.email} aria-describedby={errors.email ? 'email-err' : undefined} value={email} onChange={(e) => setEmail(e.target.value)} autoFocus />
         {errors.email && <p id="email-err" className="err" role="alert">{errors.email}</p>}
@@ -310,7 +341,7 @@ function Login({ settings, expired, notice, onLogin }: { settings: Settings; exp
         <button className="btn block" type="submit" disabled={busy}>{busy ? 'Entrando…' : 'Entrar'}</button>
       </form>
       <p className="hint">Esqueceu a senha? Use a recuperação no Axis.</p>
-    </main>
+    </AuthLayout>
   );
 }
 
@@ -344,7 +375,7 @@ function Picking({ boot, ops, enqueue }: ScreenProps) {
   if (!task) {
     return (
       <section>
-        <h2>Tarefas de separação</h2>
+        <h1>Tarefas de separação</h1>
         {boot.pickingTasks.length === 0 && <p className="hint">Nenhuma tarefa aberta neste almoxarifado.</p>}
         {boot.pickingTasks.map((t) => (
           <button key={t.id} className="card btn-card" onClick={() => setTaskId(t.id)}>
@@ -359,7 +390,7 @@ function Picking({ boot, ops, enqueue }: ScreenProps) {
     return (
       <section>
         <button className="btn ghost" onClick={() => setTaskId(null)}>← Tarefas</button>
-        <h2>{task.code}</h2>
+        <h1>{task.code}</h1>
         {!started && <button className="btn block" onClick={() => enqueue('picking.start', { id: task.id }, `Iniciar ${task.code}`)}>Iniciar separação</button>}
         {task.items.map((i) => (
           <button key={i.id} className="card btn-card" disabled={!started} onClick={() => { setItemId(i.id); setStep('loc'); setErr(''); }}>
@@ -377,7 +408,7 @@ function Picking({ boot, ops, enqueue }: ScreenProps) {
   return (
     <section>
       <button className="btn ghost" onClick={() => setItemId(null)}>← Itens</button>
-      <h2>{matName(boot, item.materialId)}</h2>
+      <h1>{matName(boot, item.materialId)}</h1>
       <p>Endereço <strong>{item.locationCode}</strong> · faltam <strong>{fmtQty(remaining(item))}</strong> {m?.uom}</p>
       {step === 'loc' && <ScanInput label="1. Leia o endereço" hint={`Esperado: ${item.locationCode}`} onCode={onCode} />}
       {step === 'mat' && <ScanInput label="2. Leia o material" hint="Código de barras, QR ou SKU" onCode={onCode} />}
@@ -413,7 +444,7 @@ function Putaway({ boot, ops, enqueue }: ScreenProps) {
     const list = boot.putawayTasks.filter((t) => !done(t.id));
     return (
       <section>
-        <h2>Armazenagem</h2>
+        <h1>Armazenagem</h1>
         {list.length === 0 && <p className="hint">Nenhuma tarefa de armazenagem.</p>}
         {list.map((t) => <button key={t.id} className="card btn-card" onClick={() => setId(t.id)}><strong>{t.code}</strong> · {matName(boot, t.materialId)}<div className="hint">{fmtQty(t.quantity)} · sugerido: {t.suggestedLocationCode ?? 'sem sugestão'}</div></button>)}
       </section>
@@ -422,7 +453,7 @@ function Putaway({ boot, ops, enqueue }: ScreenProps) {
   return (
     <section>
       <button className="btn ghost" onClick={() => setId(null)}>← Tarefas</button>
-      <h2>{matName(boot, task.materialId)}</h2>
+      <h1>{matName(boot, task.materialId)}</h1>
       <p>Quantidade {fmtQty(task.quantity)} · destino sugerido <strong>{task.suggestedLocationCode ?? '—'}</strong></p>
       <ScanInput label="Leia o endereço de destino" onCode={onCode} />
       {err && <p className="err" role="alert">{err}</p>}
@@ -433,10 +464,10 @@ function Putaway({ boot, ops, enqueue }: ScreenProps) {
 function Counting({ boot, ops, enqueue }: ScreenProps) {
   const [vals, setVals] = useState<Record<string, string>>({});
   const counted = (lineId: string) => ops.some((o) => o.type === 'count.submit' && o.payload.lineId === lineId);
-  if (boot.countSheets.length === 0) return <section><h2>Inventário</h2><p className="hint">Nenhuma contagem em andamento.</p></section>;
+  if (boot.countSheets.length === 0) return <section><h1>Inventário</h1><p className="hint">Nenhuma contagem em andamento.</p></section>;
   return (
     <section>
-      <h2>Inventário (contagem cega)</h2>
+      <h1>Inventário (contagem cega)</h1>
       {boot.countSheets.map((s) => (
         <div key={s.id} className="card">
           <strong>{s.code}</strong> <span className="hint">{s.round}ª contagem</span>
@@ -461,7 +492,7 @@ function Counting({ boot, ops, enqueue }: ScreenProps) {
 function SyncPanel({ ops, syncing, onSync, queue, refresh, onChangeWarehouse, onLogout, email }: { ops: QueueOp[]; syncing: boolean; onSync: () => void; queue: OfflineQueue; refresh: () => Promise<void>; onChangeWarehouse: () => void; onLogout: () => void; email?: string }) {
   return (
     <section>
-      <h2>Pendências de sincronização</h2>
+      <h1>Pendências de sincronização</h1>
       <button className="btn block" onClick={onSync} disabled={syncing}>{syncing ? 'Sincronizando…' : 'Sincronizar agora'}</button>
       {ops.length === 0 && <p className="hint">Tudo sincronizado.</p>}
       {ops.map((o) => (

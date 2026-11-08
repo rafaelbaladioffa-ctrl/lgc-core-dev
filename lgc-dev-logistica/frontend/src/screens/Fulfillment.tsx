@@ -46,7 +46,7 @@ export function Fulfillment() {
   ];
   return (
     <section>
-      <h2>Ordens de atendimento e SLA</h2>
+      <h1>Ordens de atendimento e SLA</h1>
       <form className="toolbar" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Situação<select className="inp" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}><option value="">Todas</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
         <label className="field"><span>Somente atrasadas</span><input type="checkbox" checked={late} onChange={(e) => { setLate(e.target.checked); setPage(1); }} aria-label="Somente atrasadas" /></label>

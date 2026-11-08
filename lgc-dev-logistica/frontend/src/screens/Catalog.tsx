@@ -55,7 +55,7 @@ export function Catalog({ warehouseId, canWrite = false, canReadCost = false }: 
   const data = res.state === 'ready' ? res.data : null;
   return (
     <section>
-      <h2>Catálogo de materiais</h2>
+      <h1>Catálogo de materiais</h1>
       {canWrite && <div className="toolbar"><button className="btn" onClick={() => setCreating(true)}>Novo material</button></div>}
       <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Código, descrição ou código de barras" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></label>
@@ -97,7 +97,7 @@ function MaterialDetail({ m: initial, warehouseId, canWrite, canReadCost, onBack
         : <button className="btn ghost" onClick={() => void act('deactivate')} title={del.data.reason}>Inativar</button>)}
       {actErr && <p className="err" role="alert">{actErr}</p>}
       {editing && <MaterialForm mode="edit" materialId={m.id} initial={valuesFromMaterial(m as never)} onCancel={() => setEditing(false)} onSaved={(saved) => { setM({ ...m, ...(saved as object) } as Material); setEditing(false); setVTick((n) => n + 1); }} />}
-      <h2>{m.code} — {m.shortDescription}</h2>
+      <h1>{m.code} — {m.shortDescription}</h1>
       {m.technicalDescription && <p className="hint">{m.technicalDescription}</p>}
       <div className="card">
         <h3>Disponibilidade{warehouseId ? ' neste almoxarifado' : ''}</h3>

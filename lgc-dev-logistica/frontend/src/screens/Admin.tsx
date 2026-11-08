@@ -16,7 +16,7 @@ export function Admin({ warehouseId, canIntegration, canWrite = false, canPolicy
   const [part, setPart] = useState<'loc' | 'pol' | 'int'>('loc');
   return (
     <section>
-      <h2>Administração</h2>
+      <h1>Administração</h1>
       <div className="toolbar">
         <button className={part === 'loc' ? 'btn' : 'btn ghost'} onClick={() => setPart('loc')}>Endereços</button>
         <button className={part === 'pol' ? 'btn' : 'btn ghost'} onClick={() => setPart('pol')}>Parâmetros de reposição</button>

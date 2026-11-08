@@ -15,7 +15,7 @@ export function Replenishment({ warehouseId, canManage, canAck }: { warehouseId?
   const [part, setPart] = useState<'sug' | 'alt'>('sug');
   return (
     <section>
-      <h2>Reposição e alertas</h2>
+      <h1>Reposição e alertas</h1>
       <div className="toolbar">
         <button className={part === 'sug' ? 'btn' : 'btn ghost'} onClick={() => setPart('sug')}>Sugestões de compra</button>
         <button className={part === 'alt' ? 'btn' : 'btn ghost'} onClick={() => setPart('alt')}>Alertas e faltas</button>

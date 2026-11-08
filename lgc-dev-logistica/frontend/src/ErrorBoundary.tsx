@@ -9,7 +9,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode; resetKey?: s
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <div className="card" role="alert">
+      <div className="axis-alert axis-alert--danger" role="alert">
         <strong>Não foi possível exibir esta tela.</strong>
         <p className="hint">{this.state.error.message}</p>
         <button className="btn" onClick={() => location.reload()}>Recarregar</button>

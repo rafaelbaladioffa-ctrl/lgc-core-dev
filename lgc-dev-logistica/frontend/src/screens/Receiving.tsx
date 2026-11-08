@@ -36,7 +36,7 @@ export function Receiving({ warehouseId }: { warehouseId?: string }) {
   ];
   return (
     <section>
-      <h2>Recebimento</h2>
+      <h1>Recebimento</h1>
       <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Código, nota fiscal ou veículo" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></label>
         <label className="field">Situação<select className="inp" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}><option value="">Todas</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
@@ -72,7 +72,7 @@ function ReceiptDetail({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <section>
       <button className="btn ghost" onClick={onBack}>← Recebimentos</button>
-      <h2>{r.code} <span className={`pill ${tone(r.status)}`}>{STATUS[r.status] ?? r.status}</span></h2>
+      <h1>{r.code} <span className={`pill ${tone(r.status)}`}>{STATUS[r.status] ?? r.status}</span></h1>
       <div className="card"><dl className="kv">
         <div><dt>Nota fiscal</dt><dd>{r.invoiceNumber ?? '—'}</dd></div><div><dt>Veículo</dt><dd>{r.vehicle ?? '—'}</dd></div><div><dt>Volumes</dt><dd>{r.volumes ?? '—'}</dd></div>
         <div><dt>Criado em</dt><dd>{fmtDateTime(r.createdAt)}</dd></div><div><dt>Concluído em</dt><dd>{r.completedAt ? fmtDateTime(r.completedAt) : '—'}</dd></div><div><dt>Divergência</dt><dd>{yesNo(r.hasDivergence)}</dd></div>

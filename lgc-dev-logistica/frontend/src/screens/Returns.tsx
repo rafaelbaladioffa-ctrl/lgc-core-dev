@@ -24,7 +24,7 @@ export function Returns({ warehouseId, canCustody }: { warehouseId?: string; can
   const [part, setPart] = useState<'ret' | 'cus'>('ret');
   return (
     <section>
-      <h2>Devoluções e custódias</h2>
+      <h1>Devoluções e custódias</h1>
       <div className="toolbar">
         <button className={part === 'ret' ? 'btn' : 'btn ghost'} onClick={() => setPart('ret')}>Devoluções</button>
         <button className={part === 'cus' ? 'btn' : 'btn ghost'} onClick={() => setPart('cus')}>Termos de custódia</button>
@@ -89,7 +89,7 @@ function ReturnDetail({ id, onBack }: { id: string; onBack: () => void }) {
   return (
     <>
       <button className="btn ghost" onClick={onBack}>← Devoluções</button>
-      <h2>{r.code} — {TYPE[r.type] ?? r.type}</h2>
+      <h1>{r.code} — {TYPE[r.type] ?? r.type}</h1>
       {r.notes && <p className="hint">{r.notes}</p>}
       {(r.items ?? []).map((i) => (
         <div key={i.id} className="card">

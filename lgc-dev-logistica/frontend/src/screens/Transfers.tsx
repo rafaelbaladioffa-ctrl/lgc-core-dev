@@ -45,7 +45,7 @@ export function Transfers({ warehouseId }: { warehouseId?: string }) {
   ];
   return (
     <section>
-      <h2>Transferências</h2>
+      <h1>Transferências</h1>
       <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Código ou motivo" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></label>
         <label className="field">Situação<select className="inp" value={status} onChange={(e) => { setStatus(e.target.value); setPage(1); }}><option value="">Todas</option>{Object.entries(STATUS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
@@ -82,7 +82,7 @@ function TransferDetail({ id, wmap, onBack }: { id: string; wmap: Map<string, { 
   return (
     <section>
       <button className="btn ghost" onClick={onBack}>← Transferências</button>
-      <h2>{t.code} <span className={`pill ${tone(t.status)}`}>{STATUS[t.status] ?? t.status}</span></h2>
+      <h1>{t.code} <span className={`pill ${tone(t.status)}`}>{STATUS[t.status] ?? t.status}</span></h1>
       <div className="card"><dl className="kv">
         <div><dt>Origem</dt><dd>{whLabel(wmap, t.fromWarehouseId)}</dd></div><div><dt>Destino</dt><dd>{whLabel(wmap, t.toWarehouseId)}</dd></div><div><dt>Motivo</dt><dd>{t.reason}</dd></div>
         <div><dt>Solicitada em</dt><dd>{fmtDateTime(t.createdAt)}</dd></div><div><dt>Expedida em</dt><dd>{t.dispatchedAt ? fmtDateTime(t.dispatchedAt) : '—'}</dd></div><div><dt>Recebida em</dt><dd>{t.receivedAt ? fmtDateTime(t.receivedAt) : '—'}</dd></div>

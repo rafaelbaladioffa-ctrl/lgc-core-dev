@@ -1,6 +1,6 @@
 /* Service worker: casca do app em cache (abre sem rede); a API nunca é cacheada aqui — os dados offline ficam no IndexedDB. */
-const CACHE = 'logistica-shell-v2';
-const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/favicon.svg', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'logistica-shell-v3';
+const SHELL = ['/', '/index.html', '/manifest.webmanifest', '/brand-industrial/axis-favicon.svg', '/brand-industrial/axis-logo-dark.svg', '/brand-industrial/axis-symbol.svg', '/favicon-192.png', '/favicon-512.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

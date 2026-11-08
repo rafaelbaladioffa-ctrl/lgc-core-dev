@@ -3,7 +3,7 @@
 > **Nota de 2026-11-07:** este documento era o `PLANNING_LOGISTICA.md` da raiz do Core. Ele continua sendo a
 > especificação funcional do satélite, mas a seção 0 tem afirmações superadas:
 > - **§0.1 (repositório):** a Logística vive como subpasta do repositório do Core, não em repositório próprio.
-> - **§0.2 (branding):** os tokens visuais foram copiados para `frontend/src/styles.css`.
+> - **§0.2 (branding):** a Logística segue a identidade visual do Core (tema "Industrial Flow Graphite", grafite + teal, Inter). Os tokens e o shell (`frontend/src/styles/axis-tokens.css` e `axis-shell.css`) são gerados por `scripts/sync-design.mjs` a partir do Core — não edite; `frontend/src/styles.css` guarda só o que é específico da Logística. Regras em `docs/design/identidade-visual.md` do Core.
 > - **§0.3 (tokens):** o PWA faz refresh, e o token do launcher é trocado por uma sessão de 8 h.
 > - **§0.4 (eventos):** os eventos que o Core realmente emite são outros.
 >

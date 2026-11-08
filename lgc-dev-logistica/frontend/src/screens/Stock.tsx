@@ -44,7 +44,7 @@ export function Stock({ warehouseId, canAdjust = false }: { warehouseId: string;
   ];
   return (
     <section>
-      <h2>Estoque do almoxarifado</h2>
+      <h1>Estoque do almoxarifado</h1>
       {adjusting && <StockAdjust balance={adjusting} label={byId.get(adjusting.materialId)?.code ?? adjusting.materialId} onCancel={() => setAdjusting(null)} onDone={() => { setAdjusting(null); reload(); }} />}
       <form className="toolbar" role="search" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Buscar<input className="inp" placeholder="Material, endereço ou lote" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} /></label>

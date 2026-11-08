@@ -45,7 +45,7 @@ export function Dashboard({ warehouseId }: { warehouseId?: string }) {
   }, [days, all, warehouseId]);
   return (
     <section>
-      <h2>Painel operacional</h2>
+      <h1>Painel operacional</h1>
       <form className="toolbar" onSubmit={(e) => e.preventDefault()}>
         <label className="field">Período<select className="inp" value={days} onChange={(e) => setDays(Number(e.target.value))}><option value={7}>Últimos 7 dias</option><option value={30}>Últimos 30 dias</option><option value={90}>Últimos 90 dias</option></select></label>
         <label className="field">Escopo<select className="inp" value={all ? 'all' : 'one'} onChange={(e) => setAll(e.target.value === 'all')}><option value="one">Este almoxarifado</option><option value="all">Todos os acessíveis</option></select></label>
