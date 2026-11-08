@@ -7,6 +7,8 @@ import { OutboxService } from './outbox.service.js';
 import { handleCcEvent, isCcEvent } from '../cost-centers/cc-events.js';
 import { refreshBudgetStatus } from '../cost-centers/cc-budget-status.js';
 import { todaySaoPaulo } from '../cost-centers/cc-engine.js';
+import { winRevisionFromCore, type ProjectApproval } from '../budgets/revision-won.js';
+import { UnprocessableEventError } from './unprocessable-event.error.js';
 
 export interface Envelope {
   event_id: string;
@@ -106,6 +108,30 @@ export function toQuoteRequest(env: Envelope) {
 }
 
 /**
+ * Aprovação do projeto no Core (plano ponta a ponta §4.2) → revisão aceita. Só o que o Financeiro usa:
+ * o projeto (`project_id`, `cost_center_id`), a revisão (`accepted_quote.external_revision_id`), o instante da
+ * aprovação e o PO. Campo que falta vira erro legível no evento (`UnprocessableEventError`), não 400.
+ */
+export function toProjectApproval(env: Envelope): ProjectApproval {
+  const p = env.payload;
+  const str = (o: Record<string, unknown>, k: string) => (typeof o[k] === 'string' && o[k] !== '' ? (o[k] as string) : null);
+  const projectAxisId = str(p, 'project_id');
+  if (!projectAxisId) throw new UnprocessableEventError('project.approved sem project_id.');
+  const quote = p['accepted_quote'];
+  const revisionId = quote && typeof quote === 'object' && !Array.isArray(quote) ? str(quote as Record<string, unknown>, 'external_revision_id') : null;
+  if (!revisionId) throw new UnprocessableEventError('project.approved sem accepted_quote.external_revision_id: não dá para saber qual revisão o cliente aceitou.');
+  const approvedAt = str(p, 'approved_at');
+  return {
+    projectAxisId,
+    revisionId,
+    approvedAt: new Date(approvedAt && !Number.isNaN(Date.parse(approvedAt)) ? approvedAt : env.occurred_at),
+    costCenterAxisId: str(p, 'cost_center_id'),
+    clientPoNumber: str(p, 'client_po_number'),
+    eventId: env.event_id,
+  };
+}
+
+/**
  * Receptor do webhook do Core (especificação §2.3):
  *  - assinatura HMAC-SHA256 do corpo bruto (`X-Axis-Signature: sha256=<hex>`), comparação em tempo constante;
  *  - anti-replay: janela de `occurred_at` + idempotência por `event_id`;
@@ -180,6 +206,12 @@ export class AxisWebhookService {
       });
       return { status: outcome === 'ignored' ? 'ignored' : 'processed', event_id: env.event_id };
     } catch (err) {
+      if (err instanceof UnprocessableEventError) {
+        // Nada a reentregar: a transação foi desfeita, o evento fica FAILED com a causa legível e o Core recebe 200.
+        this.logger.warn(`Evento ${env.event_type} ${env.event_id} não aplicado: ${err.message}`);
+        await this.prisma.integrationMessage.update({ where: { id: message.id }, data: { status: 'FAILED', attempts: { increment: 1 }, lastError: err.message.slice(0, 500) } });
+        return { status: 'failed', event_id: env.event_id, error: err.message };
+      }
       this.logger.error(`Falha ao processar ${env.event_type} ${env.event_id}: ${(err as Error).message}`);
       await this.prisma.integrationMessage.update({ where: { id: message.id }, data: { status: 'FAILED', attempts: { increment: 1 }, lastError: (err as Error).message.slice(0, 500) } });
       throw err; // 4xx/5xx: o Core reentrega e o evento é reprocessado
@@ -190,6 +222,7 @@ export class AxisWebhookService {
     // Documento novo: o Financeiro baixa quando precisa (pelo pedido de cotação); não é estado do projeto.
     if (env.event_type === 'project.document_added') return 'ignored';
     if (env.event_type === 'project.quote_requested') return this.handleQuoteRequested(tx, env);
+    if (env.event_type === 'project.approved') return this.handleProjectApproved(tx, env);
     if (isCcEvent(env.event_type)) return this.handleCostCenterEvent(tx, env);
     const master = toMasterRecord(env);
     if (!master) return 'ignored';
@@ -206,6 +239,21 @@ export class AxisWebhookService {
     const master = toMasterRecord({ ...env, event_type: 'project.updated', payload: state });
     if (master) await this.upsertMaster(tx, master, new Date(env.occurred_at));
     await tx.quoteRequest.upsert({ where: { axisQuoteRequestId: request.axisQuoteRequestId }, create: request, update: {} });
+    return 'processed';
+  }
+
+  /**
+   * Projeto aprovado no Core: atualiza o projeto no cache (o evento traz o estado completo) e passa a revisão aceita
+   * a `ganha`, com o comprometido no CC do projeto (`winRevisionFromCore`). Idempotente por `event_id` (inbox) e por
+   * revisão (já ganha não muda nem lança de novo). Outra revisão já ganha no orçamento, ou revisão que não está
+   * `enviada`, vira alerta no orçamento sem alterar nada; revisão que não existe volta como erro legível.
+   */
+  private async handleProjectApproved(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed'> {
+    const approval = toProjectApproval(env);
+    const state = Object.fromEntries(Object.entries(env.payload).filter(([k]) => PROJECT_STATE_KEYS.includes(k)));
+    const master = toMasterRecord({ ...env, event_type: 'project.updated', payload: state });
+    if (master) await this.upsertMaster(tx, master, new Date(env.occurred_at));
+    await winRevisionFromCore(tx, approval);
     return 'processed';
   }
 

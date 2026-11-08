@@ -275,7 +275,7 @@ function Routes({ path, me, can }: { path: string; me: Me; can: (p: string) => b
   let m: Record<string, string> | null;
 
   if (matchRoute('/projetos', path)) return budgetRead ? <ProjectsPage canWrite={budgetWrite} canSeeCost={cost} /> : <NoAccess />;
-  if ((m = matchRoute('/projetos/:id', path))) return budgetRead ? <ProjectPage key={m.id} id={m.id} canWrite={budgetWrite} canSeeCost={cost} /> : <NoAccess />;
+  if ((m = matchRoute('/projetos/:id', path))) return budgetRead ? <ProjectPage key={m.id} id={m.id} canWrite={budgetWrite} canSeeCost={cost} canApprove={can('budget:approve')} /> : <NoAccess />;
   if ((m = matchRoute('/revisoes/:id', path))) return budgetRead ? <RevisionPage key={m.id} id={m.id} canWrite={budgetWrite} /> : <NoAccess />;
   if (matchRoute('/cotacoes', path)) return budgetRead ? <QuoteRequestsPage canWrite={budgetWrite} /> : <NoAccess />;
 

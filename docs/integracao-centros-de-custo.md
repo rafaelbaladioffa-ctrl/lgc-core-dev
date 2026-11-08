@@ -100,6 +100,12 @@ Detalhes fixados na implementação (Logística, `docs/especificacao.md §12.3.1
 
 O painel da Logística também passa a mostrar o consumo em R$ por centro de custo.
 
+**Importação no Financeiro (PT-07):** além do botão por competência, o Financeiro chama
+`consumption-by-cost-center` todo dia (mês anterior e corrente, agendador do Financeiro, ver
+[centros-de-custo-especificacao §2.1](../lgc-dev-financeiro/docs/centros-de-custo-especificacao.md#21-importação-diária-do-consumo-da-logística-pt-07)).
+A rota é só leitura e a importação é idempotente por competência e por (CC, projeto), então chamar várias vezes
+não custa nada além da consulta.
+
 ## 6. Core: reenvio dos cadastros (carga inicial do satélite)
 
 O Core só emite `cost_center.*`, `collaborator.*` e `site.*` quando o cadastro muda. Um satélite que passa a assinar esses eventos depois que os cadastros já existem fica com o cache vazio. No Financeiro, isso aparece como "Nenhum centro de custo visível".
