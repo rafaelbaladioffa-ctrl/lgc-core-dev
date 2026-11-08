@@ -120,3 +120,6 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: var(--text-xs); }
 .axis-login__form .lbl:first-child { margin-top: 0; }
 .axis-login__form .err { margin: 0; }
 .axis-login__form .btn.block { margin: var(--space-3) 0 0; }
+/* Seletor de cadastros do Core (AxisPicker): opções em lista, alinhadas à esquerda. */
+.axis-options { display: grid; gap: 4px; max-height: 320px; overflow-y: auto; }
+.axis-option { justify-content: flex-start; width: 100%; height: auto; min-height: var(--control-height); white-space: normal; text-align: left; }

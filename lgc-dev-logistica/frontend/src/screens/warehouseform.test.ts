@@ -24,3 +24,13 @@ describe('validação do novo almoxarifado', () => {
     expect(validateWarehouse({ ...ok, addressText: 'x'.repeat(301) }).addressText).toMatch(/300/);
   });
 });
+
+describe('corpo do cadastro com vínculos do Core', () => {
+  it('só envia responsável e site quando escolhidos no seletor; endereço em texto continua', async () => {
+    const { warehousePayload } = await import('./WarehouseForm');
+    expect(warehousePayload({ ...ok, addressText: '  ' })).toEqual({ code: 'ALM-SUMARE', name: 'Almoxarifado Sumaré', type: 'CENTRAL' });
+    expect(warehousePayload({ ...ok, addressText: ' Rua A, 1 ' }, { responsibleAxisUserId: 'c-1', siteAxisId: 's-1' })).toEqual({
+      code: 'ALM-SUMARE', name: 'Almoxarifado Sumaré', type: 'CENTRAL', addressText: 'Rua A, 1', responsibleAxisUserId: 'c-1', siteAxisId: 's-1',
+    });
+  });
+});

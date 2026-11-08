@@ -179,6 +179,10 @@ export class ReplenishmentService {
   // Retorno do Axis: pedido aprovado e previsão (purchase_order.approved / .changed)
   // ---------------------------------------------------------------------------------------------
 
+  /**
+   * Pedido aprovado no Axis: registra a previsão e evita nova sugestão equivalente. Itens por `material_code` ou `material_id`
+   * (id da Logística). Também recebe as compras do Core já traduzidas por `core-purchase.adapter.ts`.
+   */
   async registerPurchase(tx: Tx, p: Record<string, unknown>) {
     const poId = typeof p['purchase_order_id'] === 'string' ? p['purchase_order_id'] : undefined;
     if (!poId) throw new BadRequestException('purchase_order_id ausente.');
@@ -189,19 +193,21 @@ export class ReplenishmentService {
     const items = Array.isArray(p['items']) ? (p['items'] as Array<Record<string, unknown>>) : [];
     if (items.length === 0) throw new BadRequestException('Pedido sem itens.');
     // Itens repetidos do mesmo material somam; o último não sobrescreve os anteriores.
-    const merged = new Map<string, { material_code: string; quantity: number; suggestion_id?: string }>();
+    const merged = new Map<string, { ref: { code?: string; id?: string }; quantity: number; suggestion_id?: string }>();
     for (const it of items) {
-      const code = String(it['material_code'] ?? '');
+      const code = typeof it['material_code'] === 'string' && it['material_code'] ? it['material_code'] : undefined;
+      const id = !code && typeof it['material_id'] === 'string' && it['material_id'] ? it['material_id'] : undefined;
+      const key = code ? `c:${code}` : `i:${id ?? ''}`;
       const q = Number(it['quantity']);
       if (!Number.isFinite(q) || q <= 0) throw new BadRequestException('Item do pedido com quantidade inválida.');
-      const prev = merged.get(code);
-      merged.set(code, { material_code: code, quantity: (prev?.quantity ?? 0) + q, suggestion_id: prev?.suggestion_id ?? (typeof it['suggestion_id'] === 'string' ? it['suggestion_id'] : undefined) });
+      const prev = merged.get(key);
+      merged.set(key, { ref: { code, id }, quantity: (prev?.quantity ?? 0) + q, suggestion_id: prev?.suggestion_id ?? (typeof it['suggestion_id'] === 'string' ? it['suggestion_id'] : undefined) });
     }
     for (const it of merged.values()) {
       const qty = Number(it.quantity);
       if (!Number.isFinite(qty) || qty <= 0) throw new BadRequestException('Item do pedido com quantidade inválida.');
-      const m = await tx.material.findFirst({ where: { code: it.material_code } });
-      if (!m) throw new BadRequestException(`Material ${it.material_code} não encontrado.`);
+      const m = it.ref.code ? await tx.material.findFirst({ where: { code: it.ref.code } }) : it.ref.id ? await tx.material.findUnique({ where: { id: it.ref.id } }) : null;
+      if (!m) throw new BadRequestException(`Material ${it.ref.code ?? it.ref.id ?? '(sem código)'} não encontrado.`);
       const bySuggestion = it.suggestion_id ? await tx.replenishmentSuggestion.findUnique({ where: { id: it.suggestion_id } }) : null;
       const target = bySuggestion ?? (await tx.replenishmentSuggestion.findFirst({ where: { materialId: m.id, warehouseId: wh.id, status: { in: ['ENVIADA_AXIS', 'APROVADA_AXIS'] } }, orderBy: { seq: 'desc' } }));
       if (target) await tx.replenishmentSuggestion.update({ where: { id: target.id }, data: { status: 'APROVADA_AXIS', approvedQty: qty, expectedAt: expected, axisPurchaseOrderId: poId } });

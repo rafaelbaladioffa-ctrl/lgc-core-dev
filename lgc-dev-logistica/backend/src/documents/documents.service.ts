@@ -3,6 +3,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import { fmtDate, fmtDateTime } from '../labels/labels.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
+import { axisLabel, PERSON_KINDS, resolveOwnIds } from '../common/axis-cache.js';
 
 const brl = (v: { toString(): string } | number | null | undefined) => (v == null ? '—' : Number(v.toString()).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
 const num = (v: { toString(): string }) => Number(v.toString()).toLocaleString('pt-BR', { maximumFractionDigits: 6 });
@@ -60,7 +61,7 @@ export class DocumentsService {
     const locs = new Map((await this.prisma.location.findMany({ where: { id: { in: t.items.map((i) => i.locationId) } } })).map((l) => [l.id, l.code]));
     const lots = new Map((await this.prisma.lot.findMany({ where: { id: { in: t.items.flatMap((i) => (i.lotId ? [i.lotId] : [])) } } })).map((l) => [l.id, l]));
     return this.base('Lista de separação', pad('SEP', t.seq), user,
-      { Ordem: pad('ATD', order.seq), Projeto: order.projectAxisId ?? '—', 'Necessário até': fmtDate(order.neededBy), Prioridade: String(t.priority), Conferência: t.requiresCheck ? 'Independente obrigatória' : 'Não exigida' }, ['Separador', 'Conferente'],
+      { Ordem: pad('ATD', order.seq), Projeto: await axisLabel(this.prisma, ['PROJECT'], order.projectAxisId), 'Necessário até': fmtDate(order.neededBy), Prioridade: String(t.priority), Conferência: t.requiresCheck ? 'Independente obrigatória' : 'Não exigida' }, ['Separador', 'Conferente'],
       { columns: ['Endereço', 'Material', 'Descrição', 'Lote', 'Validade', 'Planejado', 'Separado', 'UM'], rows: [...t.items].sort((a, b) => (locs.get(a.locationId) ?? '').localeCompare(locs.get(b.locationId) ?? '', 'pt-BR', { numeric: true })).map((i) => { const m = mats.get(i.materialId)!; const lot = i.lotId ? lots.get(i.lotId) : undefined; return [locs.get(i.locationId) ?? '—', m.code, m.shortDescription, lot?.lotNumber ?? '—', fmtDate(lot?.expiresAt), num(i.quantityPlanned), num(i.quantityPicked), m.stockUom.code]; }) });
   }
 
@@ -72,7 +73,7 @@ export class DocumentsService {
     const mats = await this.materialMap(s.packages.flatMap((p) => p.items.map((i) => i.pickingItem.materialId)));
     const rows = s.packages.flatMap((p) => p.items.map((i) => { const m = mats.get(i.pickingItem.materialId)!; return [pad('VOL', p.seq), m.code, m.shortDescription, num(i.quantity), m.stockUom.code, p.weightKg ? `${num(p.weightKg)} kg` : '—', p.seal ?? '—']; }));
     return this.base('Romaneio de expedição', s.manifestCode ?? pad('EXP', s.seq), user,
-      { Ordem: pad('ATD', order.seq), Destino: s.destination ?? '—', Transportador: s.carrier ?? '—', Rota: s.route ?? '—', Veículo: s.vehicle ?? '—', 'Expedido em': fmtDateTime(s.dispatchedAt), Volumes: String(s.packages.length) }, ['Expedição', 'Transportador', 'Recebedor'],
+      { Ordem: pad('ATD', order.seq), Projeto: await axisLabel(this.prisma, ['PROJECT'], order.projectAxisId), Destino: s.destination ?? (await axisLabel(this.prisma, ['SITE'], s.destinationSiteAxisId ?? order.destinationSiteAxisId)), Transportador: s.carrier ?? '—', Rota: s.route ?? '—', Veículo: s.vehicle ?? '—', 'Expedido em': fmtDateTime(s.dispatchedAt), Volumes: String(s.packages.length) }, ['Expedição', 'Transportador', 'Recebedor'],
       { columns: ['Volume', 'Material', 'Descrição', 'Qtd.', 'UM', 'Peso', 'Lacre'], rows });
   }
 
@@ -82,7 +83,7 @@ export class DocumentsService {
     const order = await this.prisma.fulfillmentOrder.findUniqueOrThrow({ where: { id: s.orderId } });
     if (order.warehouseId) await this.rbac.assertWarehouseAccess(user, order.warehouseId);
     if (s.proofs.length === 0) throw new UnprocessableEntityException('Ainda não há comprovante de entrega para esta expedição.');
-    return this.base('Comprovante de entrega', pad('EXP', s.seq), user, { Ordem: pad('ATD', order.seq), Situação: s.status, Projeto: order.projectAxisId ?? '—' }, ['Recebedor', 'Entregador'],
+    return this.base('Comprovante de entrega', pad('EXP', s.seq), user, { Ordem: pad('ATD', order.seq), Situação: s.status, Projeto: await axisLabel(this.prisma, ['PROJECT'], order.projectAxisId), Destino: s.destination ?? (await axisLabel(this.prisma, ['SITE'], s.destinationSiteAxisId ?? order.destinationSiteAxisId)) }, ['Recebedor', 'Entregador'],
       { columns: ['Resultado', 'Recebedor', 'Entregue em', 'Volumes', 'Observações', 'Assinatura', 'Foto'], rows: s.proofs.map((p) => [p.outcome, p.receiverName, fmtDateTime(p.deliveredAt), String(p.packageIds.length), p.notes ?? '—', p.signatureRef ?? '—', p.photoRef ?? '—']) });
   }
 
@@ -103,12 +104,14 @@ export class DocumentsService {
   async custody(id: string, user: AuthenticatedUser) {
     const t = await this.prisma.custodyTerm.findUnique({ where: { id } });
     if (!t) throw new NotFoundException('Termo de custódia não encontrado.');
-    if (t.custodianAxisId !== user.userId && !user.permissions.includes('custody:execute') && !user.permissions.includes('audit:read')) throw new UnprocessableEntityException('Sem acesso a este termo.');
+    const manager = user.permissions.includes('custody:execute') || user.permissions.includes('audit:read');
+    if (!manager && !(await resolveOwnIds(this.prisma, user)).includes(t.custodianAxisId)) throw new UnprocessableEntityException('Sem acesso a este termo.');
     const m = await this.prisma.material.findUniqueOrThrow({ where: { id: t.materialId }, include: { stockUom: true } });
     const serial = t.serialId ? await this.prisma.serialNumber.findUnique({ where: { id: t.serialId } }) : null;
-    const cust = await this.prisma.axisMasterCache.findFirst({ where: { axisId: t.custodianAxisId, kind: { in: ['COLLABORATOR', 'USER'] } } });
+    const custodian = await axisLabel(this.prisma, PERSON_KINDS, t.custodianAxisId);
+    const project = await axisLabel(this.prisma, ['PROJECT'], t.projectAxisId);
     return this.base('Termo de entrega e custódia', pad('CUS', t.seq), user,
-      { Custodiante: cust?.name ?? t.custodianAxisId, Material: `${m.code} — ${m.shortDescription}`, Quantidade: `${num(t.quantity)} ${m.stockUom.code}`, Série: serial?.serial ?? '—', Patrimônio: serial?.assetTag ?? '—', 'Entregue em': fmtDateTime(t.deliveredAt), 'Devolução prevista': fmtDate(t.expectedReturnAt), Situação: t.status, 'Aceite/assinatura': t.acceptanceRef ?? '—' }, ['Custodiante', 'Almoxarife'], undefined,
+      { Custodiante: custodian, Projeto: project, Material: `${m.code} — ${m.shortDescription}`, Quantidade: `${num(t.quantity)} ${m.stockUom.code}`, Série: serial?.serial ?? '—', Patrimônio: serial?.assetTag ?? '—', 'Entregue em': fmtDateTime(t.deliveredAt), 'Devolução prevista': fmtDate(t.expectedReturnAt), Situação: t.status, 'Aceite/assinatura': t.acceptanceRef ?? '—' }, ['Custodiante', 'Almoxarife'], undefined,
       ['O custodiante declara ter recebido o item em bom estado e se responsabiliza por sua guarda e devolução.']);
   }
 
@@ -120,7 +123,7 @@ export class DocumentsService {
     const mats = await this.materialMap(r.items.map((i) => i.materialId));
     const scrap = r.items.some((i) => i.disposition === 'SUCATA');
     return this.base(scrap ? 'Certificado de devolução/descarte' : 'Comprovante de devolução', pad('DEV', r.seq), user,
-      { Tipo: r.type, 'Devolvido por': r.returnedByAxisId ?? '—', Projeto: r.projectAxisId ?? '—', Situação: r.status, 'Recebida em': fmtDateTime(r.createdAt) }, ['Quem devolveu', 'Inspeção', 'Almoxarife'],
+      { Tipo: r.type, 'Devolvido por': await axisLabel(this.prisma, PERSON_KINDS, r.returnedByAxisId), Projeto: await axisLabel(this.prisma, ['PROJECT'], r.projectAxisId), Situação: r.status, 'Recebida em': fmtDateTime(r.createdAt) }, ['Quem devolveu', 'Inspeção', 'Almoxarife'],
       { columns: ['Material', 'Descrição', 'Qtd.', 'Destinação', 'Aprovação Axis', 'Parecer'], rows: r.items.map((i) => { const m = mats.get(i.materialId)!; return [m.code, m.shortDescription, num(i.quantity), i.disposition ?? 'PENDENTE', i.approvalRef ?? '—', i.notes ?? '—']; }) });
   }
 

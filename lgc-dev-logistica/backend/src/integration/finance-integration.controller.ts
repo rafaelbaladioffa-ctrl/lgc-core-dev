@@ -32,7 +32,16 @@ export class FinanceIntegrationService {
     const ids = [...new Set(terms.map((t) => t.materialId))];
     const mats = ids.length === 0 ? [] : await this.prisma.material.findMany({ where: { id: { in: ids } }, select: { id: true, averageCost: true, lastCost: true } });
     const cost = new Map(mats.map((m) => [m.id, { averageCost: m.averageCost, lastCost: m.lastCost }]));
-    return aggregateCustody(terms.map((t) => ({ ...t, material: cost.get(t.materialId) ?? { averageCost: null, lastCost: null } })));
+    // Termos antigos guardam o id de USUÁRIO do custodiante; o Core identifica pessoas por colaborador. Na leitura, o usuário ligado a
+    // um colaborador (cache USER, `collaborator_id`) soma na linha do colaborador: a mesma pessoa não aparece partida em duas (L3).
+    const custodians = [...new Set(terms.map((t) => t.custodianAxisId))];
+    const users = custodians.length === 0 ? [] : await this.prisma.axisMasterCache.findMany({ where: { kind: 'USER', axisId: { in: custodians } }, select: { axisId: true, data: true } });
+    const toCollaborator = new Map<string, string>();
+    for (const u of users) {
+      const linked = (u.data as Record<string, unknown> | null)?.['collaborator_id'];
+      if (typeof linked === 'string' && linked) toCollaborator.set(u.axisId, linked);
+    }
+    return aggregateCustody(terms.map((t) => ({ ...t, custodianAxisId: toCollaborator.get(t.custodianAxisId) ?? t.custodianAxisId, material: cost.get(t.materialId) ?? { averageCost: null, lastCost: null } })));
   }
 }
 

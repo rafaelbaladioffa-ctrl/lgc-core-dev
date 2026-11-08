@@ -1,8 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { Prisma, StockCondition } from '@prisma/client';
 import type { StockMovement } from '@prisma/client';
 import { randomUUID } from 'crypto';
 import { problem } from '../common/errors.js';
+import { checkAxisRefs, PERSON_KINDS, type AxisRef } from '../common/axis-cache.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
@@ -20,8 +21,26 @@ export type MovementInput = Omit<PostMovementDto, 'quantity'> & { quantity: Pris
 
 export const movementCode = (seq: number) => `MOV-${String(seq).padStart(8, '0')}`;
 
+/**
+ * Ids do Core informados num lançamento manual (L1 do mapa de interoperabilidade). Na saída para consumo (`SAIDA_ENTREGA`),
+ * projeto e custodiante inativos bloqueiam (como na ordem de atendimento: projeto encerrado e desligado não recebem material);
+ * nos demais casos — entradas, devoluções, ajustes e transferências, que regularizam o que já existe — inativo só gera aviso.
+ * Centro de custo e cliente inativos sempre só avisam (mesma regra da ordem). Ausente do cache: aviso.
+ */
+export function movementAxisRefs(dto: Pick<PostMovementDto, 'type' | 'projectAxisId' | 'costCenterAxisId' | 'clientAxisId' | 'custodianAxisId'>): AxisRef[] {
+  const consumption = dto.type === 'SAIDA_ENTREGA';
+  return [
+    { id: dto.projectAxisId, kinds: ['PROJECT'], label: 'Projeto', onInactive: consumption ? 'block' : 'warn' },
+    { id: dto.costCenterAxisId, kinds: ['COST_CENTER'], label: 'Centro de custo', onInactive: 'warn' },
+    { id: dto.clientAxisId, kinds: ['CLIENT'], label: 'Cliente', onInactive: 'warn' },
+    { id: dto.custodianAxisId, kinds: PERSON_KINDS, label: 'Custodiante', onInactive: consumption ? 'block' : 'warn' },
+  ];
+}
+
 @Injectable()
 export class StockService {
+  private readonly logger = new Logger(StockService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
@@ -43,8 +62,11 @@ export class StockService {
     if (!user.permissions.includes(needed)) throw new ForbiddenException(`Permissão insuficiente. Necessário: ${needed}.`);
     if (isAdjust && !dto.axisApprovalRef) throw new BadRequestException('Ajustes, perdas e descartes exigem a referência de aprovação do Axis (axisApprovalRef).');
     this.validateShape(dto);
+    const referenceWarnings = await checkAxisRefs(this.prisma, movementAxisRefs(dto));
+    for (const w of referenceWarnings) this.logger.warn(`Movimento ${idempotencyKey}: ${w}`);
 
-    return this.run(() => this.prisma.$transaction((tx) => this.apply(tx, { ...dto, quantity: new Prisma.Decimal(dto.quantity) }, idempotencyKey, user, false)), idempotencyKey);
+    const result = await this.run(() => this.prisma.$transaction((tx) => this.apply(tx, { ...dto, quantity: new Prisma.Decimal(dto.quantity) }, idempotencyKey, user, false)), idempotencyKey);
+    return { ...result, referenceWarnings };
   }
 
   /** Lançamento interno (ex.: entrega confirmada): já autorizado pelo fluxo de origem; mantém escopo por almoxarifado. */

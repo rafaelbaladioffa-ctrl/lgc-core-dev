@@ -19,10 +19,11 @@ interface Kpis {
   consumption: { valueByProject?: ValueRow<'project'>[]; valueByCostCenter?: ValueRow<'costCenter'>[] };
 }
 
-type ValueRow<K extends string> = Record<K, string | null> & { value: string; valueBRL: string; movements: number };
+/** `projectLabel`/`costCenterLabel`: nome do cache do Core (o id, quando o cadastro ainda não chegou). */
+type ValueRow<K extends string> = Record<K, string | null> & Partial<Record<`${K}Label`, string | null>> & { value: string; valueBRL: string; movements: number };
 
 const valueCols = (key: 'project' | 'costCenter', header: string, none: string): Column<Record<string, unknown> & { value: string; movements: number }>[] => [
-  { key, header, render: (r) => (r[key] as string | null) ?? <span className="hint">{none}</span> },
+  { key, header, render: (r) => ((r[`${key}Label`] ?? r[key]) as string | null) ?? <span className="hint">{none}</span> },
   { key: 'movements', header: 'Movimentos', num: true, render: (r) => r.movements.toLocaleString('pt-BR') },
   { key: 'value', header: 'Valor', num: true, render: (r) => fmtBRL(r.value) },
 ];

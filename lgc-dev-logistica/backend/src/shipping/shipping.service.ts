@@ -1,14 +1,18 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnprocessableEntityException } from '@nestjs/common';
 import { FulfillmentStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import { StockService } from '../stock/stock.service.js';
 import { emitOutbound, orderCode, orderEventBase, summarizeItems } from '../fulfillment/order-events.js';
 import { problem } from '../common/errors.js';
+import { checkAxisRefs, custodianIdFor } from '../common/axis-cache.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import type { CheckDto, ConfirmDeliveryDto, DispatchDto, ListTasksQuery, PackDto, ReleasePickingDto, ScanDto } from './shipping.dto.js';
 
 type Tx = Prisma.TransactionClient;
+type ShipmentSite = { destinationSiteAxisId: string | null };
+/** Eventos da expedição levam o site do romaneio (pode ter sido trocado na embalagem/expedição) em vez do site da ordem. */
+const withShipmentSite = <O extends { destinationSiteAxisId: string | null }>(order: O, s: ShipmentSite): O => ({ ...order, destinationSiteAxisId: s.destinationSiteAxisId ?? order.destinationSiteAxisId });
 const D = (v: Prisma.Decimal.Value) => new Prisma.Decimal(v);
 export const isCustodyMaterial = (m: { returnable: boolean; assetTagged: boolean; serialControlled: boolean; type: string }) => m.returnable || m.assetTagged || m.serialControlled || ['EPI', 'FERRAMENTA', 'EQUIPAMENTO', 'ATIVO'].includes(m.type);
 /** Custo unitário gravado na baixa: custo médio móvel do material; sem ele, o último custo; sem nenhum, a baixa fica sem custo. */
@@ -20,6 +24,8 @@ const pad = (prefix: string, n: number) => `${prefix}-${String(n).padStart(8, '0
 
 @Injectable()
 export class ShippingService {
+  private readonly logger = new Logger(ShippingService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly rbac: RbacService,
@@ -257,7 +263,10 @@ export class ShippingService {
         if (D(it.quantity).decimalPlaces() > mat.stockUom.precision) throw new UnprocessableEntityException(problem(`A unidade ${mat.stockUom.code} aceita no máximo ${mat.stockUom.precision} casa(s) decimal(is).`, 'UNIT_CONVERSION_ERROR'));
       }
 
-      const shipment = await tx.shipment.create({ data: { orderId, destination: dto.destination ?? order.destinationText, createdBy: user.userId } }); // destino editável: parte do da ordem (site do Axis)
+      // Destino editável: parte do da ordem (site do Axis e texto); o texto continua valendo como ajuste manual.
+      const siteId = dto.destinationSiteAxisId ?? order.destinationSiteAxisId;
+      if (dto.destinationSiteAxisId) await this.checkSite(tx, dto.destinationSiteAxisId);
+      const shipment = await tx.shipment.create({ data: { orderId, destination: dto.destination ?? order.destinationText, destinationSiteAxisId: siteId, createdBy: user.userId } });
       for (const p of dto.packages) {
         await tx.package.create({
           data: { shipmentId: shipment.id, orderId, weightKg: p.weightKg, lengthCm: p.lengthCm, widthCm: p.widthCm, heightCm: p.heightCm, seal: p.seal, items: { create: p.items.map((i) => ({ pickingItemId: i.pickingItemId, quantity: i.quantity })) } },
@@ -294,17 +303,25 @@ export class ShippingService {
 
       const dispatchedAt = new Date();
       const destination = dto.destination ?? s.destination ?? order.destinationText;
-      await tx.shipment.update({ where: { id }, data: { status: 'EXPEDIDA', carrier: dto.carrier, route: dto.route, vehicle: dto.vehicle, destination, manifestCode: pad('ROM', s.seq), dispatchedAt, dispatchedBy: user.userId } });
+      if (dto.destinationSiteAxisId) await this.checkSite(tx, dto.destinationSiteAxisId);
+      const site = { destinationSiteAxisId: dto.destinationSiteAxisId ?? s.destinationSiteAxisId ?? order.destinationSiteAxisId };
+      await tx.shipment.update({ where: { id }, data: { status: 'EXPEDIDA', carrier: dto.carrier, route: dto.route, vehicle: dto.vehicle, destination, destinationSiteAxisId: site.destinationSiteAxisId, manifestCode: pad('ROM', s.seq), dispatchedAt, dispatchedBy: user.userId } });
       await tx.package.updateMany({ where: { shipmentId: id }, data: { status: 'EXPEDIDO' } });
       const updated = await this.setOrder(tx, s.orderId, 'EXPEDIDA');
       const packages = await tx.package.findMany({ where: { shipmentId: id }, include: { items: { include: { pickingItem: true } } } });
       await this.emit(tx, 'shipment.dispatched', {
-        ...orderEventBase(updated, destination),
+        ...orderEventBase(withShipmentSite(updated, site), destination),
         shipment_id: id, shipment_code: pad('EXP', s.seq), manifest: pad('ROM', s.seq), carrier: dto.carrier, route: dto.route ?? null, vehicle: dto.vehicle ?? null,
         dispatched_at: dispatchedAt.toISOString(), packages: packages.length, items: await this.packageItems(tx, packages),
       });
       return this.loadShipment(tx, id);
     });
+  }
+
+  /** Site do Core escolhido para o romaneio: ausente do cache só registra aviso; inativo é recusado (422). */
+  private async checkSite(tx: Tx, siteAxisId: string) {
+    const warnings = await checkAxisRefs(tx, [{ id: siteAxisId, kinds: ['SITE'], label: 'Site de destino', onInactive: 'block' }]);
+    for (const w of warnings) this.logger.warn(w);
   }
 
   private async assertRecipientActive(tx: Tx, axisId?: string | null) {
@@ -352,7 +369,7 @@ export class ShippingService {
         await tx.package.updateMany({ where: { id: { in: pending.map((p) => p.id) } }, data: { status: 'RECUSADO' } });
         await tx.shipment.update({ where: { id }, data: { status: 'RECUSADA' } });
         const refusedOrder = await this.setOrder(tx, s.orderId, 'DIVERGENCIA', `Entrega recusada: ${dto.notes}`);
-        await this.emit(tx, 'delivery.refused', { ...orderEventBase(refusedOrder, s.destination), ...this.deliveryFields(s, dto, proofBase.deliveredAt), reason: dto.notes, items: await this.packageItems(tx, pending) });
+        await this.emit(tx, 'delivery.refused', { ...orderEventBase(withShipmentSite(refusedOrder, s), s.destination), ...this.deliveryFields(s, dto, proofBase.deliveredAt), reason: dto.notes, items: await this.packageItems(tx, pending) });
         return this.loadShipment(tx, id);
       }
 
@@ -361,6 +378,9 @@ export class ShippingService {
       const custody = materials.some((m) => isCustodyMaterial(m));
       if (custody && !dto.receiverAxisId) throw new UnprocessableEntityException(problem('Material em custódia (EPI, ferramenta, ativo ou seriado) exige a identificação do recebedor no Axis (receiverAxisId).', 'AXIS_REFERENCE_INVALID'));
       await this.assertRecipientActive(tx, dto.receiverAxisId);
+      // Custódia fica no colaborador (como o Core identifica pessoas): recebedor informado como usuário vira o colaborador ligado a ele.
+      const custodianId = dto.receiverAxisId ? await custodianIdFor(tx, dto.receiverAxisId) : undefined;
+      if (custodianId !== dto.receiverAxisId) await this.assertRecipientActive(tx, custodianId);
       const matById = new Map(materials.map((m) => [m.id, m]));
 
       for (const pkg of delivering) {
@@ -382,14 +402,14 @@ export class ShippingService {
               type: 'SAIDA_ENTREGA', materialId: material.id, quantity: line.quantity, lotId: r.lotId ?? undefined, serialId: line.serialId, fromLocationId: r.locationId,
               reason: `Entrega ${orderCode(order.seq)} (${pad('EXP', s.seq)})`, axisDocumentRef: order.axisRequestId, logisticsDocumentRef: pad('ROM', s.seq),
               projectAxisId: order.projectAxisId ?? undefined, costCenterAxisId: order.costCenterAxisId ?? undefined,
-              custodianAxisId: custody ? dto.receiverAxisId : undefined, correlationId: order.id, unitCost: unitCostOf(material), // custo médio móvel no momento da entrega (na falta, o último custo)
+              custodianAxisId: custody ? custodianId : undefined, correlationId: order.id, unitCost: unitCostOf(material), // custo médio móvel no momento da entrega (na falta, o último custo)
             }, line.key, user);
             // Termo de custódia (9.5): EPI, ferramenta, equipamento, ativo ou seriado ficam sob responsabilidade do recebedor.
-            if (isCustodyMaterial(material) && dto.receiverAxisId) {
+            if (isCustodyMaterial(material) && custodianId) {
               const term = await tx.custodyTerm.create({
-                data: { custodianAxisId: dto.receiverAxisId, materialId: material.id, serialId: line.serialId, lotId: r.lotId, quantity: line.quantity, orderId: order.id, shipmentId: id, projectAxisId: order.projectAxisId, acceptanceRef: dto.signatureRef, expectedReturnAt: dto.expectedReturnAt ? new Date(dto.expectedReturnAt) : undefined, createdBy: user.userId },
+                data: { custodianAxisId: custodianId, materialId: material.id, serialId: line.serialId, lotId: r.lotId, quantity: line.quantity, orderId: order.id, shipmentId: id, projectAxisId: order.projectAxisId, acceptanceRef: dto.signatureRef, expectedReturnAt: dto.expectedReturnAt ? new Date(dto.expectedReturnAt) : undefined, createdBy: user.userId },
               });
-              await this.emit(tx, 'asset.custody.changed', { custody_term_id: term.id, custodian_id: dto.receiverAxisId, material_id: material.id, serial_id: line.serialId ?? null, action: 'delivered' });
+              await this.emit(tx, 'asset.custody.changed', { custody_term_id: term.id, custodian_id: custodianId, material_id: material.id, serial_id: line.serialId ?? null, action: 'delivered' });
             }
           }
         }
@@ -403,11 +423,11 @@ export class ShippingService {
       if (left === 0) {
         await tx.shipment.update({ where: { id }, data: { status: 'ENTREGUE' } });
         const doneOrder = await this.setOrder(tx, s.orderId, 'ENTREGUE');
-        await this.emit(tx, 'delivery.confirmed', { ...orderEventBase(doneOrder, s.destination), ...delivered, pending_packages: 0 });
+        await this.emit(tx, 'delivery.confirmed', { ...orderEventBase(withShipmentSite(doneOrder, s), s.destination), ...delivered, pending_packages: 0 });
       } else {
         await tx.shipment.update({ where: { id }, data: { status: 'PARCIAL' } });
         const partialOrder = await this.setOrder(tx, s.orderId, 'EXPEDIDA', `Entrega parcial: ${left} volume(s) pendente(s).`);
-        await this.emit(tx, 'delivery.partial', { ...orderEventBase(partialOrder, s.destination), ...delivered, pending_packages: left });
+        await this.emit(tx, 'delivery.partial', { ...orderEventBase(withShipmentSite(partialOrder, s), s.destination), ...delivered, pending_packages: left });
       }
       await this.emit(tx, 'availability.changed', { warehouse_id: order.warehouseId });
       return this.loadShipment(tx, id);

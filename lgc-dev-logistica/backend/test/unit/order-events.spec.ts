@@ -392,3 +392,55 @@ describe('AxisWebhookService — site.* e cost_center.* viram cache de cadastros
     await expect(w.handle('cost_center.updated', { code: 'x' })).rejects.toThrow('cost_center_id ausente');
   });
 });
+
+describe('ShippingService — site do romaneio (L6) e custódia no colaborador (L3)', () => {
+  const packFixture = () => {
+    const f = shippingFixture({ order: { status: 'SEPARADA' } });
+    const tx = f.tx as unknown as Record<string, Record<string, unknown>>;
+    tx.pickingTask = { findFirst: vi.fn().mockResolvedValue({ status: 'SEPARADA', items: [{ id: 'pk-1', quantityPicked: D(10) }] }) };
+    tx.material.findUniqueOrThrow = vi.fn().mockResolvedValue({ ...MAT_A, stockUom: { code: 'M', precision: 3 } });
+    tx.package = { create: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]) };
+    f.tx.shipment.findUnique.mockResolvedValue({ id: 'ship-new', seq: 9, packages: [], proofs: [] });
+    return f;
+  };
+  const pack = { packages: [{ items: [{ pickingItemId: 'pk-1', quantity: 10 }] }] };
+
+  it('a embalagem copia o site de destino da ordem para o romaneio', async () => {
+    const f = packFixture();
+    await f.service.pack('ord-1', pack as never, user);
+    expect(f.tx.shipment.create.mock.calls[0][0].data.destinationSiteAxisId).toBe(SITE);
+  });
+
+  it('site escolhido no romaneio, se inativo no cache, é recusado (422)', async () => {
+    const f = packFixture();
+    f.tx.axisMasterCache.findFirst.mockResolvedValue({ axisId: 'site-x', kind: 'SITE', code: 'OLD1', name: 'Site antigo', active: false });
+    await expect(f.service.pack('ord-1', { ...pack, destinationSiteAxisId: 'site-x' } as never, user)).rejects.toMatchObject({ status: 422 });
+    expect(f.tx.shipment.create).not.toHaveBeenCalled();
+  });
+
+  it('site trocado na expedição vai para o romaneio e para o shipment.dispatched', async () => {
+    const f = shippingFixture();
+    f.tx.axisMasterCache.findFirst.mockResolvedValue({ axisId: 'site-2', kind: 'SITE', code: 'GRU54', name: 'Novo', active: true });
+    await f.service.dispatch('ship-1', { carrier: 'Frota própria', destinationSiteAxisId: 'site-2' } as never, user);
+    expect(f.tx.shipment.update.mock.calls[0][0].data.destinationSiteAxisId).toBe('site-2');
+    expect(f.messages[0].payload.destination.site_id).toBe('site-2');
+  });
+
+  it('recebedor informado como usuário do Core: o termo de custódia guarda o colaborador ligado a ele', async () => {
+    const f = shippingFixture({
+      shipment: { status: 'EXPEDIDA', manifestCode: 'ROM-00000003' },
+      order: { status: 'EXPEDIDA' },
+      packages: [{ id: 'pkg-2', status: 'EXPEDIDO', items: [{ id: 'pi-2', quantity: D(1), pickingItem: { materialId: 'mat-b', reservationId: 'res-2', serialIds: [] } }] }],
+    });
+    f.tx.material.findMany.mockResolvedValue([{ ...MAT_B, returnable: false, assetTagged: false, serialControlled: false, type: 'EPI', averageCost: null, lastCost: D('20') }]);
+    f.tx.axisMasterCache.findFirst.mockImplementation(async ({ where }: { where: { kind: unknown; axisId: string } }) =>
+      where.kind === 'USER' && where.axisId === 'user-9' ? { data: { collaborator_id: 'colab-9' } } : null);
+    const custodyCreate = vi.fn().mockResolvedValue({ id: 'term-1' });
+    (f.tx as unknown as Record<string, unknown>).custodyTerm = { create: custodyCreate };
+    await f.service.confirmDelivery('ship-1', { outcome: 'ENTREGUE', receiverName: 'Maria Souza', receiverAxisId: 'user-9' } as never, user);
+    expect(custodyCreate.mock.calls[0][0].data.custodianAxisId).toBe('colab-9');
+    expect(f.stock.applyInternal.mock.calls[0][1].custodianAxisId).toBe('colab-9');
+    expect(f.messages.find((m) => m.eventType === 'asset.custody.changed')?.payload.custodian_id).toBe('colab-9');
+    expect(f.messages.find((m) => m.eventType === 'delivery.confirmed')?.payload.receiver_id).toBe('user-9'); // a prova de entrega guarda quem recebeu
+  });
+});

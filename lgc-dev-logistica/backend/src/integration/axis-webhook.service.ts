@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { ReplenishmentService } from '../replenishment/replenishment.service.js';
 import { FulfillmentService } from '../fulfillment/fulfillment.service.js';
 import { adaptMaterialRequestEvent } from './material-request.adapter.js';
+import { adaptCorePurchase } from './core-purchase.adapter.js';
 
 interface Envelope {
   event_id: string;
@@ -20,6 +21,30 @@ const CLOCK_SKEW_MS = 5 * 60_000;
 const INACTIVE_PROJECT_STATUS = ['cancelado', 'encerrado', 'arquivado'];
 
 type Master = { kind: string; axisId: string; code?: string; name?: string; active?: boolean; data: Record<string, unknown> };
+
+/**
+ * Famílias do Core que a Logística recebe (assinatura do satélite, reenvio de cadastros) mas não usa: ficam registradas como
+ * ignoradas, com o motivo, e nunca caem no adaptador de requisição de material.
+ */
+export const IGNORED_FAMILIES = ['job_title', 'holiday', 'certification', 'work_schedule', 'sector', 'request', 'sla', 'finance_request'];
+
+/** Motivo gravado (em `lastError`) quando um evento é ignorado; null quando não há o que explicar (ping, tipo desconhecido). */
+export function ignoredReason(eventType: string, p: Record<string, unknown>): string | null {
+  const family = eventType.split('.')[0];
+  if (family === 'purchase') {
+    const mapped = adaptCorePurchase(eventType, p);
+    return mapped.kind === 'ignored' ? mapped.reason : null;
+  }
+  if (IGNORED_FAMILIES.includes(family)) return `${eventType} não é usado pela Logística.`;
+  return null;
+}
+
+/** `active` explícito do payload; senão, a regra de cada cadastro. `deleted: true` sempre inativa. */
+const activeFrom = (p: Record<string, unknown>, fallback: boolean | undefined): boolean | undefined => {
+  if (p['deleted'] === true) return false;
+  if (typeof p['active'] === 'boolean') return p['active'];
+  return fallback;
+};
 
 /**
  * Receptor do webhook do Axis (PLANNING.md 3.1/3.2, PLANNING_LOGISTICA.md 12.1/12.4):
@@ -87,11 +112,13 @@ export class AxisWebhookService {
 
     try {
       const outcome = await this.prisma.$transaction((tx) => this.handle(tx, env));
+      const ignored = outcome === 'ignored';
       await this.prisma.integrationMessage.update({
         where: { id: message.id },
-        data: { status: outcome === 'ignored' ? 'IGNORED' : 'PROCESSED', processedAt: new Date(), attempts: { increment: 1 }, lastError: outcome === 'out_of_order' ? 'out_of_order' : null },
+        // lastError guarda a nota do processamento: evento fora de ordem ou o motivo de um evento ignorado.
+        data: { status: ignored ? 'IGNORED' : 'PROCESSED', processedAt: new Date(), attempts: { increment: 1 }, lastError: outcome === 'out_of_order' ? 'out_of_order' : ignored ? ignoredReason(env.event_type, env.payload) : null },
       });
-      return { status: outcome === 'ignored' ? 'ignored' : 'processed', event_id: env.event_id };
+      return { status: ignored ? 'ignored' : 'processed', event_id: env.event_id };
     } catch (err) {
       this.logger.error(`Falha ao processar ${env.event_type} ${env.event_id}: ${(err as Error).message}`);
       await this.prisma.integrationMessage.update({ where: { id: message.id }, data: { status: 'FAILED', attempts: { increment: 1 }, lastError: (err as Error).message.slice(0, 500) } });
@@ -107,38 +134,45 @@ export class AxisWebhookService {
 
   private async handle(tx: Prisma.TransactionClient, env: Envelope): Promise<'processed' | 'ignored' | 'out_of_order'> {
     const p = env.payload;
-    const str = (k: string) => (typeof p[k] === 'string' ? (p[k] as string) : undefined);
+    const str = (k: string) => (typeof p[k] === 'string' && (p[k] as string).length > 0 ? (p[k] as string) : undefined);
     const [family, action] = env.event_type.split('.');
     const occurredAt = new Date(env.occurred_at);
 
     let master: Master | null = null;
     switch (family) {
-      case 'user':
+      case 'user': {
+        // Contrato V1 (mapa §6): user_id, email, name (colaborador ou e-mail), status active|disabled, active, collaborator_id, roles.
         if (!str('user_id')) throw new BadRequestException('user_id ausente.');
-        master = { kind: 'USER', axisId: str('user_id')!, name: str('email'), active: action !== 'disabled', data: p };
+        const active = action === 'disabled' ? false : activeFrom(p, str('status') ? str('status') !== 'disabled' : true);
+        master = { kind: 'USER', axisId: str('user_id')!, name: str('name') ?? str('email'), active, data: p };
         break;
-      case 'collaborator':
+      }
+      case 'collaborator': {
+        // `active` do payload; senão `status` (desligado = inativo). Sem nenhum dos dois (ex.: cost_center_changed), mantém o que havia.
         if (!str('collaborator_id')) throw new BadRequestException('collaborator_id ausente.');
-        master = { kind: 'COLLABORATOR', axisId: str('collaborator_id')!, name: str('name'), active: action !== 'offboarded', data: p };
+        const byStatus = str('status') ? str('status') !== 'desligado' : undefined;
+        const active = action === 'offboarded' ? false : activeFrom(p, byStatus);
+        master = { kind: 'COLLABORATOR', axisId: str('collaborator_id')!, name: str('name'), active, data: p };
         break;
+      }
       case 'client':
         if (!str('client_id')) throw new BadRequestException('client_id ausente.');
-        master = { kind: 'CLIENT', axisId: str('client_id')!, code: p['code'] != null ? String(p['code']) : undefined, name: str('name'), data: p };
+        master = { kind: 'CLIENT', axisId: str('client_id')!, code: typeof p['code'] === 'number' || typeof p['code'] === 'string' ? String(p['code']) : undefined, name: str('name') ?? str('legal_name') ?? str('trade_name'), active: activeFrom(p, undefined), data: p };
         break;
       case 'project':
         if (!str('project_id')) throw new BadRequestException('project_id ausente.');
-        master = { kind: 'PROJECT', axisId: str('project_id')!, code: str('code'), name: str('name'), active: str('status') ? !INACTIVE_PROJECT_STATUS.includes(str('status')!) : undefined, data: p };
+        master = { kind: 'PROJECT', axisId: str('project_id')!, code: str('code'), name: str('name'), active: activeFrom(p, str('status') ? !INACTIVE_PROJECT_STATUS.includes(str('status')!) : undefined), data: p };
         break;
       case 'cost_center':
         // Cadastro de centro de custo (cache): a ordem de atendimento o valida sem bloquear (PT-04).
         if (!str('cost_center_id')) throw new BadRequestException('cost_center_id ausente.');
-        master = { kind: 'COST_CENTER', axisId: str('cost_center_id')!, code: str('code'), name: str('name'), active: typeof p['active'] === 'boolean' ? (p['active'] as boolean) : undefined, data: p };
+        master = { kind: 'COST_CENTER', axisId: str('cost_center_id')!, code: str('code'), name: str('name'), active: activeFrom(p, undefined), data: p };
         break;
       case 'site': {
         // Site (obra/endereço de entrega) do Core: destino das ordens de envio de material (PT-04).
         const siteId = str('site_id');
         if (!siteId) throw new BadRequestException('site_id ausente.');
-        master = { kind: 'SITE', axisId: siteId, code: str('code') ?? str('site_code'), name: str('name'), active: typeof p['active'] === 'boolean' ? (p['active'] as boolean) : undefined, data: p };
+        master = { kind: 'SITE', axisId: siteId, code: str('code') ?? str('site_code'), name: str('name'), active: activeFrom(p, undefined), data: p };
         break;
       }
       case 'purchase_order':
@@ -146,7 +180,15 @@ export class AxisWebhookService {
         if (action !== 'approved' && action !== 'changed') return 'ignored';
         await this.replenishment.registerPurchase(tx, p);
         return 'processed';
+      case 'purchase': {
+        // Compras do Core (purchase.approved / order_registered): só entram na reposição quando destinadas a um almoxarifado.
+        const mapped = adaptCorePurchase(env.event_type, p);
+        if (mapped.kind === 'ignored') return 'ignored'; // motivo gravado em lastError (ignoredReason)
+        await this.replenishment.registerPurchase(tx, mapped.payload);
+        return 'processed';
+      }
       default: {
+        if (IGNORED_FAMILIES.includes(family)) return 'ignored';
         // Adaptador 0.4: ticket.status_changed (legado) / material_request.* → evento de domínio.
         const domain = adaptMaterialRequestEvent(env.event_type, p);
         if (!domain) return 'ignored'; // ping e eventos que Logística ainda não consome

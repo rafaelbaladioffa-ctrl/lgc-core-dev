@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { RbacService } from '../rbac/rbac.service.js';
 import { AvailabilityService, todayBR } from '../stock/availability.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
+import { axisLabels } from '../common/axis-cache.js';
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
@@ -127,6 +128,11 @@ export class DashboardService {
     const alerts = await this.prisma.alert.groupBy({ by: ['severity'], where: { status: { in: ['ABERTO', 'RECONHECIDO'] } }, _count: { _all: true } });
     const emergency = await this.prisma.receipt.count({ where: { createdAt: { gte: from, lte: to }, exceptionApprovalRef: { not: null }, ...(inWh && { warehouseId: inWh }) } });
 
+    // Nomes de projeto e centro de custo pelo cache do Core (id sem cadastro aparece como o próprio id).
+    const projectNames = await axisLabels(this.prisma, ['PROJECT'], [...consumption.map((c) => c.projectAxisId), ...consumptionValue.map((v) => v.project)]);
+    const ccNames = await axisLabels(this.prisma, ['COST_CENTER'], [...consumption.map((c) => c.costCenterAxisId), ...consumptionValue.map((v) => v.cost_center)]);
+    const nameOf = (names: Map<string, string>, id: string | null) => (id ? (names.get(id) ?? id) : null);
+
     return {
       period: { from: from.toISOString(), to: to.toISOString() },
       accuracy: { counted: ok + bad, matched: ok, pct: pct(ok, ok + bad) },
@@ -139,7 +145,13 @@ export class DashboardService {
       },
       stock: { policies: policies.length, stockouts, belowMin, avgCoverageDays: coverage.length ? Math.round((coverage.reduce((s, x) => s + x, 0) / coverage.length) * 10) / 10 : null },
       expiring,
-      consumption: { top: consumption.map((c) => ({ project: c.projectAxisId, costCenter: c.costCenterAxisId, quantity: c._sum.quantity?.toString(), movements: c._count._all })), ...(canCost && { valueByProject: sumValueBy(consumptionValue, (v) => v.project).map(({ key, ...v }) => ({ project: key, ...v })), valueByCostCenter: sumValueBy(consumptionValue, (v) => v.cost_center).map(({ key, ...v }) => ({ costCenter: key, ...v })) }) },
+      consumption: {
+        top: consumption.map((c) => ({ project: c.projectAxisId, projectLabel: nameOf(projectNames, c.projectAxisId), costCenter: c.costCenterAxisId, costCenterLabel: nameOf(ccNames, c.costCenterAxisId), quantity: c._sum.quantity?.toString(), movements: c._count._all })),
+        ...(canCost && {
+          valueByProject: sumValueBy(consumptionValue, (v) => v.project).map(({ key, ...v }) => ({ project: key, projectLabel: nameOf(projectNames, key), ...v })),
+          valueByCostCenter: sumValueBy(consumptionValue, (v) => v.cost_center).map(({ key, ...v }) => ({ costCenter: key, costCenterLabel: nameOf(ccNames, key), ...v })),
+        }),
+      },
       receiving: { bySupplier: [...bySupplier.entries()].map(([supplier, v]) => ({ supplier, ...v, divergencePct: pct(v.divergentes, v.total) })), withoutOrderException: emergency },
       lossesAndAdjustments: losses.map((l) => ({ type: l.type, movements: l._count._all, quantity: l._sum.quantity?.toString() })),
       custody: { byStatus: Object.fromEntries(custody.map((c) => [c.status, c._count._all])), overdue },

@@ -15,7 +15,10 @@ export class CreateWarehouseDto {
   @IsOptional() @IsString() @MaxLength(60) companyAxisId?: string;
   @IsOptional() @IsString() @MaxLength(60) unitAxisId?: string;
   @IsOptional() @IsString() @MaxLength(60) projectAxisId?: string;
+  /** Responsável no Axis: id de usuário ou de colaborador (seletor de pessoas do cache). */
   @IsOptional() @IsString() @MaxLength(60) responsibleAxisUserId?: string;
+  /** Site do Axis onde o almoxarifado fica (opcional; o endereço em texto continua). */
+  @IsOptional() @IsString() @MaxLength(60) siteAxisId?: string;
   @IsOptional() @IsString() @MaxLength(300) addressText?: string;
 }
 

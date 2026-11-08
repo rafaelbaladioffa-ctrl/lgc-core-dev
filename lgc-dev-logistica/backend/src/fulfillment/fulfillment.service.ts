@@ -4,6 +4,7 @@ import { FulfillmentStatus, Prisma } from '@prisma/client';
 import type { FulfillmentOrder } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { problem } from '../common/errors.js';
+import { resolveOwnIds } from '../common/axis-cache.js';
 import { todayBR } from '../stock/availability.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import type { CreateFulfillmentDto, ListFulfillmentQuery } from './fulfillment.dto.js';
@@ -22,20 +23,20 @@ export { orderCode };
 /**
  * Escopo de quem só tem `fulfillment:read`: a ordem é "sua" se você é o solicitante (id de usuário do Axis)
  * ou o destinatário. O Core manda o destinatário como id de COLABORADOR (`recipient_id`), então ele casa com
- * `collaboratorId` do token; o id de usuário continua aceito para ordens antigas ou criadas manualmente.
+ * `collaboratorId` do token (ou com o colaborador ligado ao usuário no cache `USER`: `resolveOwnIds`); o id de
+ * usuário continua aceito para ordens antigas ou criadas manualmente.
  */
-function ownIds(user: Pick<AuthenticatedUser, 'userId' | 'collaboratorId'>): string[] {
+export function ownIds(user: Pick<AuthenticatedUser, 'userId' | 'collaboratorId'>): string[] {
   return [user.userId, user.collaboratorId].filter((id): id is string => !!id);
 }
 
-export function ownOrdersWhere(user: Pick<AuthenticatedUser, 'userId' | 'collaboratorId'>): Prisma.FulfillmentOrderWhereInput {
-  const ids = ownIds(user);
+export function ownOrdersWhere(user: Pick<AuthenticatedUser, 'userId' | 'collaboratorId'>, ids = ownIds(user)): Prisma.FulfillmentOrderWhereInput {
   return { OR: [{ requesterAxisId: user.userId }, { recipientAxisId: { in: ids } }] };
 }
 
-export function isOwnOrder(order: Pick<FulfillmentOrder, 'requesterAxisId' | 'recipientAxisId'>, user: Pick<AuthenticatedUser, 'userId' | 'collaboratorId'>): boolean {
+export function isOwnOrder(order: Pick<FulfillmentOrder, 'requesterAxisId' | 'recipientAxisId'>, user: Pick<AuthenticatedUser, 'userId' | 'collaboratorId'>, ids = ownIds(user)): boolean {
   if (order.requesterAxisId === user.userId) return true;
-  return order.recipientAxisId !== null && ownIds(user).includes(order.recipientAxisId);
+  return order.recipientAxisId !== null && ids.includes(order.recipientAxisId);
 }
 
 /** Situações em que a ordem ainda aceita reserva e, portanto, a definição do almoxarifado. */
@@ -338,7 +339,7 @@ export class FulfillmentService {
     const where: Prisma.FulfillmentOrderWhereInput = {
       ...(query.status && { status: query.status }),
       ...(query.axisRequestId && { axisRequestId: query.axisRequestId }),
-      ...(!this.canSeeAll(user) && ownOrdersWhere(user)),
+      ...(!this.canSeeAll(user) && ownOrdersWhere(user, await resolveOwnIds(this.prisma, user))),
     };
     const [total, rows] = await this.prisma.$transaction([
       this.prisma.fulfillmentOrder.count({ where }),
@@ -355,7 +356,7 @@ export class FulfillmentService {
   private async load(id: string, user: AuthenticatedUser | null) {
     const order = await this.prisma.fulfillmentOrder.findUnique({ where: { id }, include: { items: { include: { reservations: true } } } });
     if (!order) throw new NotFoundException('Ordem de atendimento não encontrada.');
-    if (user && !this.canSeeAll(user) && !isOwnOrder(order, user)) {
+    if (user && !this.canSeeAll(user) && !isOwnOrder(order, user, await resolveOwnIds(this.prisma, user))) {
       throw new ForbiddenException('Sem acesso a esta ordem de atendimento.');
     }
     const items = order.items.map((i) => {
