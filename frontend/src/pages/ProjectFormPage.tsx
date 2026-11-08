@@ -11,6 +11,7 @@ import { useAuth } from '../context/AuthContext';
 import { ProjectDocuments } from '../components/ProjectDocuments';
 import { ProjectQuotes } from '../components/ProjectQuotes';
 import { ProjectApproval } from '../components/ProjectApproval';
+import { ProjectJourney } from '../components/ProjectJourney';
 import { DOCUMENT_ACCEPT, readFileAsBase64 } from '../utils/fileUpload';
 
 const emptyForm: CreateProjectInput = {
@@ -156,8 +157,13 @@ export function ProjectFormPage() {
       error={error}
       loading={loading}
       submitLabel={isEdit ? 'Salvar alterações' : 'Cadastrar'}
-      maxWidth={520}
+      maxWidth={isEdit ? 760 : 520}
     >
+      {isEdit && id && (
+        <FormSection title="Jornada do projeto">
+          <ProjectJourney projectId={id} />
+        </FormSection>
+      )}
       <FormSection title="Dados do projeto">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <input

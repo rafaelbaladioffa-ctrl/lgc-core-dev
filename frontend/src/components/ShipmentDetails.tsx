@@ -35,7 +35,8 @@ export function ShipmentDetails({ request, shipment, statusLabel, canAdminReques
   const place = [destination.city, destination.state].filter(Boolean).join('/');
   const logistics = shipment.logistics;
   const delivered = deliveredByMaterial(logistics);
-  const shortages = shortageItems(logistics);
+  // Depois de entregue, a falta registrada na reserva já foi suprida.
+  const shortages = request.status === 'encerrada' || request.status === 'concluida' ? [] : shortageItems(logistics);
   const shortageByCode = new Map(shortages.map((item) => [item.materialCode, item.shortage]));
 
   const resolve = async () => {

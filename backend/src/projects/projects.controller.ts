@@ -14,6 +14,7 @@ import { ProjectDocumentsService, contentDisposition } from './project-documents
 import { CreateProjectDocumentDto } from './dto/create-project-document.dto.js';
 import { ProjectQuotesService } from './project-quotes.service.js';
 import { ProjectApprovalService } from './project-approval.service.js';
+import { ProjectJourneyService } from './project-journey.service.js';
 import { RequestProjectQuoteDto } from './dto/project-quote.dto.js';
 
 /** A Bid é guardada como ZIP genérico (detecção pelos bytes); o download usa o tipo de planilha. */
@@ -27,6 +28,7 @@ export class ProjectsController {
     private readonly documentsService: ProjectDocumentsService,
     private readonly quotesService: ProjectQuotesService,
     private readonly approvalService: ProjectApprovalService,
+    private readonly journeyService: ProjectJourneyService,
   ) {}
 
   @Post()
@@ -47,6 +49,14 @@ export class ProjectsController {
   @RequirePermissions('project:read')
   fieldAlerts(@CurrentUser() user: AuthenticatedUser) {
     return this.projectsService.fieldAlerts(user.collaboratorId);
+  }
+
+  /** Etapa atual de cada projeto (selo da lista), `{ [projectId]: { key, label, state } }` (PT-11). */
+  @Get('journey-stages')
+  @RequirePermissions('project:read')
+  async journeyStages() {
+    const projects = await this.projectsService.findAll();
+    return this.journeyService.currentStages(projects.map((p) => p.id));
   }
 
   @Get(':id')
@@ -75,6 +85,13 @@ export class ProjectsController {
   @RequirePermissions('project:read')
   getAcceptance(@Param('id') id: string) {
     return this.approvalService.getAcceptance(id);
+  }
+
+  /** Jornada do projeto: cotação → aprovado → requisição de envio → obra no Field → encerrado (PT-11). Sem valores de custo. */
+  @Get(':id/journey')
+  @RequirePermissions('project:read')
+  getJourney(@Param('id') id: string) {
+    return this.journeyService.journey(id);
   }
 
   @Delete(':id')

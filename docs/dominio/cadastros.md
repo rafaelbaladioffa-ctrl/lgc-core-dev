@@ -288,7 +288,7 @@ Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado
 - `PUT /projects/:id` altera nome, centro de custo, responsável, site e datas previstas.
 - `DELETE /projects/:id` é exclusão física e só vale para projeto em `proposta` sem requisições; nos outros casos responde `409` e o caminho é encerrar o projeto.
 
-**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`; com `aprovado` aceita `acceptedQuoteId` e `clientPoNumber`, §10.3), `GET /projects/:id/acceptance` (`project:read`, aceite e requisição gerada), `GET /projects/field-alerts` (`project:read`, obras concluídas no Field nos projetos abertos do usuário, §10.4), `DELETE /projects/:id` (`project:delete`, `delete_project`).
+**Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`; com `aprovado` aceita `acceptedQuoteId` e `clientPoNumber`, §10.3), `GET /projects/:id/acceptance` (`project:read`, aceite e requisição gerada), `GET /projects/field-alerts` (`project:read`, obras concluídas no Field nos projetos abertos do usuário, §10.4), `GET /projects/:id/journey` e `GET /projects/journey-stages` (`project:read`, jornada do projeto e etapa atual de cada projeto, §10.5), `DELETE /projects/:id` (`project:delete`, `delete_project`).
 
 **Eventos de outbox.** Todo evento `project.*` leva o estado completo do projeto, para o cache dos satélites (o Financeiro usa nome e centro de custo no orçamento e no rateio — decisão P-07 da especificação de Projetos do Financeiro):
 
@@ -428,6 +428,24 @@ O Field avisa o Core por eventos `field.project.*` ([integracao-core-field.md §
 - **`field.project.progress`:** snapshot de `date` anterior à guardada (ou, no mesmo dia, de `occurred_at` anterior) é ignorado; o percentual é limitado a 0–100; sem `percent_complete` válido, `failed`.
 - **`field.project.completed`:** registra `completed_at` e um `AuditEvent` `project.field_completed`; **não encerra o projeto** (encerrar continua manual). O responsável do projeto é avisado pelo sino do topo ("Obra do projeto … concluída no Field — encerre o projeto"), alimentado por `GET /projects/field-alerts`, que lista os projetos dele ainda `aprovado`/`em_execucao` com obra concluída e some sozinho quando o projeto é encerrado.
 - **Idempotência e ordem:** cada campo só muda para um valor mais novo ou igual (`created` mais antigo não desfaz o mais novo; `started`/`completed` guardam a menor data); o projeto é travado (`FOR UPDATE`) durante o tratamento. Falhas com mensagem em português (`failed`): projeto inexistente, evento de outro satélite que não o Field, `axis_project_id`/`field_project_id` ausente, projeto já ligado a outra obra do Field.
+
+### 10.5 Jornada do projeto (PT-11)
+
+Linha do tempo **Cotação → Aprovado → Requisição de envio → Obra no Field → Encerrado**, montada só com o que o Core já guarda. Código: [project-journey.ts](../../backend/src/projects/project-journey.ts) (regra pura `buildJourney`) e [project-journey.service.ts](../../backend/src/projects/project-journey.service.ts) (leitura em lote). **Nenhum valor de custo, margem ou salário**: só situações, datas, horas e percentuais; o resultado financeiro fica no Financeiro e o painel só mostra o link **Ver resultado no Financeiro** (`financeiroUrl`) quando o satélite Financeiro ativo tem `frontend_url` configurada (`{frontend_url}/#/projetos/:id`).
+
+- **`GET /projects/:id/journey`** (`project:read`): `{projectId, code, name, status, currentStage, stages[], shipment, field, financeiroUrl}`. Cada etapa traz `key`, `label`, `state` (`feito`, `em_andamento`, `pendente`, `atencao`), `date` (ISO do marco mais recente ou `null`), `summary`, `details[{label, value}]`, `alerts[]` e `link`. `shipment` (itens com pedido, entregue e falta; totais) e `field` (link, plano da SOW, tarefas, %, HH real × previsto) alimentam os indicadores da tela. `404` se o projeto não existe.
+- **`GET /projects/journey-stages`** (`project:read`): `{ [projectId]: {key, label, state} }` com a etapa atual de cada projeto, em lote (uma consulta por tabela), para o selo da lista.
+- **Etapa atual** = a primeira que não está `feito`; projeto `encerrado` termina na etapa Encerrado.
+
+| Etapa | Estado | Fonte |
+|---|---|---|
+| Cotação | `pendente` (não solicitada) → `em_andamento` (pedida, aguardando o Financeiro) → `feito` (cotação recebida; mostra a revisão vigente, nº de revisões e de materiais) | `project_quote_requests`, `project_quotes` |
+| Aprovado | `pendente` → `feito` (data, revisão aceita, PO, quem aprovou, site); aviso se a cotação chegou e falta o site | `project_acceptances` |
+| Requisição de envio | `pendente` até aprovar; sem materiais na cotação: `feito` ("nenhum envio necessário"); `em_andamento` (aprovação do CC, depois Logística); **`atencao`** com: sem aprovador, reprovada/cancelada, falta de material (`RESERVADA_PARCIAL`/`AGUARDANDO_ESTOQUE`, PA-11), `BLOQUEADA`/`DIVERGENCIA`, entrega recusada; `feito` quando encerrada pela entrega. Detalhes: aprovação do CC, situação e ordem na Logística, expedição (data, romaneio, transportadora), entrega, faltas | `requests` (origem `projeto_aprovado`) e `form_data.shipment.logistics` ([requisicoes-estado-atual.md §16.1](requisicoes-estado-atual.md#161-acompanhamento-da-logística-pt-09)); a falta da reserva deixa de valer depois da entrega |
+| Obra no Field | `pendente` (aguardando o Field) → `em_andamento` (criada; em execução com %) → `feito` (concluída); **`atencao`** com plano da SOW `pending_review`/`failed`/`no_sow` ou HH real acima do previsto. Link da obra (URL absoluta do Field, ou a base `frontend_url` do satélite Field + caminho relativo; sem base, sem link) | `project_field_works` (§10.4) |
+| Encerrado | `pendente` → **`atencao`** quando o Field concluiu a obra e o projeto segue aberto (encerrar é manual, PA-18) → `feito` (data = `updated_at` do projeto encerrado) | `projects.status` |
+
+**Frontend:** a seção **Jornada do projeto** abre a edição do projeto (`/projects/:id/edit`) e a tela própria `/projects/:id/journey` (`project:read`, para quem só lê). Indicadores (`KpiCard`): etapa atual, material entregue, itens em falta, avanço da obra, tarefas, HH real × previsto. Erro de API aparece na tela com **Tentar de novo**. A lista de projetos ganhou a coluna **Etapa** (selo com a etapa atual, colorido pelo estado; clicar abre a jornada).
 
 ---
 

@@ -244,6 +244,8 @@ Todos levam `axis_project_id` (UUID do projeto no Core) e `field_project_id` (id
 - O comando diário gera um `progress` por obra e dia; rodar de novo no mesmo dia só gera outro se algum número mudou.
   Ignora obra cancelada, concluída e sem tarefas.
 
+O Core mostra o que recebe na etapa "Obra no Field" da jornada do projeto (link, plano da SOW, tarefas, % e HH real × previsto; [cadastros.md §10.5](dominio/cadastros.md#105-jornada-do-projeto-pt-11)). O link usa o `url` do `field.project.created`; se ele vier relativo (`FRONTEND_URL` vazia no Field), o Core o junta ao `frontend_url` do satélite Field e, sem essa base, não mostra link.
+
 ### 5.3 Agendar (VPS)
 
 ```bash

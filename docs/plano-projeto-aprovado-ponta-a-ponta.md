@@ -316,10 +316,13 @@ Depende de PT-03 e PT-07.
 
 ### Onda 4 — visão e ensaio
 
-**PT-11 · Core + Financeiro · Jornada do projeto**
+**PT-11 · Core + Financeiro · Jornada do projeto** — **lado do Core feito em 2026-11-08** (o resultado do projeto e do CC no Financeiro segue com o PT-07/PT-10)
 - No projeto do Core: linha do tempo Cotação → Aprovado → Requisição (aprovada / expedida / entregue)
   → Obra no Field (% e HH) → Encerrado. Valores (receita, custo, margem) só no Financeiro.
 - No Financeiro: resultado do projeto e do CC (contratado, comprometido, realizado por categoria).
+- Entregue no Core: `GET /projects/:id/journey` e `GET /projects/journey-stages` (`project:read`), seção "Jornada do projeto" na edição do
+  projeto, tela `/projects/:id/journey`, coluna "Etapa" na lista e link "Ver resultado no Financeiro" (só com `frontend_url` do
+  satélite Financeiro). Detalhe: [cadastros.md §10.5](dominio/cadastros.md#105-jornada-do-projeto-pt-11).
 
 **PT-12 · Ensaio ponta a ponta**
 - Bancos `_test` dos quatro sistemas; roteiro: criar projeto com site → cotar com materiais e equipe

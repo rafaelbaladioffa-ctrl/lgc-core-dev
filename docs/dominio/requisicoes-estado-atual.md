@@ -335,4 +335,6 @@ Cada evento grava também `AuditEvent` (`request.logistics_order_created`, `…_
 
 **Tela:** o detalhe do envio mostra o cartão **Situação na Logística** (ordem, situação, aviso "Falta material no estoque" com a lista de faltas, expedição, entrega e recusa) e, na tabela de materiais, as colunas **Falta no estoque** e **Entregue** (soma de todas as confirmações).
 
+**Jornada do projeto:** a mesma situação aparece na etapa **Requisição de envio** da jornada do projeto ([cadastros.md §10.5](cadastros.md#105-jornada-do-projeto-pt-11)), com a falta como estado de atenção (limitação: a reposição do estoque não gera evento, então a falta registrada na reserva só some quando a entrega é concluída).
+
 **Fora do escopo (PA-11):** compra automática do que falta. O Suprimentos abre a compra; a Logística não compra.

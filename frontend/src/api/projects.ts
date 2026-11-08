@@ -150,7 +150,62 @@ export interface ProjectFieldAlert {
   completedAt: string;
 }
 
+export type JourneyState = 'feito' | 'em_andamento' | 'pendente' | 'atencao';
+export type JourneyStageKey = 'cotacao' | 'aprovado' | 'requisicao' | 'obra' | 'encerrado';
+
+export interface JourneyStage {
+  key: JourneyStageKey;
+  label: string;
+  state: JourneyState;
+  /** ISO do marco mais recente da etapa. */
+  date: string | null;
+  summary: string;
+  details: Array<{ label: string; value: string }>;
+  alerts: string[];
+  /** Caminho do Core (`/requests/…`) ou URL absoluta (obra no Field). */
+  link: { label: string; to: string } | null;
+}
+
+/** `GET /projects/:id/journey` (PT-11). Só horas, percentuais e situações: nenhum valor de custo, margem ou salário. */
+export interface ProjectJourney {
+  projectId: string;
+  code: string;
+  name: string | null;
+  status: ProjectStatus;
+  currentStage: JourneyStageKey;
+  stages: JourneyStage[];
+  shipment: {
+    requestId: string;
+    code: string;
+    items: Array<{ materialCode: string; description: string; unit: string; quantity: string; delivered: string; shortage: string | null }>;
+    delivered: number;
+    total: number;
+    shortages: number;
+  } | null;
+  field: {
+    url: string | null;
+    fieldProjectCode: string | null;
+    sowPlanStatus: string | null;
+    tasksCount: number | null;
+    percentComplete: number | null;
+    tasksTotal: number | null;
+    tasksDone: number | null;
+    realManHours: number | null;
+    plannedManHours: number | null;
+    progressDate: string | null;
+    startedAt: string | null;
+    completedAt: string | null;
+  } | null;
+  /** Só vem com a URL de frontend do satélite Financeiro configurada. */
+  financeiroUrl: string | null;
+}
+
+/** Etapa atual de cada projeto, por id (selo da lista). */
+export type ProjectJourneyStages = Record<string, { key: JourneyStageKey; label: string; state: JourneyState }>;
+
 export const projectsApi = {
+  journey: (id: string) => api.get<ProjectJourney>(`/projects/${id}/journey`).then((r) => r.data),
+  journeyStages: () => api.get<ProjectJourneyStages>('/projects/journey-stages').then((r) => r.data),
   fieldAlerts: () => api.get<ProjectFieldAlert[]>('/projects/field-alerts').then((r) => r.data),
   list: () => api.get<Project[]>('/projects').then((r) => r.data),
   get: (id: string) => api.get<Project>(`/projects/${id}`).then((r) => r.data),

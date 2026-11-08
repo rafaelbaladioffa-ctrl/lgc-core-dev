@@ -3,6 +3,7 @@ import { PrismaClient, Prisma } from '@prisma/client';
 import { randomInt, randomUUID } from 'node:crypto';
 import { ProjectApprovalService } from '../src/projects/project-approval.service.js';
 import { ProjectsService } from '../src/projects/projects.service.js';
+import { ProjectJourneyService } from '../src/projects/project-journey.service.js';
 import { RequestsService } from '../src/requests/requests.service.js';
 import { OutboxService } from '../src/integration/outbox.service.js';
 import { DelegationsService } from '../src/delegations/delegations.service.js';
@@ -175,8 +176,24 @@ describe.skipIf(!process.env.TEST_DATABASE_URL)('PT-09 — handlers de entrada (
     const alerts = await projects.fieldAlerts(ids.responsible);
     expect(alerts).toEqual([expect.objectContaining({ projectId: ids.project, fieldProjectCode: 'CSTR-PROJ-0042', completedAt: '2026-11-30T17:00:00.000Z' })]);
 
+    // PT-11: a jornada do projeto agrega tudo isso (consulta real, sem nenhum valor de custo).
+    const journeys = new ProjectJourneyService(prisma as any);
+    const journey = await journeys.journey(ids.project);
+    expect(journey.stages.map((st) => [st.key, st.state])).toEqual([
+      ['cotacao', 'feito'],
+      ['aprovado', 'feito'],
+      ['requisicao', 'feito'],
+      ['obra', 'feito'],
+      ['encerrado', 'atencao'],
+    ]);
+    expect(journey.currentStage).toBe('encerrado');
+    expect(journey.shipment).toMatchObject({ requestId: ids.request, delivered: 1200, total: 1200, shortages: 0 });
+    expect(journey.field).toMatchObject({ fieldProjectCode: 'CSTR-PROJ-0042', percentComplete: 25.5, realManHours: 40.5, plannedManHours: 400 });
+    expect(await journeys.currentStages([ids.project])).toEqual({ [ids.project]: { key: 'encerrado', label: 'Encerrado', state: 'atencao' } });
+
     // Encerrar (manual) tira o aviso.
     await projects.updateStatus(ids.project, { status: 'encerrado' } as any);
     expect(await projects.fieldAlerts(ids.responsible)).toEqual([]);
+    expect((await journeys.currentStages([ids.project]))[ids.project]).toEqual({ key: 'encerrado', label: 'Encerrado', state: 'feito' });
   });
 });

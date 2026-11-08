@@ -152,7 +152,7 @@ ou `X-Field-Signature`.
   [cadastros.md §10.4](dominio/cadastros.md#104-obra-no-field-pt-09)). Os dois são idempotentes (repetir um evento não duplica
   efeito) e tolerantes à ordem trocada (decidem por `status`/`request_version`/datas, nunca pela ordem de chegada); o satélite
   é conferido (`field.*` só do Field, os da ordem de envio só da Logística) e requisição/projeto inexistente ou payload
-  incompleto viram `failed` com o motivo legível na tela Integrações. Evento de qualquer outro tipo continua `ignored` (`202`).
+  incompleto viram `failed` com o motivo legível na tela Integrações. Evento de qualquer outro tipo continua `ignored` (`202`). O que os handlers guardam alimenta a **jornada do projeto** do Core (`GET /projects/:id/journey`, [cadastros.md §10.5](dominio/cadastros.md#105-jornada-do-projeto-pt-11)).
 - *Resultado.* `processed` → `200`; `ignored` (sem handler) → `202`; repetido já `processed`/`ignored` →
   mesma resposta, sem reprocessar (`duplicate: true`); handler lançou → efeito desfeito, linha `failed`
   com a mensagem e `500` (o satélite reenvia; o reenvio de um `failed` é reprocessado na mesma linha).
