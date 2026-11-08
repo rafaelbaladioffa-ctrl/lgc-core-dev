@@ -2,7 +2,7 @@ import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, 
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
-import { CreateBudgetDto, SimulateRevisionDto, UpdateRevisionDto } from './budget-inputs.dto.js';
+import { CreateBudgetDto, SimulateRevisionDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
 
@@ -43,6 +43,13 @@ export class BudgetsController {
   @RequirePermissions('budget:write')
   create(@Body() dto: CreateBudgetDto, @CurrentUser() user: AuthenticatedUser) {
     return this.budgets.createBudget(dto, user);
+  }
+
+  /** Cabeçalho: título e início/conclusão previstos (nulo = valor do projeto no Core). */
+  @Patch(':id')
+  @RequirePermissions('budget:write')
+  update(@Param('id', ParseUUIDPipe) id: string, @Body() dto: UpdateBudgetDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.budgets.updateBudget(id, dto, user);
   }
 
   @Post(':id/revisions')

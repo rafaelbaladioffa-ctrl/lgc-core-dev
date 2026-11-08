@@ -13,7 +13,7 @@ import {
 } from '../lib/budgets';
 import { listDestinations, listMaterials, type BudgetDestination, type BudgetMaterial } from '../lib/budgetParams';
 import { decimalToInput, formatNumber, formatPercent, fractionToPercentInput, parseDecimal, parsePercent } from '../lib/decimal';
-import { formatBRL, formatDateTime } from '../lib/format';
+import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
 import { Badge, ErrorAlert, Field, messageOf, PageHeader, useLoad, useUnsavedWarning } from '../components/ui';
 
@@ -257,7 +257,7 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
     <form onSubmit={save} noValidate>
       <PageHeader
         title={`${rev.code}`}
-        back={{ href: `/projetos/${encodeURIComponent(rev.budget.axisProjectId)}`, label: rev.budget.title }}
+        back={{ href: `/projetos/${encodeURIComponent(rev.budget.axisProjectId)}`, label: rev.budget.displayTitle }}
         actions={
           canWrite && (
             <>
@@ -287,6 +287,10 @@ function RevisionEditor({ rev, editable, canWrite, onChange }: { rev: Revision; 
       >
         <p className="muted">
           <Badge tone={st.tone}>{st.label}</Badge> {rev.project?.client?.name ?? ''} · parâmetros {rev.parameterSet.code} · alterada em {formatDateTime(rev.updatedAt)}
+        </p>
+        <p className="muted">
+          {rev.budget.displayTitle} · previsto de {formatDate(rev.budget.schedule.start.value)} a {formatDate(rev.budget.schedule.end.value)}
+          {(rev.budget.schedule.start.source === 'orcamento' || rev.budget.schedule.end.source === 'orcamento') && ' (ajustado no orçamento)'}
         </p>
       </PageHeader>
 

@@ -42,8 +42,10 @@ O que muda em relação à planilha está em [§15](#15-diferenças-intencionais
 
 ## 2. Conceitos
 
-- **Projeto**: registro do Core (`code`, cliente, centro de custo, responsável, status). O Core ainda
-  não tem nome nem valor de projeto; o título fica no orçamento (P-07).
+- **Projeto**: registro do Core (`code`, nome, cliente, centro de custo, responsável, status, início e
+  conclusão previstos). O Financeiro guarda uma cópia no cache de mestres (webhook `project.*` e
+  "Atualizar do Axis Core"). Projetos criados no Core antes de 2026-11-07 podem estar sem nome. O
+  valor do projeto continua só no orçamento (P-07, resolvida).
 - **Orçamento** (`project_budgets`): um por projeto e modelo. Tem revisões.
 - **Revisão** (`budget_revisions`): versão numerada (R1, R2…) com as entradas, o conjunto de
   parâmetros usado e o resultado calculado. Só a revisão `rascunho` é editável.
@@ -85,7 +87,7 @@ O Core é dono do status do projeto (`proposta → aprovado → em_execucao → 
 | Revisão `ganha` com projeto ainda `proposta` no Core | "Atualize o status do projeto no Core" |
 | Projeto `encerrado` no Core com realizado aberto | "Feche o realizado" |
 
-Emitir evento para o Core (`budget.won`) fica para quando o Core tiver receptor (P-07).
+Emitir evento para o Core (`budget.won`) fica para quando o Core tiver receptor de eventos de satélite.
 
 ## 4. Parâmetros (versionados)
 
@@ -134,7 +136,7 @@ Cada revisão guarda as entradas abaixo; o servidor gera as linhas calculadas (�
 
 | Seção | Entradas |
 |---|---|
-| Cabeçalho | Projeto do Core (obrigatório), título, início e conclusão previstos, observações |
+| Cabeçalho | Projeto do Core (obrigatório), título, início e conclusão previstos (do orçamento, não da revisão: ver abaixo), observações (da revisão) |
 | Equipe | Por função: pessoas e dias (funções de campo) ou horas (gerente) |
 | Material | Item do catálogo ou avulso (descrição, preço cobrado, custo real), quantidade; frete/retirada; perdas (% do custo) |
 | Deslocamento | Destino do catálogo ou km/pedágio manuais; carros; aluguel de carro e estacionamento por carro/dia (custo). Diárias de veículo = carros × dias de trabalho |
@@ -145,6 +147,20 @@ Cada revisão guarda as entradas abaixo; o servidor gera as linhas calculadas (�
 
 "Dias de trabalho" é um número da revisão, comum a todas as funções de campo (como na planilha).
 Equipes com dias diferentes por função ficam para depois.
+
+**Cabeçalho e dados do Core (P-07, decidido em 2026-11-07).** O cabeçalho pertence ao orçamento e vale
+para todas as revisões; não entra no cálculo e pode ser alterado em qualquer situação da revisão
+(`PATCH /budgets/:id`, `budget:write`, com auditoria `budget.updated`).
+
+- **Título**: opcional. Vazio, o orçamento mostra o nome do projeto no Core e acompanha a edição lá;
+  sem nome no Core (projeto antigo), mostra "código — cliente". Preenchido, o título do orçamento
+  prevalece. Na migração, títulos gerados automaticamente (`<código>` ou `<código> — <cliente>`)
+  foram esvaziados para passar a seguir o nome do Core.
+- **Início e conclusão previstos**: o padrão é o prazo previsto do projeto no Core. Cada data pode ser
+  sobrescrita no orçamento (ex.: proposta com prazo diferente do cadastrado); apagar volta a usar a do
+  Core. A tela indica a origem de cada data ("do Axis Core" ou "do orçamento"). A conclusão efetiva não
+  pode ser antes do início efetivo (`400`); no banco, um `CHECK` vale para as datas próprias.
+- O Financeiro não escreve no Core: mudar o prazo do projeto continua sendo feito lá.
 
 ## 6. Regras de cálculo
 
@@ -360,7 +376,7 @@ P-03.
 | `parameter_set_roles` | função (§4.1) por conjunto |
 | `client_profiles` | perfil de cliente versionado (constantes AWS §7, tabela tipo de cabo → linha do bid) |
 | `budget_materials`, `budget_destinations` | catálogos (§4.3) |
-| `project_budgets` | `axis_project_id`, `model` (`generico`/`aws_sow`), `client_profile_id?`, título |
+| `project_budgets` | `axis_project_id`, `model` (`generico`/`aws_sow`), `client_profile_id?`, `title?`, `planned_start_date?`, `planned_end_date?` (vazios = valores do projeto no Core, §5) |
 | `budget_revisions` | número, status, `parameter_set_id`, entradas (`inputs` JSON validado pelo DTO: equipe, material com preço e custo copiados do catálogo, deslocamento, plataforma, hospedagem, alimentação, custos extras), resultado (`result` JSON) e totais em colunas (receita, impostos, diretos, indiretos, lucro, lucro sobre o custo), criado/alterado por e em |
 | `budget_revision_team`, `budget_revision_items` | equipe e itens de material/custo da revisão, com valores copiados do catálogo |
 | `budget_revision_sow` | dados lidos da SOW, correções e justificativas dos indicadores |
@@ -379,8 +395,9 @@ gravam evento de negócio com antes/depois.
 | `GET/POST /parameter-sets`, `GET/PATCH /parameter-sets/:id`, `POST /:id/publish` | budget_params:read / write (salários exigem read_payroll) |
 | `GET /parameter-sets/:id/hourly-costs` | budget_params:read_payroll |
 | `GET/POST/PATCH /budget-materials`, `/budget-destinations`, `/client-profiles` | budget_params:read / write |
-| `GET /projects` (cache do Core + resumo do orçamento) | budget:read |
+| `GET /projects` (cache do Core com nome, centro de custo e prazo previsto + resumo do orçamento), `GET /projects/:axisProjectId`, `POST /projects/sync` | budget:read |
 | `GET/POST /budgets`, `GET /budgets/:id` | budget:read / write |
+| `PATCH /budgets/:id` (cabeçalho: título e datas previstas; `null` = valor do Core) | budget:write |
 | `POST /budgets/:id/revisions` (nova revisão a partir da última) | budget:write |
 | `GET/PATCH /revisions/:id` | budget:read / write |
 | `POST /revisions/:id/simulate` (calcula sem gravar) | budget:read |
@@ -408,11 +425,16 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
 
 ## 13. Integração
 
-- **Projetos e clientes**: cache alimentado por `project.created/status_changed` e
-  `client.created/updated` (já funcionam) e pelo botão "Atualizar do Axis Core", que lê `GET /projects`
-  e `GET /clients` do Core com o token de quem clicou (PJ2).
-- O evento `project.created` não traz nome nem centro de custo; o centro de custo será necessário
-  para rateio. Ver P-07.
+- **Projetos e clientes**: cache alimentado por `project.created/updated/status_changed/deleted`,
+  `cost_center.created/updated` e `client.created/updated`, e pelo botão "Atualizar do Axis Core", que
+  lê `GET /projects` e `GET /clients` do Core com o token de quem clicou (PJ2).
+- Desde 2026-11-07 (P-07) todo `project.*` leva o estado completo: nome, cliente, centro de custo
+  (id, código e nome), responsável, status e `planned_start_date`/`planned_end_date` (`AAAA-MM-DD`).
+  `project.deleted` (exclusão de proposta no Core) chega com `status: 'encerrado'` e `deleted: true` e
+  marca o projeto inativo. Nome nulo (projeto antigo) não apaga o nome guardado. A carga por
+  `GET /projects` grava as mesmas chaves e preserva o código e o nome do centro de custo vindos do
+  webhook (a lista do Core só devolve o id). Contrato: `docs/dominio/cadastros.md` §4 e §10 do Core e
+  [integracao-core-financeiro.md §2](../../docs/integracao-core-financeiro.md#2-eventos-core--financeiro).
 - Feriados para "cabe na janela": consulta ao calendário do Core; se o Core não expuser, só dias
   úteis com aviso "sem feriados".
 - Nenhum evento Financeiro → Core nesta frente.
@@ -483,6 +505,10 @@ de custo; outros modelos de cliente além do AWS.
 - Telas: `#/projetos` (lista com orçamento e lucro sobre o custo), `#/projetos/:id` (revisões),
   `#/revisoes/:id` (editor com resultado recalculado pelo servidor enquanto se digita).
 - Não verificado ainda: uso na tela com login real (feito só por testes e chamadas sem sessão).
+- Dados do Core (P-07, 2026-11-07): migração `20261108140000_pj2_cabecalho_core` (título opcional,
+  datas previstas próprias do orçamento). A lista de projetos mostra nome e prazo previsto do Core
+  ("Sem nome no Axis Core" para projeto antigo); a página do projeto mostra centro de custo e prazo e
+  tem "Editar cabeçalho"; a revisão mostra o título efetivo e o prazo. Regras em §5.
 
 ## 17. Decisões pendentes
 
@@ -494,7 +520,7 @@ de custo; outros modelos de cliente além do AWS.
 | P-04 | Custo hora do realizado: parâmetros da revisão ganha ou os vigentes na execução? | Os da revisão ganha (compara só o que mudou na obra); mostrar os vigentes como informação |
 | P-05 | Guardar o texto original da SOW (documento do cliente)? | Guardar, com acesso restrito a `budget:write`, e prazo de retenção definido |
 | P-06 | Catálogo de material próprio ou o catálogo de materiais do Core com preço e custo? | Próprio no início (precisa de preço cobrado por cliente); vincular `axis_material_id` opcional |
-| P-07 | O projeto do Core deve ganhar nome (e o evento trazer nome e centro de custo)? | Sim: mudança de contrato no Core, em PR próprio |
+| P-07 | O projeto do Core deve ganhar nome (e o evento trazer nome e centro de custo)? | **Resolvida (2026-11-07)**: o Core ganhou nome e prazo previsto e emite o estado completo em `project.*` e `cost_center.*`; o Financeiro usa nome e prazo no cabeçalho do orçamento (§5) |
 | P-08 | Planilhas preenchidas de projetos reais para validar o cálculo | Usar fora do Git, só para conferir; testes versionados com números fictícios |
 | P-09 | Manter o adicional de IRPJ sobre toda a presunção (conservador)? | Manter até a contabilidade confirmar |
 | P-10 | Valores a revisar na carga inicial: salário igual para técnico e encarregado, ISS no teto, rateio/contingência/prazo em 0, R$/km estimado, gerente sem valor | Revisar com a contabilidade antes de publicar o primeiro conjunto |

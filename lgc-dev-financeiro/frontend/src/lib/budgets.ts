@@ -16,28 +16,43 @@ export const REVISION_STATUS: Record<RevisionStatus, { label: string; tone: 'suc
 
 export const PROJECT_STATUS: Record<string, string> = { proposta: 'Proposta', aprovado: 'Aprovado', em_execucao: 'Em execução', encerrado: 'Encerrado' };
 
-export interface ProjectRow {
-  axisProjectId: string;
-  code: string | null;
-  status: string | null;
-  active: boolean;
-  client: { code: string | null; name: string | null } | null;
-  budget: {
-    id: string;
-    title: string;
-    revision: { id: string; number: number; status: RevisionStatus; revenue: string | null; profit?: string | null; profitOnCost?: string | null } | null;
-  } | null;
-}
-
-export interface ProjectDetail {
+/** Projeto do Axis Core como o Financeiro guarda (nome e datas previstas desde a P-07). */
+export interface CoreProject {
   axisProjectId: string;
   code: string;
+  /** Nulo em projetos antigos do Core, ainda sem nome. */
+  name: string | null;
   status: string | null;
   active: boolean;
   client: { code: string | null; name: string | null } | null;
-  budgets: Array<{
+  costCenter: { code: string | null; name: string | null } | null;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+}
+
+export type DateSource = 'orcamento' | 'core' | null;
+
+/** Cabeçalho do orçamento: título e datas próprios são opcionais; vazios, valem os do projeto no Core. */
+export interface BudgetHeader {
+  title: string | null;
+  displayTitle: string;
+  plannedStartDate: string | null;
+  plannedEndDate: string | null;
+  schedule: { start: { value: string | null; source: DateSource }; end: { value: string | null; source: DateSource } };
+}
+
+export interface ProjectRow extends CoreProject {
+  budget:
+    | (BudgetHeader & {
+        id: string;
+        revision: { id: string; number: number; status: RevisionStatus; revenue: string | null; profit?: string | null; profitOnCost?: string | null } | null;
+      })
+    | null;
+}
+
+export interface ProjectDetail extends CoreProject {
+  budgets: Array<BudgetHeader & {
     id: string;
-    title: string;
     model: string;
     createdAt: string;
     revisions: Array<{ id: string; number: number; status: RevisionStatus; parameterSetCode: string; revenue: string | null; profit?: string | null; profitOnCost?: string | null; updatedAt: string }>;
@@ -140,8 +155,8 @@ export interface Revision {
   code: string;
   status: RevisionStatus;
   notes: string | null;
-  budget: { id: string; title: string; model: string; axisProjectId: string; projectCode: string };
-  project: { axisProjectId: string; code: string; status: string | null; client: { code: string | null; name: string | null } | null } | null;
+  budget: BudgetHeader & { id: string; model: string; axisProjectId: string; projectCode: string };
+  project: CoreProject | null;
   parameterSet: { id: string; code: string; status: string; hoursPerDay: string | null; kmRate: string | null; materialMarkup: string | null; platformDailyBilled: string | null };
   currentParameterSet: { id: string; code: string } | null;
   roles: Array<{ roleKey: string; label: string; fieldRole: boolean; billingRate: string | null }>;
@@ -156,7 +171,9 @@ export const listProjects = () => api<{ lastSyncedAt: string | null; projects: P
 export const syncProjects = () => api<{ clients: number; projects: number; updated: number }>('/projects/sync', { method: 'POST', body: '{}' });
 export const getProject = (id: string) => api<ProjectDetail>(`/projects/${encodeURIComponent(id)}`);
 export const createBudget = (axisProjectId: string) => api<{ budgetId: string; revisionId: string }>('/budgets', { method: 'POST', body: JSON.stringify({ axisProjectId }) });
-export const newRevision = (budgetId: string) => api<{ revisionId: string }>(`/budgets/${budgetId}/revisions`, { method: 'POST', body: '{}' });
+export const updateBudget = (id: string, body: { title?: string | null; plannedStartDate?: string | null; plannedEndDate?: string | null }) =>
+  api<BudgetHeader>(`/budgets/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+export const newRevision =(budgetId: string) => api<{ revisionId: string }>(`/budgets/${budgetId}/revisions`, { method: 'POST', body: '{}' });
 export const getRevision = (id: string) => api<Revision>(`/revisions/${id}`);
 export const saveRevision = (id: string, body: { inputs?: BudgetInputs; notes?: string | null }) => api<Revision>(`/revisions/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 export const simulateRevision = (id: string, inputs: BudgetInputs) => api<BudgetResult>(`/revisions/${id}/simulate`, { method: 'POST', body: JSON.stringify({ inputs }) });

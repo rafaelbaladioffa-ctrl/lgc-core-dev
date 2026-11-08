@@ -1,9 +1,22 @@
-import { useState } from 'react';
-import { createBudget, getProject, listProjects, newRevision, PROJECT_STATUS, REVISION_STATUS, syncProjects } from '../lib/budgets';
+import { useState, type FormEvent } from 'react';
+import { createBudget, getProject, listProjects, newRevision, PROJECT_STATUS, REVISION_STATUS, syncProjects, updateBudget, type BudgetHeader, type CoreProject, type DateSource } from '../lib/budgets';
 import { formatPercent } from '../lib/decimal';
-import { formatBRL, formatDateTime } from '../lib/format';
+import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { navigate } from '../lib/router';
-import { Badge, ErrorAlert, messageOf, PageHeader, useLoad } from '../components/ui';
+import { Badge, ErrorAlert, Field, messageOf, PageHeader, useLoad } from '../components/ui';
+
+/** "01/12/2026 a 15/01/2027"; uma das pontas vazia vira "—". */
+export function formatPeriod(start: string | null | undefined, end: string | null | undefined): string {
+  if (!start && !end) return '—';
+  return `${formatDate(start)} a ${formatDate(end)}`;
+}
+
+const SOURCE_LABEL: Record<Exclude<DateSource, null>, string> = { core: 'do Axis Core', orcamento: 'do orçamento' };
+
+/** Código e nome do projeto do Core; projeto antigo sem nome mostra o aviso. */
+function ProjectName({ project }: { project: Pick<CoreProject, 'name'> }) {
+  return project.name ? <span>{project.name}</span> : <span className="muted">Sem nome no Axis Core</span>;
+}
 
 export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canSeeCost: boolean }) {
   const { data, error, loading, reload } = useLoad(listProjects, [], 'Não foi possível carregar os projetos.');
@@ -26,7 +39,7 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
   }
 
   const q = search.trim().toLowerCase();
-  const rows = (data?.projects ?? []).filter((p) => !q || [p.code, p.client?.name, p.budget?.title].some((v) => v?.toLowerCase().includes(q)));
+  const rows = (data?.projects ?? []).filter((p) => !q || [p.code, p.name, p.client?.name, p.budget?.displayTitle].some((v) => v?.toLowerCase().includes(q)));
 
   return (
     <>
@@ -46,7 +59,7 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
         </p>
       )}
       <div className="toolbar">
-        <input type="search" placeholder="Buscar por código, cliente ou título" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Buscar projeto" />
+        <input type="search" placeholder="Buscar por código, nome ou cliente" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Buscar projeto" />
       </div>
       {error && <ErrorAlert message={error} onRetry={reload} />}
       {loading && !data && <p className="muted">Carregando…</p>}
@@ -58,6 +71,7 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
                 <th>Projeto</th>
                 <th>Cliente</th>
                 <th>Situação no Core</th>
+                <th>Prazo previsto</th>
                 <th>Orçamento</th>
                 <th className="num">Valor da proposta</th>
                 {canSeeCost && <th className="num">Lucro sobre o custo</th>}
@@ -66,7 +80,7 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="muted empty">
+                  <td colSpan={canSeeCost ? 7 : 6} className="muted empty">
                     {data.projects.length === 0 ? 'Nenhum projeto no Financeiro ainda. Clique em "Atualizar do Axis Core".' : 'Nenhum projeto encontrado.'}
                   </td>
                 </tr>
@@ -76,10 +90,14 @@ export function ProjectsPage({ canWrite, canSeeCost }: { canWrite: boolean; canS
                 return (
                   <tr key={p.axisProjectId} className="row-link" onClick={() => navigate(`/projetos/${encodeURIComponent(p.axisProjectId)}`)}>
                     <td>
-                      <a href={`#/projetos/${encodeURIComponent(p.axisProjectId)}`}>{p.code ?? p.axisProjectId}</a>
+                      <a href={`#/projetos/${encodeURIComponent(p.axisProjectId)}`}>{p.code}</a>
+                      <div className="cell-sub">
+                        <ProjectName project={p} />
+                      </div>
                     </td>
                     <td>{p.client?.name ?? '—'}</td>
                     <td>{p.status ? (PROJECT_STATUS[p.status] ?? p.status) : '—'}</td>
+                    <td className="nowrap">{formatPeriod(p.plannedStartDate, p.plannedEndDate)}</td>
                     <td>{rev ? <Badge tone={REVISION_STATUS[rev.status].tone}>{`R${rev.number} · ${REVISION_STATUS[rev.status].label}`}</Badge> : <span className="muted">{canWrite ? 'sem orçamento' : '—'}</span>}</td>
                     <td className="num">{rev ? formatBRL(rev.revenue) : '—'}</td>
                     {canSeeCost && <td className="num">{rev?.profitOnCost ? formatPercent(rev.profitOnCost) : '—'}</td>}
@@ -122,7 +140,7 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
   return (
     <>
       <PageHeader
-        title={data.code}
+        title={data.name ? `${data.code} — ${data.name}` : data.code}
         back={{ href: '/projetos', label: 'Projetos' }}
         actions={
           canWrite &&
@@ -141,15 +159,18 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
       >
         <p className="muted">
           {data.client?.name ?? 'Cliente não sincronizado'} · {data.status ? (PROJECT_STATUS[data.status] ?? data.status) : 'situação desconhecida'} no Axis Core
+          {data.costCenter && ` · centro de custo ${[data.costCenter.code, data.costCenter.name].filter(Boolean).join(' — ')}`}
+        </p>
+        <p className="muted">
+          Prazo previsto no Axis Core: {formatPeriod(data.plannedStartDate, data.plannedEndDate)}
+          {!data.name && ' · Projeto sem nome no Axis Core: edite-o lá para o nome aparecer aqui.'}
         </p>
       </PageHeader>
       {actionError && <ErrorAlert message={actionError} />}
       {!budget && <p className="card muted">Este projeto ainda não tem orçamento.{canWrite ? ' Clique em "Criar orçamento" para montar a primeira revisão com os parâmetros vigentes.' : ''}</p>}
       {budget && (
         <section className="card table-card">
-          <div className="card-pad">
-            <h2>{budget.title}</h2>
-          </div>
+          <BudgetHeaderCard budgetId={budget.id} header={budget} project={data} canWrite={canWrite} onSaved={reload} />
           <table className="table">
             <thead>
               <tr>
@@ -183,5 +204,92 @@ export function ProjectPage({ id, canWrite, canSeeCost }: { id: string; canWrite
         </section>
       )}
     </>
+  );
+}
+
+/**
+ * Cabeçalho do orçamento (P-07). Título vazio = nome do projeto no Axis Core; datas vazias = prazo previsto do
+ * projeto no Core. Preencher aqui sobrescreve só no orçamento (o Core não muda).
+ */
+export function BudgetHeaderCard({ budgetId, header, project, canWrite, onSaved }: { budgetId: string; header: BudgetHeader; project: CoreProject; canWrite: boolean; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState('');
+  const [start, setStart] = useState('');
+  const [end, setEnd] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function open() {
+    setTitle(header.title ?? '');
+    setStart(header.plannedStartDate ?? '');
+    setEnd(header.plannedEndDate ?? '');
+    setError(null);
+    setEditing(true);
+  }
+
+  async function save(e: FormEvent) {
+    e.preventDefault();
+    if (title.trim() && title.trim().length < 3) return setError('Título: 3 a 160 caracteres, ou deixe vazio para usar o nome do Axis Core.');
+    setBusy(true);
+    setError(null);
+    try {
+      await updateBudget(budgetId, { title: title.trim() || null, plannedStartDate: start || null, plannedEndDate: end || null });
+      setEditing(false);
+      onSaved();
+    } catch (err) {
+      setError(messageOf(err, 'Não foi possível salvar o cabeçalho.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const sourceNote = (source: DateSource) => (source ? <small className="muted"> ({SOURCE_LABEL[source]})</small> : null);
+  const { start: s, end: en } = header.schedule;
+
+  if (editing) {
+    return (
+      <form className="card-pad" onSubmit={save} noValidate>
+        <h2>Cabeçalho do orçamento</h2>
+        <div className="grid-3">
+          <Field label="Título" hint={project.name ? `Vazio = nome do Axis Core: ${project.name}` : 'Vazio = código e cliente (o projeto ainda não tem nome no Axis Core)'}>
+            <input value={title} maxLength={160} onChange={(e) => setTitle(e.target.value)} placeholder={project.name ?? ''} />
+          </Field>
+          <Field label="Início previsto" hint={`Vazio = do Axis Core: ${formatDate(project.plannedStartDate)}`}>
+            <input type="date" value={start} onChange={(e) => setStart(e.target.value)} />
+          </Field>
+          <Field label="Conclusão prevista" hint={`Vazio = do Axis Core: ${formatDate(project.plannedEndDate)}`}>
+            <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} />
+          </Field>
+        </div>
+        {error && <ErrorAlert message={error} />}
+        <div className="form-actions">
+          <button className="btn btn-primary" type="submit" disabled={busy}>
+            {busy ? 'Salvando…' : 'Salvar cabeçalho'}
+          </button>
+          <button className="btn btn-ghost" type="button" disabled={busy} onClick={() => setEditing(false)}>
+            Cancelar
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  return (
+    <div className="card-pad budget-header">
+      <div>
+        <h2>{header.displayTitle}</h2>
+        <p className="muted">
+          {!header.title && project.name ? 'Título: nome do projeto no Axis Core. ' : ''}
+          Início previsto: {formatDate(s.value)}
+          {sourceNote(s.source)} · Conclusão prevista: {formatDate(en.value)}
+          {sourceNote(en.source)}
+        </p>
+      </div>
+      {canWrite && (
+        <button className="btn btn-ghost" type="button" onClick={open}>
+          Editar cabeçalho
+        </button>
+      )}
+    </div>
   );
 }

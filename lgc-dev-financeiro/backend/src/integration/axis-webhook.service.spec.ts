@@ -67,6 +67,43 @@ describe('toMasterRecord', () => {
     expect(toMasterRecord(envelope({ event_type: 'client.created', payload: { client_id: 'k1', code: 12 } }))).toMatchObject({ kind: 'CLIENT', code: '12' });
   });
 
+  // Contrato do Core (cadastros §4 e §10): todo project.* leva o estado completo do projeto.
+  const projectState = {
+    project_id: 'p1',
+    code: 'PROP-100.001-1126',
+    name: 'Projeto Exemplo',
+    status: 'aprovado',
+    client_id: 'k1',
+    cost_center_id: 'cc1',
+    cost_center_code: '110',
+    cost_center_name: 'Centro Exemplo',
+    responsible_collaborator_id: 'c1',
+    planned_start_date: '2026-12-01',
+    planned_end_date: '2027-01-15',
+  };
+
+  it('project.updated traz nome, centro de custo e datas previstas', () => {
+    const m = toMasterRecord(envelope({ event_type: 'project.updated', payload: { ...projectState, changed_fields: ['name', 'planned_end_date'] } }));
+    expect(m).toMatchObject({ kind: 'PROJECT', axisId: 'p1', code: 'PROP-100.001-1126', name: 'Projeto Exemplo', active: true });
+    expect(m?.data).toMatchObject({ cost_center_id: 'cc1', cost_center_name: 'Centro Exemplo', planned_start_date: '2026-12-01', planned_end_date: '2027-01-15' });
+  });
+
+  it('project.deleted (status encerrado e deleted: true) marca o projeto inativo', () => {
+    const m = toMasterRecord(envelope({ event_type: 'project.deleted', payload: { ...projectState, status: 'encerrado', deleted: true } }));
+    expect(m).toMatchObject({ kind: 'PROJECT', axisId: 'p1', name: 'Projeto Exemplo', active: false });
+    expect(m?.data).toMatchObject({ deleted: true });
+  });
+
+  it('projeto antigo sem nome não apaga o nome guardado', () => {
+    expect(toMasterRecord(envelope({ event_type: 'project.status_changed', payload: { ...projectState, name: null, previous_status: 'proposta' } }))?.name).toBeUndefined();
+  });
+
+  it('cost_center.created/updated, com active false na exclusão', () => {
+    const cc = { cost_center_id: 'cc1', code: '110', name: 'Centro Exemplo', sector_id: 's1', parent_cost_center_id: null, responsible_collaborator_id: null, active: true };
+    expect(toMasterRecord(envelope({ event_type: 'cost_center.created', payload: cc }))).toMatchObject({ kind: 'COST_CENTER', axisId: 'cc1', code: '110', name: 'Centro Exemplo', active: true });
+    expect(toMasterRecord(envelope({ event_type: 'cost_center.updated', payload: { ...cc, active: false } }))).toMatchObject({ kind: 'COST_CENTER', active: false });
+  });
+
   it('ignora eventos que não são mestres', () => {
     expect(toMasterRecord(envelope({ event_type: 'request.completed', payload: { request_id: 'r1' } }))).toBeNull();
   });
@@ -86,6 +123,16 @@ describe('AxisWebhookService.receive', () => {
     await expect(service.receive(body, sign(body))).resolves.toEqual({ status: 'processed', event_id: EVENT_ID });
     expect(tx.axisMasterCache.upsert).toHaveBeenCalledOnce();
     expect(prisma.integrationMessage.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'PROCESSED' }) }));
+  });
+
+  it('project.deleted grava o projeto inativo e mantém o nome já guardado quando vier sem nome', async () => {
+    const { prisma, tx } = prismaMock();
+    tx.axisMasterCache.findUnique.mockResolvedValue({ sourceOccurredAt: new Date(Date.now() - 3_600_000), code: 'PROP-1', name: 'Projeto Exemplo', active: true, data: { project_id: 'p1', status: 'proposta' } });
+    const service = new AxisWebhookService(prisma as unknown as PrismaService, config({ AXIS_WEBHOOK_SECRET: SECRET }));
+    const body = raw(envelope({ event_type: 'project.deleted', occurred_at: new Date(Date.now() - 60_000).toISOString(), payload: { project_id: 'p1', code: 'PROP-1', name: null, status: 'encerrado', deleted: true } }));
+    await expect(service.receive(body, sign(body))).resolves.toEqual({ status: 'processed', event_id: EVENT_ID });
+    const { update } = tx.axisMasterCache.upsert.mock.calls[0][0];
+    expect(update).toMatchObject({ name: 'Projeto Exemplo', active: false, data: { status: 'encerrado', deleted: true } });
   });
 
   it('evento repetido não é reprocessado', async () => {

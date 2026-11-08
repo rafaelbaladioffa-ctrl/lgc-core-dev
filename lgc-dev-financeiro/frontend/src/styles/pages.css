@@ -378,3 +378,25 @@ a.btn {
     position: static;
   }
 }
+
+/* --- Dados do projeto no Core (P-07) --- */
+.cell-sub {
+  font-size: var(--text-xs);
+  margin-top: 2px;
+}
+
+td.nowrap {
+  white-space: nowrap;
+}
+
+.budget-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.budget-header h2 {
+  margin-bottom: var(--space-1);
+}

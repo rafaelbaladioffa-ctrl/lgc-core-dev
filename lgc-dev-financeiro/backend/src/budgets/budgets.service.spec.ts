@@ -5,7 +5,7 @@ import { validate } from 'class-validator';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
-import { BudgetsService, emptyInputs, presentResult } from './budgets.service.js';
+import { budgetHeader, BudgetsService, emptyInputs, presentResult, projectInfo } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
 import { BudgetInputsDto } from './budget-inputs.dto.js';
 import type { BudgetResult } from './budget-engine.js';
@@ -121,6 +121,53 @@ describe('BudgetsService — regras', () => {
   });
 });
 
+describe('Cabeçalho do orçamento com dados do Core (P-07)', () => {
+  const cache = {
+    axisId: 'p1',
+    code: 'PROP-100.001-1126',
+    name: 'Projeto Exemplo',
+    active: true,
+    data: { client_id: 'k1', status: 'aprovado', cost_center_code: '110', cost_center_name: 'Centro Exemplo', planned_start_date: '2026-12-01', planned_end_date: '2027-01-15' },
+  };
+  const project = projectInfo(cache, { code: '100', name: 'Cliente Exemplo' });
+  const own = { title: null, projectCode: 'PROP-100.001-1126', plannedStartDate: null, plannedEndDate: null };
+
+  it('lê nome, centro de custo e datas previstas do cache', () => {
+    expect(project).toMatchObject({ name: 'Projeto Exemplo', costCenter: { code: '110', name: 'Centro Exemplo' }, plannedStartDate: '2026-12-01', plannedEndDate: '2027-01-15' });
+  });
+
+  it('sem título nem datas próprios, usa o nome e as datas do Core', () => {
+    expect(budgetHeader(own, project)).toMatchObject({
+      title: null,
+      displayTitle: 'Projeto Exemplo',
+      schedule: { start: { value: '2026-12-01', source: 'core' }, end: { value: '2027-01-15', source: 'core' } },
+    });
+  });
+
+  it('título e data do orçamento sobrescrevem; projeto sem nome mostra código e cliente', () => {
+    const h = budgetHeader({ ...own, title: 'Proposta revisada', plannedEndDate: new Date('2027-02-01T00:00:00Z') }, project);
+    expect(h).toMatchObject({ displayTitle: 'Proposta revisada', plannedEndDate: '2027-02-01', schedule: { start: { source: 'core' }, end: { value: '2027-02-01', source: 'orcamento' } } });
+    expect(budgetHeader(own, { ...project, name: null }).displayTitle).toBe('PROP-100.001-1126 — Cliente Exemplo');
+  });
+
+  function serviceFor() {
+    const tx = {
+      projectBudget: { findUnique: vi.fn().mockResolvedValue({ id: 'b1', ...own }), update: vi.fn().mockResolvedValue({}) },
+      axisMasterCache: { findUnique: vi.fn(({ where }: { where: { kind_axisId: { kind: string } } }) => Promise.resolve(where.kind_axisId.kind === 'PROJECT' ? cache : null)) },
+    };
+    return { tx, service: new BudgetsService(prismaWith(tx), audit) };
+  }
+
+  it('grava a data própria e recusa conclusão antes do início do Core', async () => {
+    const { tx, service } = serviceFor();
+    await expect(service.updateBudget('b1', { plannedEndDate: '2026-11-20' }, ORCAMENTISTA)).rejects.toThrow('A conclusão prevista (do orçamento) não pode ser antes do início (do projeto no Axis Core).');
+    await expect(service.updateBudget('b1', { plannedStartDate: '2026-02-30' }, ORCAMENTISTA)).rejects.toThrow('Início previsto: data inexistente.');
+    const out = await service.updateBudget('b1', { title: '  ', plannedStartDate: '2026-12-10' }, ORCAMENTISTA);
+    expect(tx.projectBudget.update).toHaveBeenCalledWith({ where: { id: 'b1' }, data: { title: null, plannedStartDate: new Date('2026-12-10T00:00:00Z') } });
+    expect(out.schedule.start).toEqual({ value: '2026-12-10', source: 'orcamento' });
+  });
+});
+
 describe('BudgetInputsDto', () => {
   it('aceita entradas válidas e recusa negativos e textos', async () => {
     const ok = plainToInstance(BudgetInputsDto, { workDays: 5, team: [{ roleKey: 'tecnico', people: 2 }], materials: [], travel: { cars: 1, kmRoundTrip: '64' } });
@@ -147,7 +194,7 @@ describe('CoreSyncService', () => {
       url.endsWith('/clients')
         ? reply([{ id: 'c1', code: 100, legalName: 'Cliente', updatedAt: '2026-11-01T00:00:00Z' }])
         : reply([
-            { id: 'p1', code: 'PROP-100.001-1126', clientId: 'c1', status: 'proposta', updatedAt: '2026-11-02T00:00:00Z' },
+            { id: 'p1', code: 'PROP-100.001-1126', name: 'Projeto Exemplo', plannedStartDate: '2026-12-01T00:00:00.000Z', plannedEndDate: null, clientId: 'c1', status: 'proposta', updatedAt: '2026-11-02T00:00:00Z' },
             { id: 'p-novo', code: 'PROP-100.002-1126', clientId: 'c1', status: 'encerrado', updatedAt: '2026-11-02T00:00:00Z' },
           ]),
     );
@@ -155,7 +202,34 @@ describe('CoreSyncService', () => {
     expect(out).toEqual({ clients: 1, projects: 2, updated: 2 });
     expect(fetchFn).toHaveBeenCalledWith('http://core/api/v1/projects', expect.objectContaining({ headers: { Authorization: 'Bearer t' } }));
     expect(tx.axisMasterCache.upsert).toHaveBeenCalledTimes(2);
-    expect(tx.axisMasterCache.upsert.mock.calls[1][0].create).toMatchObject({ kind: 'PROJECT', axisId: 'p1', code: 'PROP-100.001-1126', active: true });
+    expect(tx.axisMasterCache.upsert.mock.calls[1][0].create).toMatchObject({
+      kind: 'PROJECT',
+      axisId: 'p1',
+      code: 'PROP-100.001-1126',
+      name: 'Projeto Exemplo',
+      active: true,
+      data: { name: 'Projeto Exemplo', planned_start_date: '2026-12-01', planned_end_date: null },
+    });
+  });
+
+  it('projeto sem nome no Core mantém o nome e o centro de custo que o webhook já trouxe', async () => {
+    const tx = {
+      axisMasterCache: {
+        findUnique: vi.fn(({ where }: { where: { kind_axisId: { kind: string } } }) =>
+          Promise.resolve(
+            where.kind_axisId.kind === 'PROJECT'
+              ? { sourceOccurredAt: new Date('2026-11-01'), name: 'Nome do webhook', data: { cost_center_id: 'cc1', cost_center_code: '110', cost_center_name: 'Centro Exemplo' } }
+              : null,
+          ),
+        ),
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+    };
+    const fetchFn = vi.fn((url: string) =>
+      url.endsWith('/clients') ? reply([]) : reply([{ id: 'p1', code: 'PROP-1', name: null, clientId: 'c1', costCenterId: 'cc1', status: 'aprovado', updatedAt: '2026-11-02T00:00:00Z' }]),
+    );
+    await new CoreSyncService(prismaWith(tx), audit, config).syncProjectsAndClients(ORCAMENTISTA, 'Bearer t', fetchFn as unknown as typeof fetch);
+    expect(tx.axisMasterCache.upsert.mock.calls[0][0].update).toMatchObject({ name: 'Nome do webhook', data: { cost_center_code: '110', cost_center_name: 'Centro Exemplo', planned_start_date: null } });
   });
 
   it('Core recusando a consulta vira 403 em pt-BR', async () => {

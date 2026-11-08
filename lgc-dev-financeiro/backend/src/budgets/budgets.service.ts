@@ -4,7 +4,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { computeBudget, type BudgetInputs, type BudgetResult, type EngineParams } from './budget-engine.js';
-import type { BudgetInputsDto, CreateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
+import type { BudgetInputsDto, CreateBudgetDto, UpdateBudgetDto, UpdateRevisionDto } from './budget-inputs.dto.js';
 
 export const COST_PERMISSION = 'budget:read_cost';
 const canSeeCost = (u: AuthenticatedUser) => u.permissions.includes(COST_PERMISSION);
@@ -61,6 +61,56 @@ function presentInputs(inputs: BudgetInputs, cost: boolean): BudgetInputs {
 }
 
 const str = (v: unknown) => (typeof v === 'string' ? v : null);
+/** Data de negócio `AAAA-MM-DD` (coluna DATE chega à meia-noite UTC). */
+const dateOnly = (v: Date | null | undefined) => (v ? v.toISOString().slice(0, 10) : null);
+const parseDateOnly = (v: string | null | undefined) => (v ? new Date(`${v}T00:00:00Z`) : v === null ? null : undefined);
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+
+type CacheRow = { axisId: string; code: string | null; name: string | null; active: boolean; data: unknown };
+type ClientRow = { code: string | null; name: string | null } | null | undefined;
+
+/** Projeto do Core como o Financeiro o mostra (cache alimentado pelo webhook e por POST /projects/sync). */
+export function projectInfo(p: CacheRow, client: ClientRow) {
+  const data = (p.data ?? {}) as Record<string, unknown>;
+  const ccCode = str(data.cost_center_code);
+  const ccName = str(data.cost_center_name);
+  const start = str(data.planned_start_date);
+  const end = str(data.planned_end_date);
+  return {
+    axisProjectId: p.axisId,
+    code: p.code ?? p.axisId,
+    name: p.name || str(data.name) || null,
+    status: str(data.status),
+    active: p.active,
+    client: client ? { code: client.code, name: client.name } : null,
+    costCenter: ccCode || ccName ? { code: ccCode, name: ccName } : null,
+    plannedStartDate: start && DATE_ONLY.test(start) ? start : null,
+    plannedEndDate: end && DATE_ONLY.test(end) ? end : null,
+  };
+}
+export type ProjectInfo = ReturnType<typeof projectInfo>;
+
+type DateSource = 'orcamento' | 'core' | null;
+
+/**
+ * Cabeçalho do orçamento (P-07): título e datas próprios são opcionais.
+ * Sem título, vale o nome do projeto no Core (ou "código — cliente" se o projeto ainda não tem nome).
+ * Sem data própria, vale a data prevista do projeto no Core; a data do orçamento, quando preenchida, sobrescreve.
+ */
+export function budgetHeader(b: Pick<ProjectBudget, 'title' | 'projectCode' | 'plannedStartDate' | 'plannedEndDate'>, project: ProjectInfo | null) {
+  const ownStart = dateOnly(b.plannedStartDate);
+  const ownEnd = dateOnly(b.plannedEndDate);
+  const pick = (own: string | null, core: string | null | undefined): { value: string | null; source: DateSource } =>
+    own ? { value: own, source: 'orcamento' } : core ? { value: core, source: 'core' } : { value: null, source: null };
+  return {
+    title: b.title,
+    displayTitle: b.title || project?.name || [project?.code ?? b.projectCode, project?.client?.name].filter(Boolean).join(' — '),
+    plannedStartDate: ownStart,
+    plannedEndDate: ownEnd,
+    schedule: { start: pick(ownStart, project?.plannedStartDate), end: pick(ownEnd, project?.plannedEndDate) },
+  };
+}
+
 const toDecimal = (v: string | null | undefined) => (v === null || v === undefined ? null : new Prisma.Decimal(v));
 
 @Injectable()
@@ -88,19 +138,15 @@ export class BudgetsService {
       lastSyncedAt: lastSync._max.syncedAt,
       projects: projects.map((p) => {
         const data = p.data as Record<string, unknown>;
-        const client = clientById.get(str(data.client_id) ?? '');
+        const project = projectInfo(p, clientById.get(str(data.client_id) ?? ''));
         const budget = budgetByProject.get(p.axisId);
         const rev = budget?.revisions[0];
         return {
-          axisProjectId: p.axisId,
-          code: p.code,
-          status: str(data.status),
-          active: p.active,
-          client: client ? { code: client.code, name: client.name } : null,
+          ...project,
           budget: budget
             ? {
                 id: budget.id,
-                title: budget.title,
+                ...budgetHeader(budget, project),
                 revision: rev
                   ? { id: rev.id, number: rev.number, status: rev.status, revenue: rev.revenue, ...(cost ? { profit: rev.profit, profitOnCost: rev.profitOnCost } : {}) }
                   : null,
@@ -114,10 +160,9 @@ export class BudgetsService {
   private async project(axisProjectId: string) {
     const p = await this.prisma.axisMasterCache.findUnique({ where: { kind_axisId: { kind: 'PROJECT', axisId: axisProjectId } } });
     if (!p) throw new NotFoundException('Projeto não encontrado no cache do Core. Atualize a lista de projetos.');
-    const data = p.data as Record<string, unknown>;
-    const clientId = str(data.client_id);
+    const clientId = str((p.data as Record<string, unknown>).client_id);
     const client = clientId ? await this.prisma.axisMasterCache.findUnique({ where: { kind_axisId: { kind: 'CLIENT', axisId: clientId } } }) : null;
-    return { axisProjectId: p.axisId, code: p.code ?? p.axisId, status: str(data.status), active: p.active, client: client ? { code: client.code, name: client.name } : null };
+    return projectInfo(p, client);
   }
 
   async getProject(axisProjectId: string, user: AuthenticatedUser) {
@@ -131,7 +176,7 @@ export class BudgetsService {
       ...project,
       budgets: budgets.map((b) => ({
         id: b.id,
-        title: b.title,
+        ...budgetHeader(b, project),
         model: b.model,
         createdAt: b.createdAt,
         revisions: b.revisions.map((r) => ({
@@ -179,7 +224,8 @@ export class BudgetsService {
       const set = await this.currentParameterSet(tx);
       const inputs = emptyInputs(set);
       const result = computeBudget(engineParams(set), inputs);
-      const title = dto.title?.trim() || [project.code, project.client?.name].filter(Boolean).join(' — ');
+      // Sem título informado, o cabeçalho mostra o nome do projeto no Core (e acompanha a edição lá).
+      const title = dto.title?.trim() || null;
       const budget = await tx.projectBudget.create({ data: { axisProjectId: project.axisProjectId, projectCode: project.code, model: 'generico', title, createdBy: user.userId } });
       const rev = await tx.budgetRevision.create({
         data: { budgetId: budget.id, number: 1, parameterSetId: set.id, inputs: inputs as unknown as Prisma.InputJsonValue, ...this.persistFields(result), createdBy: user.userId, updatedBy: user.userId },
@@ -187,6 +233,43 @@ export class BudgetsService {
       await this.audit.record(user.userId, 'budget.created', 'project_budget', budget.id, { project: project.code, revision: 1, parameterSet: set.code }, tx);
       return { budgetId: budget.id, revisionId: rev.id };
     });
+  }
+
+  /**
+   * Cabeçalho do orçamento: título e início/conclusão previstos. `null` volta a usar o valor do projeto no Core.
+   * Vale para todas as revisões e pode mudar em qualquer situação da revisão (não entra no cálculo).
+   */
+  async updateBudget(id: string, dto: UpdateBudgetDto, user: AuthenticatedUser) {
+    const budget = await this.prisma.projectBudget.findUnique({ where: { id } });
+    if (!budget) throw new NotFoundException('Orçamento não encontrado.');
+    const project = await this.project(budget.axisProjectId).catch(() => null);
+    const changes: { title?: string | null; plannedStartDate?: Date | null; plannedEndDate?: Date | null } = {};
+    if (dto.title !== undefined) changes.title = dto.title?.trim() || null;
+    const start = parseDateOnly(dto.plannedStartDate);
+    const end = parseDateOnly(dto.plannedEndDate);
+    if (start && dateOnly(start) !== dto.plannedStartDate) throw new BadRequestException('Início previsto: data inexistente.');
+    if (end && dateOnly(end) !== dto.plannedEndDate) throw new BadRequestException('Conclusão prevista: data inexistente.');
+    if (start !== undefined) changes.plannedStartDate = start;
+    if (end !== undefined) changes.plannedEndDate = end;
+    const next = budgetHeader({ ...budget, ...changes }, project);
+    const { start: s, end: e } = next.schedule;
+    if (s.value && e.value && e.value < s.value) {
+      const origin = (src: DateSource) => (src === 'core' ? 'do projeto no Axis Core' : 'do orçamento');
+      throw new BadRequestException(`A conclusão prevista (${origin(e.source)}) não pode ser antes do início (${origin(s.source)}).`);
+    }
+    if (Object.keys(changes).length === 0) return next;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.projectBudget.update({ where: { id }, data: changes });
+      await this.audit.record(
+        user.userId,
+        'budget.updated',
+        'project_budget',
+        id,
+        { project: budget.projectCode, title: next.title, plannedStartDate: next.plannedStartDate, plannedEndDate: next.plannedEndDate, changed: Object.keys(changes) },
+        tx,
+      );
+    });
+    return next;
   }
 
   private async loadRevision(id: string, tx: Prisma.TransactionClient = this.prisma): Promise<RevisionFull> {
@@ -210,7 +293,7 @@ export class BudgetsService {
       code: `${rev.budget.projectCode} R${rev.number}`,
       status: rev.status,
       notes: rev.notes,
-      budget: { id: rev.budget.id, title: rev.budget.title, model: rev.budget.model, axisProjectId: rev.budget.axisProjectId, projectCode: rev.budget.projectCode },
+      budget: { id: rev.budget.id, ...budgetHeader(rev.budget, project), model: rev.budget.model, axisProjectId: rev.budget.axisProjectId, projectCode: rev.budget.projectCode },
       project,
       parameterSet: { id: set.id, code: set.code, status: set.status, hoursPerDay: set.hoursPerDay, kmRate: set.kmRate, materialMarkup: set.materialMarkup, platformDailyBilled: set.platformDailyBilled },
       currentParameterSet: current,
@@ -286,7 +369,7 @@ export class BudgetsService {
       const rev = await tx.budgetRevision.create({
         data: { budgetId, number, parameterSetId: set.id, inputs: inputs as unknown as Prisma.InputJsonValue, ...this.persistFields(computeBudget(engineParams(set), inputs)), createdBy: user.userId, updatedBy: user.userId },
       });
-      await this.audit.record(user.userId, 'budget_revision.created', 'budget_revision', rev.id, { budget: budget.title, revision: number, basedOn: base?.number ?? null, parameterSet: set.code }, tx);
+      await this.audit.record(user.userId, 'budget_revision.created', 'budget_revision', rev.id, { budget: budget.title ?? budget.projectCode, revision: number, basedOn: base?.number ?? null, parameterSet: set.code }, tx);
       return rev.id;
     });
     return { revisionId: id };

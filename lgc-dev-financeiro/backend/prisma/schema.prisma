@@ -305,7 +305,11 @@ model ProjectBudget {
   axisProjectId String      @map("axis_project_id")
   projectCode   String      @map("project_code") // cópia do código do Core no momento da criação
   model         BudgetModel @default(generico)
-  title         String
+  /// Vazio = nome do projeto no Core (P-07).
+  title            String?
+  /// Vazio = data prevista do projeto no Core; preenchido = o orçamento sobrescreve (CHECK conclusão ≥ início).
+  plannedStartDate DateTime? @map("planned_start_date") @db.Date
+  plannedEndDate   DateTime? @map("planned_end_date") @db.Date
   createdBy     String      @map("created_by")
   createdAt     DateTime    @default(now()) @map("created_at")
   updatedAt     DateTime    @updatedAt @map("updated_at")

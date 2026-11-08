@@ -130,6 +130,25 @@ export class CreateBudgetDto {
   title?: string;
 }
 
+/** `AAAA-MM-DD` com mês 01–12 e dia 01–31; data inexistente (ex.: 2026-02-30) é recusada no serviço. */
+const dateOnly = (label: string) => Matches(/^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, { message: `${label}: data no formato AAAA-MM-DD.` });
+
+/** Cabeçalho do orçamento (P-07). `null` = volta a usar o valor do projeto no Core. */
+export class UpdateBudgetDto {
+  @nullable()
+  @IsString()
+  @Length(3, 160, { message: 'Título: 3 a 160 caracteres.' })
+  title?: string | null;
+
+  @nullable()
+  @dateOnly('Início previsto')
+  plannedStartDate?: string | null;
+
+  @nullable()
+  @dateOnly('Conclusão prevista')
+  plannedEndDate?: string | null;
+}
+
 export class UpdateRevisionDto {
   @IsOptional()
   @ValidateNested()
