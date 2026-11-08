@@ -25,6 +25,7 @@ Redigido em 2026-11-07 a partir da planilha que a LGC usa hoje para cotar projet
 | Cálculo | No servidor, com `Prisma.Decimal`. O frontend pede simulação à API; nunca calcula dinheiro sozinho |
 | Modelos de orçamento | `generico` (qualquer obra) e `aws_sow` (genérico + leitura da SOW, horas-meta, indicadores e valores do Bid Template) |
 | Resultado-chave | Lucro real depois de impostos e **lucro sobre o custo** contra a meta da empresa |
+| Fluxo com o Core | O Core pede a cotação ("Solicitar cotação", com a SOW em PDF); o Financeiro devolve, por revisão aprovada para envio, a Bid preenchida e a equipe orçada (§13.1, P-11 a P-15) |
 
 ## 1. Da planilha para o sistema
 
@@ -87,7 +88,8 @@ O Core é dono do status do projeto (`proposta → aprovado → em_execucao → 
 | Revisão `ganha` com projeto ainda `proposta` no Core | "Atualize o status do projeto no Core" |
 | Projeto `encerrado` no Core com realizado aberto | "Feche o realizado" |
 
-Emitir evento para o Core (`budget.won`) fica para quando o Core tiver receptor de eventos de satélite.
+A devolução da cotação aprovada para envio ao Core está em §13.1. Emitir `budget.won` fica para quando
+o Core tiver receptor genérico de eventos de satélite.
 
 ## 4. Parâmetros (versionados)
 
@@ -274,7 +276,9 @@ ficam num **perfil de cliente** versionado junto com os parâmetros, nunca no c�
 
 ### 7.1 Importação da SOW
 
-- O usuário cola o texto da SOW (como hoje). Upload de PDF com extração fica para depois.
+- A SOW vem do Core: é o PDF anexado ao projeto (P-13), versão indicada no `project.quote_requested`.
+  O Financeiro baixa o arquivo pela API de integração e extrai o texto no servidor. Colar o texto
+  continua possível como alternativa (PDF escaneado ou ilegível).
 - O servidor extrai: FBN, SOW UID, site, nome do projeto, início e conclusão da execução, prazo de
   envio (UTC, exibido também em Brasília), visita técnica, contatos, racks *live* (exige janela),
   plataforma elevatória (pedida / não precisa / não mencionada) e as linhas de cabo
@@ -319,10 +323,20 @@ Cada "Yes" pede um texto de justificativa (em inglês) guardado na revisão.
 
 ### 7.4 Valores para o Bid Template
 
-Lista pronta para digitação: nome da proposta (código do projeto), início e conclusão, lead time,
-R$/h e horas por função, deslocamento por carro/dia e nº de diárias, plataforma (diária/dias), e por
-tipo de cabo linha do bid, comprimento médio, quantidade e horas T. Textos de apoio em inglês
-(ex.: descrição do deslocamento). Exportar para planilha fica para depois.
+Valores: nome da proposta (código do projeto), início e conclusão, lead time, R$/h e horas por
+função, deslocamento por carro/dia e nº de diárias, plataforma (diária/dias), e por tipo de cabo linha
+do bid, comprimento médio, quantidade e horas T. Textos de apoio em inglês (ex.: descrição do
+deslocamento).
+
+**Bid preenchida (P-14).** O sistema preenche o **próprio Bid Template do cliente** (`.xlsx`):
+
+- O modelo vazio é enviado pela tela de Parâmetros e fica no banco, versionado junto do perfil de
+  cliente; nunca no repositório (é arquivo do cliente).
+- O perfil de cliente guarda o mapeamento valor → aba e célula (e a linha inicial das tabelas de
+  cabo). Mudou o modelo da AWS, publica-se novo perfil; revisões antigas continuam com o que usaram.
+- A Bid é gerada no servidor ao **aprovar o envio** e guardada na revisão (imutável depois disso);
+  a tela também permite baixar uma prévia do rascunho.
+- Fórmulas e formatação do modelo são preservadas; o sistema só escreve valores nas células mapeadas.
 
 ## 8. Realizado
 
@@ -437,12 +451,25 @@ Valores entram como texto decimal (`"1234.56"`), percentuais como fração (`"0.
   [integracao-core-financeiro.md §2](../../docs/integracao-core-financeiro.md#2-eventos-core--financeiro).
 - Feriados para "cabe na janela": consulta ao calendário do Core; se o Core não expuser, só dias
   úteis com aviso "sem feriados".
-- Nenhum evento Financeiro → Core nesta frente.
+- SOW: `project.document_added` e download por
+  `GET /integration/projects/:id/documents/:documentId/content` (API key; precisa assinar o evento).
+
+### 13.1 Cotação pedida pelo Core e devolvida ao Core
+
+Contrato completo em [integracao-core-financeiro.md §4](../../docs/integracao-core-financeiro.md#4-cotação-do-projeto).
+
+1. `project.quote_requested` (P-11: alguém clica "Solicitar cotação" no Core) cria o orçamento
+   `aws_sow` do projeto, se não houver, e o coloca na fila do orçamentista com o recado (`notes`) e a
+   SOW indicada. Se já houver orçamento e a SOW mudou, a próxima revisão nasce com aviso "SOW nova (vN)".
+2. Ao **aprovar o envio** (P-12), o Financeiro gera a Bid (§7.4) e grava na outbox
+   `POST /integration/projects/:axisProjectId/quotes` com `external_revision_id`, `revision_number`,
+   `sow_document_id`, `work_days`, datas da execução, `team` (por função: pessoas, dias, horas; P-15),
+   quem aprovou e a Bid em base64. Retry até o Core responder `201`; `409` vira falha para análise.
+3. Nunca vão ao Core custo, salário, imposto, indiretos ou lucro.
 
 ## 14. Fora do escopo desta frente
 
-Upload e leitura de PDF da SOW; exportação para o Bid Template; equipe com dias diferentes por
-função; custo por colaborador individual (usa-se a média por função); faturamento e contas a receber;
+Equipe com dias diferentes por função; OCR de SOW escaneada; custo por colaborador individual (usa-se a média por função); faturamento e contas a receber;
 custos realizados vindos do contas a pagar (até ele existir, lançamento manual); orçamento por centro
 de custo; outros modelos de cliente além do AWS.
 
@@ -465,9 +492,10 @@ de custo; outros modelos de cliente além do AWS.
 | PJ1 | Parâmetros versionados, funções e custo hora (§6.1), catálogos de material e destinos, permissões e perfis; testes do cálculo com valores fictícios | **feito** (2026-11-07): ver nota abaixo |
 | PJ2 | Orçamento genérico: projetos do cache, revisões, motor de cálculo (§6), `simulate`, tela da revisão e resultado; testes de paridade com a planilha | **feito** (2026-11-07): ver nota abaixo |
 | PJ3 | Fluxo da revisão (§3): submeter, devolver, aprovar envio, ganha/perdida, avisos de divergência com o Core | pendente |
-| PJ4 | Modelo `aws_sow`: perfil de cliente, importação da SOW, horas-meta, indicadores, valores do bid | pendente |
+| PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | pendente |
 | PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
+| PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | pendente |
 
 **Notas da PJ1.**
 - Migração `20261108120000_pj1_parametros`: tabelas `parameter_sets`, `parameter_set_roles`,
@@ -524,3 +552,8 @@ de custo; outros modelos de cliente além do AWS.
 | P-08 | Planilhas preenchidas de projetos reais para validar o cálculo | Usar fora do Git, só para conferir; testes versionados com números fictícios |
 | P-09 | Manter o adicional de IRPJ sobre toda a presunção (conservador)? | Manter até a contabilidade confirmar |
 | P-10 | Valores a revisar na carga inicial: salário igual para técnico e encarregado, ISS no teto, rateio/contingência/prazo em 0, R$/km estimado, gerente sem valor | Revisar com a contabilidade antes de publicar o primeiro conjunto |
+| P-11 | O projeto vai ao Financeiro sozinho ou alguém pede a cotação? | **Resolvida (2026-11-08)**: alguém clica "Solicitar cotação" no Core (`project.quote_requested`) |
+| P-12 | Quando o Financeiro devolve a cotação ao Core? | **Resolvida (2026-11-08)**: ao aprovar o envio; cada nova revisão aprovada chega como nova versão |
+| P-13 | Formato da SOW anexada no Core | **Resolvida (2026-11-08)**: PDF; o Financeiro extrai o texto. Validar o extrator com SOWs reais fora do Git |
+| P-14 | O que é a "planilha Bid preenchida"? | **Resolvida (2026-11-08)**: o próprio Bid Template do cliente preenchido. Falta uma cópia vazia do modelo (fora do Git) para mapear as células |
+| P-15 | "Colaboradores orçados" é quantidade ou pessoas nomeadas? | **Resolvida (2026-11-08)**: quantidade por função × dias (horas para o gerente) |
