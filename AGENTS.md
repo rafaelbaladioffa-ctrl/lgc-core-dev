@@ -58,4 +58,10 @@ cd lgc-dev-financeiro/backend && npx tsc -p tsconfig.build.json --noEmit && npm 
 cd lgc-dev-financeiro/frontend && npx tsc -p tsconfig.json --noEmit && npx oxlint src && npm test
 ```
 
+```bash
+node scripts/sync-design.mjs --check
+```
+
+Se mudar `axis-tokens.css`, `axis-shell.css` ou a marca em `frontend/public/brand-industrial/`, rode `node scripts/sync-design.mjs` para atualizar as cópias dos satélites (não edite as cópias).
+
 Rode também `cd backend && npm test` e `cd frontend && npm test`. A cobertura do Core ainda é pequena: escreva testes para o que mudar (exemplo de serviço com Prisma simulado: `backend/src/requests/requests-fluxo.spec.ts`).

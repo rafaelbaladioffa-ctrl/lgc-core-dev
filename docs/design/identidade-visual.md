@@ -127,3 +127,10 @@ Conferido por busca em `frontend/src` e `frontend/index.html` em 2026-11-07:
 2. Conforme a escolha: atualizar `theme-color`, manifest, `og:image`, favicons e a Logística; remover os assets da identidade descartada.
 3. Se Graphite for a oficial: produzir manual de uso (proteção, tamanhos mínimos, versões monocromáticas) e kit de exportação equivalente ao v3.
 4. Paleta de gráficos como tokens (`--chart-1`…), substituindo os hex fixos dos dashboards.
+
+## 6. Padrão único nos três sistemas
+
+- **Arquivos canônicos (só no Core):** `frontend/src/styles/axis-tokens.css` (tokens), `frontend/src/styles/axis-shell.css` (base, shell, primitivas `.axis-*` e login) e os SVGs de `frontend/public/brand-industrial/` mais `favicon-192.png`, `favicon-512.png` e `apple-touch-icon.png`.
+- **Propagação:** `node scripts/sync-design.mjs` copia esses arquivos para `lgc-dev-logistica/frontend/` e `lgc-dev-financeiro/frontend/` (CSS com cabeçalho "GERADO", em `src/styles/`; marca em `public/brand-industrial/`; ícones na raiz de `public/`). Cada satélite importa `./styles/axis-tokens.css` e `./styles/axis-shell.css`.
+- **Verificação:** `node scripts/sync-design.mjs --check` não escreve nada e sai com código 1 se alguma cópia estiver ausente ou divergente. Rode antes de entregar.
+- **Regra:** os satélites não editam as cópias. Mudança de identidade (cor, tipografia, componente do shell) se faz no Core e se propaga pelo script; estilos específicos de um satélite ficam em arquivos próprios, sem sobrescrever as classes canônicas.
