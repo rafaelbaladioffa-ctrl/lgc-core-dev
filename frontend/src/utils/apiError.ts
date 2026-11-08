@@ -5,6 +5,11 @@
  * instead of showing raw English.
  */
 const KNOWN_MESSAGES: Record<string, string> = {
+  // Sites (já em pt-BR no servidor): o texto do servidor é o texto da tela.
+  'Já existe um site com este código para o cliente.': 'Já existe um site com este código para o cliente.',
+  'O site não pertence ao cliente do projeto.': 'O site não pertence ao cliente do projeto.',
+  'O site está inativo. Escolha outro site ou reative este.': 'O site está inativo. Escolha outro site ou reative este.',
+  'Site não encontrado.': 'Site não encontrado.',
   'Cannot delete a sector that still has linked records (collaborators, cost centers, tickets, etc.)':
     'Não é possível excluir um setor que ainda possui registros vinculados (colaboradores, centros de custo, chamados, etc.).',
   'Cannot delete a cost center that still has linked projects': 'Não é possível excluir um centro de custo que ainda possui projetos vinculados.',

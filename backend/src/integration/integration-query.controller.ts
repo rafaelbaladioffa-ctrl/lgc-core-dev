@@ -80,6 +80,30 @@ export class IntegrationQueryController {
     return { data, meta: { page: p, per_page: pp, total } };
   }
 
+  @Get('sites/:id')
+  async getSite(@Param('id') id: string) {
+    const site = await this.prisma.site.findUnique({ where: { id } });
+    if (!site) throw new NotFoundException('Site not found');
+    return site;
+  }
+
+  @Get('sites')
+  async listSites(
+    @Query('client_id') clientId?: string,
+    @Query('code') code?: string,
+    @Query('active') active?: string,
+    @Query('page') page?: string,
+    @Query('per_page') perPage?: string,
+  ) {
+    const { skip, take, page: p, perPage: pp } = paginate(page, perPage);
+    const where = { clientId, code, active: active === 'true' ? true : active === 'false' ? false : undefined };
+    const [data, total] = await Promise.all([
+      this.prisma.site.findMany({ where, orderBy: [{ clientId: 'asc' }, { code: 'asc' }], skip, take }),
+      this.prisma.site.count({ where }),
+    ]);
+    return { data, meta: { page: p, per_page: pp, total } };
+  }
+
   @Get('projects/:id')
   async getProject(@Param('id') id: string) {
     const project = await this.prisma.project.findUnique({ where: { id } });

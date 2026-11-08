@@ -5,6 +5,7 @@ import { clientsApi, type CreateClientInput } from '../api/clients';
 import { translateApiError } from '../utils/apiError';
 import { MASKS } from '../utils/mask';
 import { MaskedInput } from '../components/MaskedInput';
+import { ClientSites } from '../components/ClientSites';
 
 const emptyForm: CreateClientInput = { legalName: '', cnpj: '' };
 
@@ -55,6 +56,11 @@ export function ClientFormPage() {
           <MaskedInput mask={MASKS.cnpj} value={form.cnpj ?? ''} onChange={(v) => setForm({ ...form, cnpj: v })} placeholder="CNPJ" />
         </div>
       </FormSection>
+      {isEdit && id && (
+        <FormSection title="Sites">
+          <ClientSites clientId={id} />
+        </FormSection>
+      )}
     </FormPage>
   );
 }

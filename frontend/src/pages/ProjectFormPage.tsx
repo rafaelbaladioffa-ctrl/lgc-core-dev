@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { FormPage, FormSection } from '../components/layout/FormPage';
 import { projectsApi, type CreateProjectInput, type ProjectStatus } from '../api/projects';
 import { clientsApi, type Client } from '../api/clients';
+import { sitesApi, type Site } from '../api/sites';
 import { costCentersApi, type CostCenter } from '../api/costCenters';
 import { collaboratorsApi, type CollaboratorSafe } from '../api/collaborators';
 import { translateApiError } from '../utils/apiError';
@@ -16,6 +17,7 @@ const emptyForm: CreateProjectInput = {
   clientId: '',
   costCenterId: '',
   responsibleCollaboratorId: '',
+  siteId: '',
   plannedStartDate: '',
   plannedEndDate: '',
 };
@@ -32,6 +34,9 @@ export function ProjectFormPage() {
   const [clients, setClients] = useState<Client[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
   const [collaborators, setCollaborators] = useState<CollaboratorSafe[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
+  // Sem site:read não há como listar os sites; nesse caso o formulário não mexe no site do projeto.
+  const canSelectSite = hasPermission('site:read');
   const [form, setForm] = useState<CreateProjectInput>(emptyForm);
   const [code, setCode] = useState<string | null>(null);
   const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
@@ -50,6 +55,23 @@ export function ProjectFormPage() {
       .catch((err) => setError(translateApiError(err, 'Erro ao carregar clientes, centros de custo e colaboradores.')));
   }, []);
 
+  // Sites do cliente escolhido (o seletor só oferece os do mesmo cliente do projeto).
+  useEffect(() => {
+    if (!canSelectSite || !form.clientId) return;
+    let cancelled = false;
+    sitesApi
+      .list({ clientId: form.clientId })
+      .then((list) => {
+        if (!cancelled) setSites(list);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(translateApiError(err, 'Erro ao carregar os sites do cliente.'));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canSelectSite, form.clientId]);
+
   useEffect(() => {
     if (!id) return;
     projectsApi
@@ -62,6 +84,7 @@ export function ProjectFormPage() {
           clientId: p.clientId,
           costCenterId: p.costCenterId,
           responsibleCollaboratorId: p.responsibleCollaboratorId,
+          siteId: p.siteId ?? '',
           plannedStartDate: p.plannedStartDate?.slice(0, 10) ?? '',
           plannedEndDate: p.plannedEndDate?.slice(0, 10) ?? '',
         });
@@ -70,11 +93,15 @@ export function ProjectFormPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  // Troca de cliente deixa a lista antiga na memória até a nova chegar: só vale a do cliente escolhido.
+  const clientSites = sites.filter((s) => s.clientId === form.clientId);
+
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     const plannedStartDate = dateOrNull(form.plannedStartDate);
     const plannedEndDate = dateOrNull(form.plannedEndDate);
+    const siteField = canSelectSite ? { siteId: form.siteId || null } : { siteId: undefined };
     if (plannedStartDate && plannedEndDate && plannedEndDate < plannedStartDate) {
       setError('A conclusão prevista não pode ser antes do início previsto.');
       return;
@@ -85,11 +112,12 @@ export function ProjectFormPage() {
           name: form.name,
           costCenterId: form.costCenterId,
           responsibleCollaboratorId: form.responsibleCollaboratorId,
+          ...siteField,
           plannedStartDate,
           plannedEndDate,
         });
       } else {
-        const created = await projectsApi.create({ ...form, plannedStartDate, plannedEndDate });
+        const created = await projectsApi.create({ ...form, ...siteField, plannedStartDate, plannedEndDate });
         if (sowFile) {
           try {
             const contentBase64 = await readFileAsBase64(sowFile);
@@ -131,7 +159,7 @@ export function ProjectFormPage() {
           />
           <select
             value={form.clientId}
-            onChange={(e) => setForm({ ...form, clientId: e.target.value })}
+            onChange={(e) => setForm({ ...form, clientId: e.target.value, siteId: '' })}
             required
             disabled={isEdit}
             title={isEdit ? 'O cliente faz parte do código do projeto e não pode ser trocado.' : undefined}
@@ -143,6 +171,25 @@ export function ProjectFormPage() {
               </option>
             ))}
           </select>
+          {canSelectSite && (
+            <select
+              value={form.siteId ?? ''}
+              onChange={(e) => setForm({ ...form, siteId: e.target.value })}
+              disabled={!form.clientId}
+              title={form.clientId ? undefined : 'Selecione o cliente para escolher o site.'}
+              aria-label="Site"
+            >
+              <option value="">{form.clientId ? 'Selecione o site (obrigatório para aprovar)' : 'Selecione o cliente primeiro'}</option>
+              {clientSites
+                .filter((s) => s.active || s.id === form.siteId)
+                .map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code} — {s.name}
+                    {s.active ? '' : ' (inativo)'}
+                  </option>
+                ))}
+            </select>
+          )}
           <select value={form.costCenterId} onChange={(e) => setForm({ ...form, costCenterId: e.target.value })} required>
             <option value="">Selecione o centro de custo</option>
             {costCenters.map((c) => (

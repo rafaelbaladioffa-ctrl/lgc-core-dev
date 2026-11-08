@@ -6,6 +6,12 @@ import { ProjectsService, buildProjectCode } from './projects.service.js';
  * (decisão P-07 do módulo Projetos do Financeiro). */
 
 const COST_CENTER = { id: 'cc-1', code: '100', name: 'Obras' };
+const SITE = { id: 'site-1', code: 'GRU53', name: 'Aeroporto GRU' };
+
+/** Cadastro de site que o servidor confere antes de gravar (PA-05). */
+function siteRow(overrides: Record<string, unknown> = {}) {
+  return { clientId: 'cl-1', active: true, ...overrides };
+}
 
 function projectRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -20,6 +26,8 @@ function projectRow(overrides: Record<string, unknown> = {}) {
     plannedEndDate: new Date('2027-01-15T00:00:00Z'),
     status: 'proposta',
     proposalSequence: 12,
+    siteId: null,
+    site: null,
     ...overrides,
   };
 }
@@ -28,13 +36,14 @@ function fixture(current: Record<string, unknown> | null = projectRow()) {
   const outbox = { record: vi.fn().mockResolvedValue(undefined) };
   const prisma: any = {
     client: { findUnique: vi.fn().mockResolvedValue({ id: 'cl-1', code: 7 }) },
+    site: { findUnique: vi.fn().mockResolvedValue(siteRow()) },
     project: {
       findUnique: vi.fn().mockResolvedValue(current),
-      create: vi.fn(async ({ data }) => ({ ...projectRow(), ...data, costCenter: COST_CENTER })),
+      create: vi.fn(async ({ data }) => ({ ...projectRow(), ...data, costCenter: COST_CENTER, site: data.siteId ? SITE : null })),
       update: vi.fn(async ({ data }) => {
         const merged: Record<string, unknown> = { ...projectRow(), ...current };
         for (const [k, v] of Object.entries(data)) if (v !== undefined) merged[k] = v;
-        return { ...merged, costCenter: COST_CENTER };
+        return { ...merged, costCenter: COST_CENTER, site: merged.siteId ? SITE : null };
       }),
       delete: vi.fn().mockResolvedValue(current),
     },
@@ -127,6 +136,98 @@ describe('ProjectsService', () => {
   it('não exclui proposta com requisições', async () => {
     const { service } = fixture(projectRow({ _count: { requests: 2 } }));
     await expect(service.remove('p-1')).rejects.toBeInstanceOf(ConflictException);
+  });
+});
+
+describe('ProjectsService — site do projeto (PA-05)', () => {
+  const base = { name: 'X', clientId: 'cl-1', costCenterId: 'cc-1', responsibleCollaboratorId: 'col-1' };
+
+  it('cria com site do mesmo cliente e leva site_id, site_code e site_name em project.created', async () => {
+    const { service, prisma, outbox } = fixture();
+    await service.create({ ...base, siteId: 'site-1' });
+
+    expect(prisma.site.findUnique).toHaveBeenCalledWith({ where: { id: 'site-1' }, select: { clientId: true, active: true } });
+    expect(prisma.project.create.mock.calls[0][0].data.siteId).toBe('site-1');
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.created', expect.objectContaining({
+      site_id: 'site-1',
+      site_code: 'GRU53',
+      site_name: 'Aeroporto GRU',
+    }));
+  });
+
+  it('cria sem site (opcional até a aprovação) e o evento leva os campos de site nulos', async () => {
+    const { service, prisma, outbox } = fixture();
+    await service.create(base);
+
+    expect(prisma.site.findUnique).not.toHaveBeenCalled();
+    expect(prisma.project.create.mock.calls[0][0].data.siteId).toBeNull();
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.created', expect.objectContaining({ site_id: null, site_code: null, site_name: null }));
+  });
+
+  it('site de outro cliente → 400, sem criar projeto nem evento', async () => {
+    const { service, prisma, outbox } = fixture();
+    prisma.site.findUnique.mockResolvedValue(siteRow({ clientId: 'cl-outro' }));
+
+    await expect(service.create({ ...base, siteId: 'site-x' })).rejects.toThrow('O site não pertence ao cliente do projeto.');
+    expect(prisma.project.create).not.toHaveBeenCalled();
+    expect(outbox.record).not.toHaveBeenCalled();
+  });
+
+  it('site inexistente ou inativo → 400', async () => {
+    const { service, prisma } = fixture();
+    prisma.site.findUnique.mockResolvedValueOnce(null);
+    await expect(service.create({ ...base, siteId: 'site-x' })).rejects.toBeInstanceOf(BadRequestException);
+
+    prisma.site.findUnique.mockResolvedValueOnce(siteRow({ active: false }));
+    await expect(service.create({ ...base, siteId: 'site-1' })).rejects.toThrow('O site está inativo.');
+    expect(prisma.project.create).not.toHaveBeenCalled();
+  });
+
+  it('edição confere o site contra o cliente do projeto, não contra o corpo', async () => {
+    const { service, prisma } = fixture();
+    prisma.site.findUnique.mockResolvedValue(siteRow({ clientId: 'cl-outro' }));
+    await expect(service.update('p-1', { siteId: 'site-x' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.project.update).not.toHaveBeenCalled();
+  });
+
+  it('edição troca o site e emite project.updated com o site novo', async () => {
+    const { service, prisma, outbox } = fixture();
+    await service.update('p-1', { siteId: 'site-1' });
+
+    expect(prisma.project.update.mock.calls[0][0].data.siteId).toBe('site-1');
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.updated', expect.objectContaining({
+      site_id: 'site-1',
+      site_code: 'GRU53',
+      changed_fields: ['siteId'],
+    }));
+  });
+
+  it('null desvincula o site sem consultar o cadastro', async () => {
+    const { service, prisma, outbox } = fixture(projectRow({ siteId: 'site-1', site: SITE }));
+    await service.update('p-1', { siteId: null });
+
+    expect(prisma.site.findUnique).not.toHaveBeenCalled();
+    expect(prisma.project.update.mock.calls[0][0].data.siteId).toBeNull();
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.updated', expect.objectContaining({ site_id: null, site_code: null }));
+  });
+
+  it('reenviar o mesmo site não reconfere: projeto com site depois inativado continua editável', async () => {
+    const { service, prisma } = fixture(projectRow({ siteId: 'site-1', site: SITE }));
+    prisma.site.findUnique.mockResolvedValue(siteRow({ active: false }));
+    await service.update('p-1', { name: 'Novo nome', siteId: 'site-1' });
+    expect(prisma.site.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('troca de status e exclusão também levam o site no payload', async () => {
+    const { service, prisma, outbox } = fixture(projectRow({ siteId: 'site-1', site: SITE, _count: { requests: 0 } }));
+    await service.updateStatus('p-1', { status: 'aprovado' });
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.status_changed', expect.objectContaining({ site_id: 'site-1', site_code: 'GRU53', site_name: 'Aeroporto GRU' }));
+  });
+
+  it('project.deleted leva o site do projeto excluído', async () => {
+    const { service, prisma, outbox } = fixture(projectRow({ siteId: 'site-1', site: SITE, _count: { requests: 0 } }));
+    await service.remove('p-1');
+    expect(outbox.record).toHaveBeenCalledWith(prisma, 'project.deleted', expect.objectContaining({ site_id: 'site-1', site_code: 'GRU53', deleted: true }));
   });
 });
 

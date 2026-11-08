@@ -3,16 +3,19 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { OutboxService } from './outbox.service.js';
 import { costCenterEventPayload } from '../cost-centers/cost-centers.service.js';
 import { collaboratorStatePayload } from '../collaborators/collaborators.service.js';
+import { siteEventPayload } from '../sites/sites.service.js';
 
 export interface MasterDataResyncResult {
   costCenters: number;
   collaborators: number;
   allocations: number;
+  sites: number;
 }
 
 /**
  * Reenvia aos satélites o estado atual dos cadastros que eles guardam em cache: centros de custo,
- * colaboradores e a alocação vigente de cada colaborador (docs/integracao-centros-de-custo.md §6).
+ * colaboradores, a alocação vigente de cada colaborador e os sites dos clientes
+ * (docs/integracao-centros-de-custo.md §6).
  *
  * Serve para a carga inicial de um satélite que passou a assinar esses eventos depois de os cadastros
  * existirem. Os eventos são os mesmos das escritas normais (`cost_center.updated`,
@@ -55,7 +58,11 @@ export class MasterDataResyncService {
         });
         allocations++;
       }
-      return { costCenters: costCenters.length, collaborators: collaborators.length, allocations };
+
+      const sites = await tx.site.findMany({ orderBy: [{ clientId: 'asc' }, { code: 'asc' }] });
+      for (const s of sites) await this.outbox.record(tx, 'site.updated', siteEventPayload(s));
+
+      return { costCenters: costCenters.length, collaborators: collaborators.length, allocations, sites: sites.length };
     });
   }
 }

@@ -10,6 +10,8 @@ export interface Project {
   clientId: string;
   costCenterId: string;
   responsibleCollaboratorId: string;
+  /** Site do cliente onde a obra acontece; nulo até alguém escolher (obrigatório só para aprovar). */
+  siteId: string | null;
   /** ISO; só a parte AAAA-MM-DD importa. */
   plannedStartDate: string | null;
   plannedEndDate: string | null;
@@ -22,6 +24,8 @@ export interface CreateProjectInput {
   clientId: string;
   costCenterId: string;
   responsibleCollaboratorId: string;
+  /** Do mesmo cliente do projeto; `null` desvincula na edição. */
+  siteId?: string | null;
   /** AAAA-MM-DD */
   plannedStartDate?: string | null;
   plannedEndDate?: string | null;

@@ -42,17 +42,23 @@ Mesmo envelope e assinatura usados com a Logística (`{event_id, event_type, occ
 | `project.created/updated/status_changed/deleted` | sim (`updated` e `deleted` desde 2026-11-07) | sim (cache; `encerrado` = inativo) |
 | `user.disabled` | **não** | sim (bloqueio) |
 | `cost_center.created/updated` | sim (desde 2026-11-07; exclusão vai como `updated` com `active: false`) | sim (cache) |
+| `site.created/updated` | sim (desde 2026-11-08; inativar vai como `updated` com `active: false`) | **ainda não assina**; o evento só vai para quem assinar |
 | `project.document_added` | sim | recebido e ignorado: o Financeiro baixa o documento pelo pedido de cotação |
 | `project.quote_requested` | sim (desde 2026-11-08) | sim (fila de pedidos de cotação, PJ4; §4) |
 
 Todo `project.*` leva o estado completo do projeto: `project_id`, `code`, `name`, `status`,
 `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`,
+`site_id`, `site_code`, `site_name` (`null` enquanto o projeto não tem site; desde 2026-11-08),
 `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`). `project.updated` traz também
 `changed_fields`; `project.status_changed`, `previous_status`; `project.deleted` (exclusão de
 proposta) vai com `status: 'encerrado'` e `deleted: true`, e o Financeiro marca o projeto inativo.
 Projeto antigo sem nome (`name: null`) não apaga o nome já guardado no cache. `cost_center.*` leva
 `cost_center_id`, `code`, `name`, `sector_id`, `parent_cost_center_id`, `responsible_collaborator_id`,
-`kind`, `short_code` e `active`. Contrato no Core: [dominio/cadastros.md §4 e §10](dominio/cadastros.md#10-projetos).
+`kind`, `short_code` e `active`. `site.*` leva o estado completo do site (`site_id`, `client_id`, `code`, `name`, `cep`, `address_street`,
+`address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`,
+`longitude`, `active`; `updated` traz também `changed_fields`); o Financeiro que quiser o endereço do site
+assina `site.*` ou consulta `GET /api/v1/integration/sites` por API key. Contrato no Core:
+[dominio/cadastros.md §4, §9.1 e §10](dominio/cadastros.md#91-sites).
 O Financeiro usa nome e prazo previsto no cabeçalho do orçamento e o centro de custo no rateio
 (decisão P-07 da especificação de Projetos).
 | `purchase.approved`, `purchase.order_registered`, `purchase.delivery_received`, `purchase.cancelled` | sim (desde 2026-11-08) | sim (centros de custo) |

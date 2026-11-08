@@ -37,7 +37,7 @@ export function IntegrationsPage() {
     setResyncMessage(null);
     try {
       const r = await integrationApi.resyncMasterData();
-      setResyncMessage({ tone: 'ok', text: `Reenvio registrado: ${r.costCenters} centros de custo, ${r.collaborators} colaboradores e ${r.allocations} alocações. A entrega aparece em Eventos (Outbox).` });
+      setResyncMessage({ tone: 'ok', text: `Reenvio registrado: ${r.costCenters} centros de custo, ${r.collaborators} colaboradores, ${r.allocations} alocações e ${r.sites} sites. A entrega aparece em Eventos (Outbox).` });
     } catch (err) {
       setResyncMessage({ tone: 'error', text: translateApiError(err, 'Não foi possível reenviar os cadastros.') });
     } finally {

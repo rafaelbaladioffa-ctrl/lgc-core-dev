@@ -18,6 +18,7 @@ import { JobTitleFormPage } from "./pages/JobTitleFormPage";
 import { WorkScheduleFormPage } from "./pages/WorkScheduleFormPage";
 import { ClientsPage } from "./pages/ClientsPage";
 import { ClientFormPage } from "./pages/ClientFormPage";
+import { SiteFormPage } from "./pages/SiteFormPage";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { ProjectFormPage } from "./pages/ProjectFormPage";
 import { MyActivitiesPage } from "./pages/MyActivitiesPage";
@@ -250,6 +251,22 @@ function AppRoutes() {
         element={
           <PrivateRoute permission="client:update">
             <ClientFormPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/clients/:clientId/sites/new"
+        element={
+          <PrivateRoute permission="site:create">
+            <SiteFormPage />
+          </PrivateRoute>
+        }
+      />
+      <Route
+        path="/clients/:clientId/sites/:id/edit"
+        element={
+          <PrivateRoute permission="site:update">
+            <SiteFormPage />
           </PrivateRoute>
         }
       />

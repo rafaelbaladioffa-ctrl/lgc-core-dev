@@ -25,10 +25,28 @@ const collaborator = (id: string, costCenterId: string | null) => ({
   admissionDate: new Date('2025-02-03T00:00:00Z'),
 });
 
+const site = (id: string, code: string) => ({
+  id,
+  clientId: 'cli1',
+  code,
+  name: `Site ${code}`,
+  cep: '07190100',
+  addressStreet: 'Rodovia Hélio Smidt',
+  addressNumber: 's/n',
+  addressComplement: null,
+  addressDistrict: 'Cumbica',
+  addressCity: 'Guarulhos',
+  addressState: 'SP',
+  latitude: -23.4356,
+  longitude: -46.4731,
+  active: true,
+});
+
 function setup() {
   const tx = {
     costCenter: { findMany: vi.fn().mockResolvedValue([cc('cc1', '100'), cc('cc2', '100.4.2')]) },
     collaborator: { findMany: vi.fn().mockResolvedValue([collaborator('c1', 'cc2'), collaborator('c2', null)]) },
+    site: { findMany: vi.fn().mockResolvedValue([site('s1', 'GRU53'), site('s2', 'CGH01')]) },
     collaboratorCostCenterAllocation: {
       findMany: vi.fn().mockResolvedValue([
         { collaboratorId: 'c1', costCenterId: 'cc2', validFrom: new Date('2026-03-01T00:00:00Z'), validTo: null },
@@ -47,7 +65,7 @@ describe('MasterDataResyncService', () => {
     const { service, recorded, tx } = setup();
     const result = await service.resync();
 
-    expect(result).toEqual({ costCenters: 2, collaborators: 2, allocations: 1 });
+    expect(result).toEqual({ costCenters: 2, collaborators: 2, allocations: 1, sites: 2 });
     expect(recorded.every((r) => r.tx === tx)).toBe(true);
     expect(recorded.map((r) => r.type)).toEqual([
       'cost_center.updated',
@@ -55,6 +73,8 @@ describe('MasterDataResyncService', () => {
       'collaborator.updated',
       'collaborator.updated',
       'collaborator.cost_center_changed',
+      'site.updated',
+      'site.updated',
     ]);
     expect(recorded[1].payload).toMatchObject({ cost_center_id: 'cc2', short_code: 'DC-001-JAI', kind: 'equipe_tecnica', active: true });
     expect(recorded[2].payload).toMatchObject({ collaborator_id: 'c1', cost_center_id: 'cc2', job_title_name: 'Técnico', admission_date: '2025-02-03' });
@@ -67,5 +87,6 @@ describe('MasterDataResyncService', () => {
       cost_center_id: 'cc2',
       valid_from: '2026-03-01',
     });
+    expect(recorded[5].payload).toMatchObject({ site_id: 's1', client_id: 'cli1', code: 'GRU53', address_city: 'Guarulhos', latitude: -23.4356, active: true });
   });
 });

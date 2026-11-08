@@ -16,6 +16,7 @@ const ALLOWED_TRANSITIONS: Record<ProjectStatus, ProjectStatus[]> = {
 
 export const SNAPSHOT_INCLUDE = {
   costCenter: { select: { id: true, code: true, name: true } },
+  site: { select: { id: true, code: true, name: true } },
 } satisfies Prisma.ProjectInclude;
 
 type ProjectWithCostCenter = Prisma.ProjectGetPayload<{ include: typeof SNAPSHOT_INCLUDE }>;
@@ -45,6 +46,9 @@ export function projectEventPayload(project: ProjectWithCostCenter): Record<stri
     cost_center_id: project.costCenterId,
     cost_center_code: project.costCenter.code,
     cost_center_name: project.costCenter.name,
+    site_id: project.siteId,
+    site_code: project.site?.code ?? null,
+    site_name: project.site?.name ?? null,
     responsible_collaborator_id: project.responsibleCollaboratorId,
     planned_start_date: formatDateOnly(project.plannedStartDate),
     planned_end_date: formatDateOnly(project.plannedEndDate),
@@ -64,6 +68,7 @@ export class ProjectsService {
     const plannedStartDate = toDateOnly(dto.plannedStartDate);
     const plannedEndDate = toDateOnly(dto.plannedEndDate);
     this.assertDateOrder(plannedStartDate ?? null, plannedEndDate ?? null);
+    if (dto.siteId) await this.assertSiteUsable(dto.siteId, dto.clientId);
 
     return this.prisma.$transaction(async (tx) => {
       // nextval() on a native Postgres sequence is atomic: concurrent requests each get a
@@ -80,6 +85,7 @@ export class ProjectsService {
           clientId: dto.clientId,
           costCenterId: dto.costCenterId,
           responsibleCollaboratorId: dto.responsibleCollaboratorId,
+          siteId: dto.siteId ?? null,
           plannedStartDate,
           plannedEndDate,
           status: dto.status ?? 'proposta',
@@ -110,6 +116,8 @@ export class ProjectsService {
       plannedStartDate === undefined ? current.plannedStartDate : plannedStartDate,
       plannedEndDate === undefined ? current.plannedEndDate : plannedEndDate,
     );
+    // Só confere o site quando ele muda: projeto que já guarda um site depois inativado segue editável.
+    if (dto.siteId && dto.siteId !== current.siteId) await this.assertSiteUsable(dto.siteId, current.clientId);
 
     return this.prisma.$transaction(async (tx) => {
       const project = await tx.project.update({
@@ -118,6 +126,7 @@ export class ProjectsService {
           name: dto.name,
           costCenterId: dto.costCenterId,
           responsibleCollaboratorId: dto.responsibleCollaboratorId,
+          siteId: dto.siteId,
           plannedStartDate,
           plannedEndDate,
         },
@@ -168,6 +177,14 @@ export class ProjectsService {
       // Os satélites tratam qualquer `project.*` pelo `status`; `encerrado` marca inativo no cache.
       await this.outbox.record(tx, 'project.deleted', { ...projectEventPayload(project), status: 'encerrado', deleted: true });
     });
+  }
+
+  /** Site do projeto: precisa existir, estar ativo e ser do mesmo cliente do projeto (PA-05). */
+  private async assertSiteUsable(siteId: string, clientId: string): Promise<void> {
+    const site = await this.prisma.site.findUnique({ where: { id: siteId }, select: { clientId: true, active: true } });
+    if (!site) throw new BadRequestException('Site não encontrado.');
+    if (site.clientId !== clientId) throw new BadRequestException('O site não pertence ao cliente do projeto.');
+    if (!site.active) throw new BadRequestException('O site está inativo. Escolha outro site ou reative este.');
   }
 
   private assertDateOrder(start: Date | null, end: Date | null): void {

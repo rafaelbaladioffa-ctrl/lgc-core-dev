@@ -242,11 +242,39 @@ O planning previa flags de provisionamento no `collaborator.created`; não estã
 
 **Eventos de outbox:** `client.created` (`client_id`, `code`); `client.updated` (`client_id`, `changed_fields`).
 
-**Frontend:** `/clients`, `/clients/new`, `/clients/:id/edit`.
+**Frontend:** `/clients`, `/clients/new`, `/clients/:id/edit`. A edição do cliente tem a seção **Sites** (§9.1).
+
+### 9.1 Sites
+
+Local de obra ou de entrega de um cliente (ex.: `GRU53`). Cadastro do Core usado pela Logística (endereço de entrega), pelo Financeiro e pelo Field, que precisam falar do mesmo site (decisão PA-05 do plano "projeto aprovado → obra"). Um projeto tem um site; proposta com vários sites vira vários projetos (PA-06).
+
+**Campos-chave** (`sites`, [schema.prisma](../../backend/prisma/schema.prisma)):
+
+- `client_id` (obrigatório; **não muda** depois de criado);
+- `code` (texto informado por quem cadastra, em maiúsculas, `^[A-Z0-9][A-Z0-9._-]{0,19}$`, ex.: `GRU53`) e `name`. O par (`client_id`, `code`) é único. O código **não é gerado**: é um código de negócio do cliente, por isso entra no DTO (exceção consciente à regra de códigos gerados das [diretrizes §6](../diretrizes-desenvolvimento.md));
+- endereço no mesmo padrão de colunas do cliente: `cep` (só os 8 dígitos), `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state` (UF com 2 letras). Todos opcionais;
+- `latitude` (−90 a 90) e `longitude` (−180 a 180), opcionais, `DOUBLE PRECISION` (a API devolve número, não texto);
+- `active` (padrão `true`) e `created_at`/`updated_at`.
+
+**Regras** ([sites.service.ts](../../backend/src/sites/sites.service.ts)):
+
+- Cliente inexistente na criação → `400`. Código repetido no mesmo cliente (criar ou editar) → `409` "Já existe um site com este código para o cliente.".
+- **Não há exclusão.** Site sai de uso inativado (`PUT /sites/:id` com `active: false`; reativar é `active: true`). Site inativo não pode ser escolhido num projeto (`400`), mas projeto que já o guarda continua editável.
+- `PUT` só grava o que veio no corpo **e mudou de verdade**; sem mudança real não grava nem emite evento. `code` e `name` não aceitam `null`; os demais campos opcionais aceitam `null` para limpar.
+
+**Endpoints** ([sites.controller.ts](../../backend/src/sites/sites.controller.ts)): `GET /sites` (filtros `?clientId=` e `?active=true|false`) e `GET /sites/:id` (`site:read`), `POST /sites` (`site:create`, auditado como `create_site`), `PUT /sites/:id` (`site:update`, auditado como `update_site`).
+
+**Permissões:** `site:read`, `site:create`, `site:update` (não existe `site:delete`). A migração `20261126000000_sites` e o [seed.ts](../../backend/prisma/seed.ts) dão cada uma aos papéis que já têm a permissão equivalente de clientes: `admin` (todas) e `gestor` (`site:read`, pois só tem `client:read`).
+
+**Eventos de outbox** (mesma transação da escrita; estado completo em todos): `site.created` e `site.updated` (este traz também `changed_fields`), com `site_id`, `client_id`, `code`, `name`, `cep`, `address_street`, `address_number`, `address_complement`, `address_district`, `address_city`, `address_state`, `latitude`, `longitude`, `active`. Inativar vai como `site.updated` com `active: false`. O botão **Integrações → Reenviar cadastros** também reenvia todos os sites como `site.updated` ([integracao-centros-de-custo.md §6](../integracao-centros-de-custo.md#6-core-reenvio-dos-cadastros-carga-inicial-do-satélite)).
+
+**Consulta por API key** (satélites): `GET /api/v1/integration/sites` (filtros `client_id`, `code`, `active`, `page`, `per_page`; envelope `{data, meta}`) e `GET /api/v1/integration/sites/:id`.
+
+**Frontend:** a seção **Sites** na edição do cliente lista os sites (código, nome, endereço, situação) com **+ Novo site**, **Editar** e **Inativar/Reativar**; o formulário fica em `/clients/:clientId/sites/new` (`site:create`) e `/clients/:clientId/sites/:id/edit` (`site:update`), com busca de endereço por CEP (ViaCEP) e coordenadas opcionais (aceita vírgula decimal).
 
 ## 10. Projetos
 
-**Campos-chave** (`projects`): `code` (único, gerado), `name`, `client_id`, `cost_center_id`, `responsible_collaborator_id`, `planned_start_date` e `planned_end_date` (`DATE`, opcionais), `status` (`proposta`, `aprovado`, `em_execucao`, `encerrado`; default `proposta`), `proposal_sequence`.
+**Campos-chave** (`projects`): `code` (único, gerado), `name`, `client_id`, `cost_center_id`, `responsible_collaborator_id`, `site_id` (opcional, ver abaixo), `planned_start_date` e `planned_end_date` (`DATE`, opcionais), `status` (`proposta`, `aprovado`, `em_execucao`, `encerrado`; default `proposta`), `proposal_sequence`.
 
 **Regras** ([projects.service.ts](../../backend/src/projects/projects.service.ts)):
 
@@ -254,23 +282,26 @@ O planning previa flags de provisionamento no `collaborator.created`; não estã
 - Nome (até 200 caracteres) obrigatório na API para criar e editar; a edição não aceita apagar o nome. A coluna é opcional no banco: projetos criados antes de 2026-11-07 ficam sem nome até alguém editar (a lista mostra "Sem nome — editar" e um indicador "Sem nome").
 - Datas previstas em `AAAA-MM-DD`; a conclusão não pode ser antes do início (`400` e `CHECK` no banco). Na edição, `null` apaga a data.
 - O cliente não muda depois de criado (faz parte do código).
+- **Site do projeto** (`site_id`, PA-05): opcional na criação e na edição (`siteId` no corpo; `null` desvincula). O servidor confere que o site **existe, está ativo e é do mesmo cliente do projeto**; senão `400` ("Site não encontrado.", "O site não pertence ao cliente do projeto.", "O site está inativo. Escolha outro site ou reative este."). Na edição só confere quando o site muda, então projeto cujo site foi inativado depois segue editável. **Hoje o site não é exigido para aprovar**: a exigência entra com o PT-06 do plano de aprovação, que vai validar `site_id` na transição para `aprovado`.
 - Transições de status permitidas: `proposta → aprovado | encerrado`; `aprovado → em_execucao | encerrado`; `em_execucao → encerrado`; `encerrado` é final. Outras → `400`.
 - A criação aceita `status` arbitrário (não passa pela máquina de transição).
-- `PUT /projects/:id` altera nome, centro de custo, responsável e datas previstas.
+- `PUT /projects/:id` altera nome, centro de custo, responsável, site e datas previstas.
 - `DELETE /projects/:id` é exclusão física e só vale para projeto em `proposta` sem requisições; nos outros casos responde `409` e o caminho é encerrar o projeto.
 
 **Endpoints:** `POST /projects` (`project:create`, auditoria `create_project`), `GET /projects`, `GET /projects/:id` (`project:read`), `PUT /projects/:id` (`project:update`, `update_project`), `PUT /projects/:id/status` (`project:update`, `change_project_status`), `DELETE /projects/:id` (`project:delete`, `delete_project`).
 
 **Eventos de outbox.** Todo evento `project.*` leva o estado completo do projeto, para o cache dos satélites (o Financeiro usa nome e centro de custo no orçamento e no rateio — decisão P-07 da especificação de Projetos do Financeiro):
 
-`project_id`, `code`, `name`, `status`, `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`, `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`).
+`project_id`, `code`, `name`, `status`, `client_id`, `cost_center_id`, `cost_center_code`, `cost_center_name`, `responsible_collaborator_id`, `site_id`, `site_code`, `site_name` (os três `null` enquanto o projeto não tem site; o endereço do site **não** vai aqui, está nos eventos `site.*` do §9.1), `planned_start_date`, `planned_end_date` (`AAAA-MM-DD` ou `null`).
 
 | Evento | Quando | Campos extras |
 |---|---|---|
 | `project.created` | criação | — |
-| `project.updated` | `PUT /projects/:id` | `changed_fields` |
+| `project.updated` | `PUT /projects/:id` | `changed_fields` (inclui `siteId` quando o site muda) |
 | `project.status_changed` | `PUT /projects/:id/status` | `previous_status` |
 | `project.deleted` | exclusão de proposta | `deleted: true`; `status` vai como `encerrado` para os satélites marcarem o projeto inativo sem mudança do lado deles |
+
+No formulário do projeto, o seletor **Site** (visível com `site:read`) lista só os sites do cliente escolhido e oferece os ativos mais o site atual do projeto (marcado "(inativo)" se for o caso); trocar o cliente na criação limpa o site. Sem `site:read` o formulário não mexe no site do projeto.
 
 ### 10.1 Documentos do projeto (SOW e Bid Template)
 
@@ -356,6 +387,7 @@ equipe por função, download da Bid) e histórico de pedidos.
 
 ## 12. Não verificado
 
-- Comportamento de `migrate deploy` em banco vazio e drift das tabelas `bpm_*` (ver [arquitetura.md](../arquitetura.md)).
+- Drift das tabelas `bpm_*` (ver [arquitetura.md](../arquitetura.md)). `migrate deploy` em banco vazio foi exercitado em 2026-11-08 num banco `_test` e aplicou todas as migrações, inclusive `20261126000000_sites`, sem diferença para o schema.
 - Se o `OutboxDispatcherService` entrega os eventos acima a satélites reais em produção.
-- Testes automatizados: não há testes de backend nem de frontend cobrindo os cadastros (só `test/a24-auth-refresh-password.e2e-spec.ts` cobre refresh/troca de senha).
+- Testes automatizados: não há testes de backend nem de frontend cobrindo os cadastros (só `test/a24-auth-refresh-password.e2e-spec.ts` cobre refresh/troca de senha). Exceção: sites e o site do projeto têm testes de serviço com Prisma simulado (`sites.service.spec.ts`, `projects.service.spec.ts`).
+- Sites: o trecho de permissões da migração foi testado no banco `_test` (concede aos papéis certos e reaplicar não duplica). **Não** foram exercitados com HTTP real nem no navegador: `/sites`, `/integration/sites`, o `PermissionsGuard` nas rotas novas e as telas (seção Sites do cliente, formulário do site, seletor no projeto).
