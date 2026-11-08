@@ -2,7 +2,9 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { createHmac } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { CORE_QUOTE_EVENT } from '../budgets/bid/core-quote.js';
 
 /** Espera entre tentativas: 1 min, 5 min, 30 min, 2 h; depois FAILED (dead-letter) para reenvio manual. */
 export const BACKOFF_SECONDS = [60, 300, 1800, 7200];
@@ -24,6 +26,9 @@ interface OutboundMessage {
   correlationId: string | null;
   payload: unknown;
 }
+
+/** Resposta do Core que não adianta reenviar: vai direto para a dead-letter, para análise (§13.1). */
+export class PermanentDeliveryError extends Error {}
 
 /** Corpo e cabeçalhos de uma entrega: assinatura HMAC-SHA256 do corpo exato enviado. */
 export function buildDelivery(m: OutboundMessage, secret: string | undefined) {
@@ -57,9 +62,35 @@ export class OutboxDispatcherService {
     }
   }
 
+  private get apiBase() {
+    return (this.config.get<string>('AXIS_API_URL') || 'http://localhost:3000/api/v1').replace(/\/+$/, '');
+  }
+
+  /**
+   * `POST /integration/projects/:id/quotes` do Core com a Bid guardada na revisão. 400/403/404/409 são
+   * definitivos (reenviar não muda nada); rede e 5xx tentam de novo.
+   */
+  async deliverQuote(tx: Prisma.TransactionClient, payload: unknown, fetchFn: typeof fetch = fetch): Promise<void> {
+    const message = payload as { axis_project_id: string; revision_id: string; quote: Record<string, unknown> };
+    const bid = await tx.revisionBidOutput.findUnique({ where: { revisionId: message.revision_id }, select: { filename: true, content: true } });
+    if (!bid) throw new PermanentDeliveryError('Bid da revisão não encontrada.');
+    const body = JSON.stringify({ ...message.quote, bid: { filename: bid.filename, content_base64: Buffer.from(bid.content).toString('base64') } });
+    const res = await fetchFn(`${this.apiBase}/integration/projects/${encodeURIComponent(message.axis_project_id)}/quotes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.config.get<string>('AXIS_API_KEY')}` },
+      body,
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (res.ok) return;
+    const detail = (await res.text().catch(() => '')).slice(0, 200);
+    if ([400, 403, 404, 409].includes(res.status)) throw new PermanentDeliveryError(`HTTP ${res.status} ${detail}`);
+    throw new Error(`HTTP ${res.status} ${detail}`);
+  }
+
   async dispatchOnce(limit = 50, now = new Date()): Promise<DispatchSummary> {
     const url = this.config.get<string>('AXIS_EVENTS_URL');
-    if (!url) return { enabled: false, delivered: 0, retried: 0, deadLettered: 0 };
+    const apiKey = this.config.get<string>('AXIS_API_KEY');
+    if (!url && !apiKey) return { enabled: false, delivered: 0, retried: 0, deadLettered: 0 };
     const secret = this.config.get<string>('AXIS_OUTBOUND_SECRET');
     const summary: DispatchSummary = { enabled: true, delivered: 0, retried: 0, deadLettered: 0 };
 
@@ -74,16 +105,23 @@ export class OutboxDispatcherService {
           take: limit,
         });
         for (const m of due) {
+          const isQuote = m.eventType === CORE_QUOTE_EVENT;
+          // Sem destino configurado para este tipo: continua pendente, sem contar tentativa.
+          if ((isQuote && !apiKey) || (!isQuote && !url)) continue;
           try {
-            const { body, headers } = buildDelivery(m, secret);
-            const res = await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            if (isQuote) {
+              await this.deliverQuote(tx, m.payload);
+            } else {
+              const { body, headers } = buildDelivery(m, secret);
+              const res = await fetch(url!, { method: 'POST', headers, body, signal: AbortSignal.timeout(TIMEOUT_MS) });
+              if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            }
             await tx.integrationMessage.update({ where: { id: m.id }, data: { status: 'DELIVERED', processedAt: new Date(), attempts: m.attempts + 1, lastError: null, nextAttemptAt: null } });
             summary.delivered++;
           } catch (e) {
             const attempts = m.attempts + 1;
             const error = (e as Error).message.slice(0, 300);
-            if (attempts >= MAX_ATTEMPTS) {
+            if (attempts >= MAX_ATTEMPTS || e instanceof PermanentDeliveryError) {
               await tx.integrationMessage.update({ where: { id: m.id }, data: { status: 'FAILED', attempts, lastError: error, nextAttemptAt: null } });
               this.logger.error(`Evento ${m.eventType} ${m.eventId} foi para a dead-letter após ${attempts} tentativas: ${error}`);
               summary.deadLettered++;
@@ -104,6 +142,7 @@ export class OutboxDispatcherService {
     const oldest = await this.prisma.integrationMessage.findFirst({ where: { direction: 'OUTBOUND', status: 'PENDING' }, orderBy: { createdAt: 'asc' }, select: { createdAt: true } });
     return {
       configured: !!this.config.get('AXIS_EVENTS_URL'),
+      quotesConfigured: !!this.config.get('AXIS_API_KEY'),
       counts: rows.map((r) => ({ direction: r.direction, status: r.status, count: r._count._all })),
       oldestPendingAt: oldest?.createdAt.toISOString() ?? null,
     };

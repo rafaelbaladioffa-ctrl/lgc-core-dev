@@ -3,6 +3,7 @@ import { importBidTemplate, updateHoursT, updateKpiJustifications, type KpiKey, 
 import { formatPercent, formatNumber } from '../lib/decimal';
 import { formatBRL, formatDate, formatDateTime } from '../lib/format';
 import { Badge, messageOf } from './ui';
+import { RevisionBidSection } from './RevisionBid';
 
 /** Indicadores em dinheiro (moeda da proposta); os outros são horas ou razão. */
 const MONEY_KPIS: KpiKey[] = ['costPerPort', 'laborCostPerPort'];
@@ -250,10 +251,12 @@ export function RevisionAwsSection({ rev, canWrite, initialError, onChange }: { 
                 </li>
               ))}
             </ul>
-            <p className="muted">A PJ7 escreve estes valores no próprio Bid Template ao aprovar o envio.</p>
+            <p className="muted">Estes valores são escritos no próprio Bid Template ao aprovar o envio.</p>
           </details>
         </>
       )}
+
+      {aws.bidTemplate && <RevisionBidSection rev={rev} canWrite={canWrite} />}
     </section>
   );
 }

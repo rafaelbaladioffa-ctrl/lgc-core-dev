@@ -66,7 +66,7 @@ const colNumber = (col: string) => {
 };
 const colLetter = (n: number): string => (n <= 0 ? '' : colLetter(Math.floor((n - 1) / 26)) + String.fromCharCode(65 + ((n - 1) % 26)));
 
-class Workbook {
+export class Workbook {
   private sheetCache = new Map<string, Sheet>();
   private constructor(
     private readonly zip: JSZip,

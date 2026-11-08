@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, apiDownload } from './api';
 
 /** Tipos e chamadas do orçamento de projeto (PJ2). Valores chegam como texto decimal. */
 
@@ -351,3 +351,42 @@ export const importBidTemplate = (revisionId: string, quoteRequestId?: string) =
 export const updateHoursT = (revisionId: string, hours: Record<string, number | null>) => api<Revision>(`/revisions/${revisionId}/aws/hours`, { method: 'PUT', body: JSON.stringify({ hours }) });
 export const updateKpiJustifications = (revisionId: string, justifications: Record<string, string | null>) =>
   api<Revision>(`/revisions/${revisionId}/aws/justifications`, { method: 'PUT', body: JSON.stringify({ justifications }) });
+
+/** Perfil da Bid (PJ7): fornecedor no cabeçalho e linha do Bid Template de cada tipo de cabo e função. */
+export interface BidCableLineProfile {
+  code: string;
+  description?: string | null;
+  supplier?: string | null;
+  partNumber?: string | null;
+  unit?: string | null;
+}
+export interface BidProfile {
+  header: { vendorName: string | null; pocName: string | null; pocEmail: string | null; leadTimeDays: number | null };
+  cables: Record<string, BidCableLineProfile>;
+  roles: Record<string, string>;
+}
+export interface BidTemplateLine {
+  row: number;
+  code: string;
+  description: string;
+  category: string;
+  subcategory: string;
+  supplier: string | null;
+  free: boolean;
+}
+export interface BidPlanStatus {
+  ready: boolean;
+  blockers: string[];
+  unmappedCables: string[];
+  unmappedRoles: string[];
+  lines: Array<{ code: string; label: string; supplier: string | null }>;
+  kpiYes: string[];
+}
+
+export const getBidProfile = () => api<BidProfile>('/bid-profile');
+export const updateBidProfile = (body: { header?: Partial<BidProfile['header']>; cables?: Record<string, BidCableLineProfile | null>; roles?: Record<string, string | null> }) =>
+  api<BidProfile>('/bid-profile', { method: 'PUT', body: JSON.stringify(body) });
+export const getBidLines = (revisionId: string) => api<BidTemplateLine[]>(`/revisions/${revisionId}/bid/lines`);
+export const getBidPlan = (revisionId: string) => api<BidPlanStatus>(`/revisions/${revisionId}/bid/plan`);
+export const downloadBidPreview = (revisionId: string) => apiDownload(`/revisions/${revisionId}/bid/preview`, 'previa-bid.xlsm');
+export const downloadBidOutput = (revisionId: string) => apiDownload(`/revisions/${revisionId}/bid/output`, 'bid.xlsm');

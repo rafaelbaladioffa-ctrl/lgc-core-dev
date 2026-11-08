@@ -60,6 +60,29 @@ export async function api<T>(path: string, init: RequestInit = {}, retry = true)
   return body as T;
 }
 
+/** Baixa um arquivo da API e salva com o nome do `Content-Disposition` (ou o informado). */
+export async function apiDownload(path: string, fallbackName: string, retry = true): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(API_BASE + path, { headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {} });
+  } catch {
+    throw new ApiError(0, 'Não foi possível falar com o Financeiro. Verifique a conexão.');
+  }
+  if (res.status === 401 && retry && session && (await renew())) return apiDownload(path, fallbackName, false);
+  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, await res.json().catch(() => null)));
+  const disposition = res.headers.get('Content-Disposition') ?? '';
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/)?.[1];
+  const filename = encoded ? decodeURIComponent(encoded) : fallbackName;
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export interface Me {
   userId: string;
   email: string;

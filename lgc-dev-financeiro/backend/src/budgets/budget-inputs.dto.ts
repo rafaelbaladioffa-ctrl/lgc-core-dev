@@ -235,3 +235,45 @@ export class UpdateKpiJustificationsDto {
   @IsObject()
   justifications!: Record<string, string | null>;
 }
+
+export class BidHeaderProfileDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  vendorName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  pocName?: string | null;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  pocEmail?: string | null;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(365)
+  leadTimeDays?: number | null;
+}
+
+/**
+ * Perfil da Bid: cabeçalho e mapeamentos. `cables`: tipo normalizado → { code, description?, supplier?,
+ * partNumber?, unit? } ou null; `roles`: roleKey → código da linha de mão de obra ou null. Conferido no serviço.
+ */
+export class UpdateBidProfileDto {
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => BidHeaderProfileDto)
+  header?: BidHeaderProfileDto;
+
+  @IsOptional()
+  @IsObject()
+  cables?: Record<string, { code: string; description?: string | null; supplier?: string | null; partNumber?: string | null; unit?: string | null } | null>;
+
+  @IsOptional()
+  @IsObject()
+  roles?: Record<string, string | null>;
+}

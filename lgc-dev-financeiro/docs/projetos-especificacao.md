@@ -383,20 +383,30 @@ deslocamento).
   chegou ao total e o contador de erros de validação caiu.
 - **Onde escrever, sem endereço fixo** (a versão do modelo muda e as linhas andam):
   - Cabeçalho do fornecedor (aba *Summary*): pelos **intervalos nomeados** do modelo — nome do
-    fornecedor, contato e e-mail da proposta, nome da proposta (código do projeto + revisão), início
-    e conclusão propostos, data de envio, moeda, justificativa de fabricante, lead time e markups
-    (zero para mão de obra pura).
+    fornecedor (como na lista da AWS), contato e e-mail da proposta, nome da proposta (**o código do
+    projeto**, como a LGC usa), início e conclusão propostos, data de envio e lead time. Moeda, markups e
+    os dados da AWS já vêm no modelo e não são tocados.
   - Linhas (aba *Item Selection*): localizadas pelo **código da coluna C** (part number da AWS ou
     código da linha). Colunas de entrada: B finalidade, G comprimento, J valor unitário (valor hora,
     na mão de obra), M quantidade (horas, na mão de obra), N quantidade do estoque do fornecedor, T
     horas de campo da linha, U comentário.
   - Mão de obra: uma linha por função mapeada (técnico, supervisor, gerente…, cada uma com taxa
     normal, extra e feriado), com valor hora em J e horas em M.
-  - Cabos: **uma linha por tipo, com o comprimento médio** (como a planilha da LGC), quantidade e
-    horas T. O modelo pede "duplicar linha" (macro) para vários comprimentos; o sistema não insere
-    linhas, e quando dois tipos da SOW caem no mesmo código a revisão avisa para agrupar.
-  - Condições gerais: veículos, transporte, hospedagem, diárias e locação de equipamento
-    (plataforma), pelos códigos de cada linha.
+  - Cabos fornecidos pela AWS (conferido com uma Bid real da LGC, 2026-11-08): **G comprimento médio,
+    S quantidade instalada digitada por cima da fórmula `=O`** (M e N ficam vazios, então não entra custo
+    de material), T horas e U comentário em inglês. Tipos da SOW que caem na mesma linha são somados (ex.:
+    Cat6 verde e laranja numa linha livre de cobre, com A descrição, B finalidade, D fornecedor, E código
+    e K unidade). O sistema não insere linhas ("duplicar linha" é macro); duas coisas diferentes na mesma
+    linha bloqueiam a geração.
+  - Linhas com o mesmo código: o modelo pode ter o mesmo part number numa linha com fornecedor definido
+    e noutra em "Select". Vale a do fornecedor do perfil ou, sem ele, a que já tem fornecedor; em "Select"
+    o fornecedor do perfil é escrito em D.
+  - Materiais da LGC: linha do catálogo de materiais pelo campo "referência no formulário do cliente", com
+    J preço e M quantidade (inteira); linha livre leva também descrição, fabricante, código e unidade.
+  - Condições gerais: deslocamento em *Transportation* (J valor por carro/dia, M diárias, B finalidade),
+    plataforma em *Equipment Rental*, hospedagem em *Lodging* e alimentação em *Per Diem*.
+  - Bid KPIs: **"Yes"** na coluna F dos indicadores fora da meta (a Bid real não tem texto de
+    justificativa no arquivo; a justificativa fica na revisão).
 - **Regra de conferência do próprio modelo:** a soma das horas T das linhas tem de ser igual às horas
   das funções de campo (instalador, emendador, técnico, oficial, supervisor). É a mesma regra da §7.2;
   a revisão não submete se divergir.
@@ -565,7 +575,7 @@ de custo; outros modelos de cliente além do AWS.
 | PJ4 | Modelo `aws_sow`: perfil de cliente, consumo de `project.quote_requested`, SOW em PDF baixada do Core com extração de texto, horas-meta, indicadores, valores do bid | **feito** (2026-11-08), em duas partes: ver notas abaixo. O perfil de cliente com o mapeamento tipo de cabo/função → linha do Bid Template fica para a PJ7, onde é usado |
 | PJ5 | Realizado: apontamento, lançamentos, cotado × realizado, fechamento | pendente |
 | PJ6 | Custos realizados vindos de títulos do contas a pagar (depende de F2) | pendente |
-| PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | pendente |
+| PJ7 | Bid preenchida a partir do modelo do cliente (§7.4) e devolução da cotação ao Core ao aprovar o envio (§13.1). Depende de PJ3 e PJ4; o lado do Core está pronto desde 2026-11-08 | **feito** (2026-11-08): ver nota abaixo |
 
 **Notas da PJ1.**
 - Migração `20261108120000_pj1_parametros`: tabelas `parameter_sets`, `parameter_set_roles`,
@@ -672,6 +682,33 @@ de custo; outros modelos de cliente além do AWS.
   por tipo, indicadores com justificativa em inglês, valores para a Bid).
 - Conferido: testes do leitor com uma planilha mínima fictícia, do cálculo com números conferidos à mão
   e do serviço; migrações e gatilhos num Postgres em memória. Não verificado: tela com login real.
+
+**Notas da PJ7.**
+- Migração `20261108180000_pj7_bid_envio`: `bid_profile_entries` (fornecedor e mapeamento tipo de
+  cabo / função → linha do Bid Template, único por tipo e chave) e `revision_bid_output` (Bid gerada,
+  append-only por gatilho).
+- Escritor (`bid/xlsx-editor.ts`, `bid/bid-plan.ts`, `bid/bid-fill.ts`): edita o XML só das células de
+  entrada; recusa célula com fórmula (exceto a S das linhas de cabo) e célula base de fórmula
+  compartilhada; remove o `calcChain` quando troca fórmula por valor e marca `fullCalcOnLoad`. Nome do
+  arquivo como a LGC usa: `AAAA-MM-DD_BID_<FBN>_<site>_v<revisão>.xlsm`.
+- Funções padrão (decisão do dono em 2026-11-08): técnico → *Technician*, encarregado → *General
+  Foreman / Site Supervisor*, gerente → *Project Manager*, todas na taxa normal; dá para trocar no perfil.
+- **Conferência com a Bid real** (fora do Git): preenchida a partir do modelo em branco com os números da
+  Bid da LGC, a planilha gerada, aberta no Excel, deu os mesmos totais de mão de obra, condições gerais e
+  cabo (zero), as mesmas portas, horas e metros nos indicadores, horas de campo = horas por cabo e
+  **zero erros de validação**.
+- **Aprovar envio** (`POST /revisions/:id/approve-send`) numa revisão `aws_sow` gera a Bid antes (se
+  faltar algo, a revisão continua em aprovação com o motivo) e, na mesma transação da aprovação, grava
+  a Bid e a mensagem `project_quote.ready` no outbox. A transição direta sem a Bid é recusada.
+- **Entrega ao Core:** o despachante do outbox manda `project_quote.ready` para
+  `POST /integration/projects/:id/quotes` com `AXIS_API_KEY`, juntando a Bid guardada na revisão ao
+  retrato da cotação (equipe por função, dias, datas, SOW, quem aprovou). 400/403/404/409 vão direto
+  para a dead-letter; rede e 5xx seguem o retry. Sem `AXIS_API_KEY` a mensagem fica pendente.
+- Rotas: `GET/PUT /bid-profile`, `GET /revisions/:id/bid/lines`, `GET /revisions/:id/bid/plan`,
+  `GET /revisions/:id/bid/preview` (`budget:write`, prévia sem gravar), `GET /revisions/:id/bid/output`.
+- Tela: parte "Bid para a AWS" no painel da cotação (situação, fornecedor, linha de cada tipo de cabo e
+  função, prévia e Bid enviada).
+- Não verificado: aprovação com login real e entrega contra um Core rodando.
 
 ## 17. Decisões pendentes
 

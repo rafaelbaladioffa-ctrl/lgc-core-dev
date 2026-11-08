@@ -10,7 +10,8 @@ const ACTIONS: Record<Exclude<WorkflowAction, 'discard'>, { label: string; class
     label: 'Aprovar envio',
     className: 'btn btn-primary',
     reason: 'none',
-    confirm: 'Aprovar o envio desta revisão ao cliente? Ela fica congelada e a revisão enviada anterior, se houver, passa a substituída.',
+    confirm:
+      'Aprovar o envio desta revisão ao cliente? Ela fica congelada e a revisão enviada anterior, se houver, passa a substituída. No modelo AWS, a Bid é gerada e enviada ao Axis Core com a equipe e os dias.',
     done: 'Envio aprovado.',
   },
   return: { label: 'Devolver para ajuste', className: 'btn btn-ghost', reason: 'required', done: 'Revisão devolvida para ajuste.' },

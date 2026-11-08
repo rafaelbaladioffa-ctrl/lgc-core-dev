@@ -15,7 +15,7 @@ junto com a entrega F0. Detalhe do domínio e dos payloads:
 | Webhook de compra, reembolso e adiantamento | Core → Financeiro | **Contratos novos; o Core ainda não emite** |
 | Eventos de pagamento | Financeiro → Core | Outbox pronto; **o Core não tem receptor** |
 | Pedido de cotação do projeto (`project.quote_requested`) | Core → Financeiro | Core emite e o Financeiro consome desde 2026-11-08 (fila de pedidos de cotação, PJ4) (§4) |
-| Devolução da cotação (`POST /integration/projects/:id/quotes`) | Financeiro → Core | Core recebe desde 2026-11-08; **o Financeiro ainda não envia** (§4) |
+| Devolução da cotação (`POST /integration/projects/:id/quotes`) | Financeiro → Core | Core recebe e o Financeiro envia desde 2026-11-08 (PJ7: ao aprovar o envio, pelo outbox com retry) (§4) |
 | API de consulta por API key | Financeiro → Core | Disponível no Core; o Financeiro ainda não usa |
 | Consulta de projetos e clientes com o token do usuário (`GET /projects`, `GET /clients` do Core) | Financeiro → Core | Usada pelo botão "Atualizar do Axis Core" do módulo Projetos (PJ2); respeita `project:read`/`client:read` de quem clicou. URL em `AXIS_API_URL` |
 
@@ -128,7 +128,7 @@ Content-Type: application/json
    Bid; as revisões anteriores ficam como "Substituída". Detalhe: [dominio/cadastros.md §10.2](dominio/cadastros.md#102-cotação-pelo-financeiro).
 
 **Cadastro do satélite:** a API key entregue ao cadastrar vai em `AXIS_API_KEY` do Financeiro (download
-da SOW e do Bid Template). O Financeiro precisa assinar `project.*`, `project.document_added` e
+da SOW e do Bid Template e envio da cotação). O Financeiro precisa assinar `project.*`, `project.document_added` e
 `project.quote_requested`.
 
 ## 5. O que o Core precisa fazer (ordem sugerida)

@@ -354,6 +354,7 @@ model BudgetRevision {
   events       BudgetRevisionEvent[]
   sow          BudgetRevisionSow?
   bidTemplate  RevisionBidTemplate?
+  bidOutput    RevisionBidOutput?
 
   @@unique([budgetId, number])
   @@index([status])
@@ -463,4 +464,36 @@ model RevisionBidTemplate {
   quoteRequest QuoteRequest?  @relation(fields: [quoteRequestId], references: [id])
 
   @@map("revision_bid_template")
+}
+
+/// Perfil da Bid do cliente AWS (PJ7, §7.4): dados do fornecedor no cabeçalho e o mapeamento tipo de cabo /
+/// função da equipe → linha do Bid Template (pelo código da coluna C). Fica no banco: valores e códigos do
+/// cliente não vão para o repositório.
+model BidProfileEntry {
+  id        String   @id @default(uuid())
+  /// header (key: vendorName, pocName, pocEmail, leadTimeDays), cable (key: tipo normalizado), role (key: roleKey)
+  kind      String
+  key       String
+  value     Json
+  updatedBy String   @map("updated_by")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([kind, key])
+  @@map("bid_profile_entries")
+}
+
+/// Bid preenchida ao aprovar o envio (PJ7). Append-only: nunca muda nem é apagada.
+model RevisionBidOutput {
+  revisionId  String   @id @map("revision_id")
+  filename    String
+  contentHash String   @map("content_hash")
+  content     Bytes
+  /// Células escritas e o mapeamento usado (para conferência).
+  writes      Json
+  generatedAt DateTime @default(now()) @map("generated_at")
+  generatedBy String   @map("generated_by")
+
+  revision BudgetRevision @relation(fields: [revisionId], references: [id])
+
+  @@map("revision_bid_output")
 }

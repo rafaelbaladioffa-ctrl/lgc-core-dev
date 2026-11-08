@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, Param, ParseUUIDPipe, Patch, Post, Put, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
 import { RequirePermissions } from '../rbac/permissions.decorator.js';
@@ -8,6 +9,7 @@ import {
   ImportSowDto,
   RevisionTransitionDto,
   SimulateRevisionDto,
+  UpdateBidProfileDto,
   UpdateBudgetDto,
   UpdateHoursTDto,
   UpdateKpiJustificationsDto,
@@ -15,6 +17,8 @@ import {
   UpdateSowCablesDto,
 } from './budget-inputs.dto.js';
 import { SowService } from './sow/sow.service.js';
+import { BidService } from './bid/bid.service.js';
+import { validateBidProfile } from './bid/bid-profile.js';
 import { BudgetsService } from './budgets.service.js';
 import { CoreSyncService } from './core-sync.service.js';
 
@@ -91,12 +95,64 @@ export class QuoteRequestsController {
   }
 }
 
+/** Perfil da Bid do cliente AWS (PJ7): fornecedor e mapeamento para as linhas do Bid Template. */
+@Controller('bid-profile')
+export class BidProfileController {
+  constructor(private readonly bid: BidService) {}
+
+  @Get()
+  @RequirePermissions('budget:read')
+  get() {
+    return this.bid.profile();
+  }
+
+  @Put()
+  @RequirePermissions('budget:write')
+  update(@Body() dto: UpdateBidProfileDto, @CurrentUser() user: AuthenticatedUser) {
+    return this.bid.updateProfile(validateBidProfile(dto), user);
+  }
+}
+
+const XLSM = 'application/vnd.ms-excel.sheet.macroEnabled.12';
+const attachment = (filename: string) => `attachment; filename="${filename.replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+
 @Controller('revisions')
 export class RevisionsController {
   constructor(
     private readonly budgets: BudgetsService,
     private readonly sow: SowService,
+    private readonly bid: BidService,
   ) {}
+
+  // Bid (PJ7, §7.4): linhas do modelo, plano, prévia e a Bid gerada na aprovação.
+  @Get(':id/bid/lines')
+  @RequirePermissions('budget:read')
+  bidLines(@Param('id', ParseUUIDPipe) id: string) {
+    return this.bid.templateLines(id);
+  }
+
+  @Get(':id/bid/plan')
+  @RequirePermissions('budget:read')
+  async bidPlan(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
+    const { plan, blockers, unmappedCables, unmappedRoles } = await this.bid.plan(id, user);
+    return { ready: !!plan, blockers, unmappedCables, unmappedRoles, lines: plan?.lines.map((l) => ({ code: l.code, label: l.label, supplier: l.supplier ?? null })) ?? [], kpiYes: plan?.kpiYes ?? [] };
+  }
+
+  @Get(':id/bid/preview')
+  @RequirePermissions('budget:write')
+  async bidPreview(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser, @Res() res: Response) {
+    const bid = await this.bid.preview(id, user);
+    res.set({ 'Content-Type': XLSM, 'Content-Disposition': attachment(`PREVIA_${bid.filename}`) });
+    res.send(bid.content);
+  }
+
+  @Get(':id/bid/output')
+  @RequirePermissions('budget:read')
+  async bidOutput(@Param('id', ParseUUIDPipe) id: string, @Res() res: Response) {
+    const bid = await this.bid.output(id);
+    res.set({ 'Content-Type': XLSM, 'Content-Disposition': attachment(bid.filename), 'X-Content-SHA256': bid.contentHash });
+    res.send(Buffer.from(bid.content));
+  }
 
   // SOW da revisão (§7.1). Só muda em rascunho; o texto original é do cliente (P-05).
   @Post(':id/sow/import')
@@ -194,7 +250,8 @@ export class RevisionsController {
   @HttpCode(200)
   @RequirePermissions('budget:approve')
   approveSend(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthenticatedUser) {
-    return this.budgets.transition(id, 'approve_send', user);
+    // aws_sow: gera a Bid e põe a devolução ao Core no outbox, na mesma transação da aprovação.
+    return this.bid.approveSend(id, user);
   }
 
   @Post(':id/won')

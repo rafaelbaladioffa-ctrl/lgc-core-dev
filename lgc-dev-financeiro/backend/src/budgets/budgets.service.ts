@@ -287,6 +287,20 @@ export class BudgetsService {
     return next;
   }
 
+  /** Revisão com orçamento, parâmetros, SOW e Bid Template (sem o arquivo); para o serviço da Bid. */
+  loadRevisionFull(id: string) {
+    return this.loadRevision(id);
+  }
+
+  /** Projeto do cache do Core, ou nulo se ainda não sincronizado. */
+  projectInfoOrNull(axisProjectId: string) {
+    return this.project(axisProjectId).catch(() => null);
+  }
+
+  header(budget: Pick<ProjectBudget, 'title' | 'projectCode' | 'plannedStartDate' | 'plannedEndDate'>, project: ProjectInfo | null) {
+    return budgetHeader(budget, project);
+  }
+
   private async loadRevision(id: string, tx: Prisma.TransactionClient = this.prisma): Promise<RevisionFull> {
     const rev = await tx.budgetRevision.findUnique({
       where: { id },
@@ -515,7 +529,14 @@ export class BudgetsService {
    * o histórico e a auditoria na mesma transação. Aprovar o envio marca a revisão enviada anterior como
    * substituída. Quem orçou pode aprovar a própria revisão (P-03); a auditoria registra `selfApproved`.
    */
-  async transition(id: string, action: WorkflowAction, user: AuthenticatedUser, reason?: string | null) {
+  async transition(
+    id: string,
+    action: WorkflowAction,
+    user: AuthenticatedUser,
+    reason?: string | null,
+    /** Aprovar envio no aws_sow: grava a Bid e o outbox na mesma transação (BidService.approveSend). */
+    onApproveSend?: (tx: Prisma.TransactionClient, approvedAt: Date) => Promise<unknown>,
+  ) {
     const rule = WORKFLOW[action];
     if (!user.permissions.includes(rule.permission)) throw new ForbiddenException('Você não tem permissão para esta ação.');
     const why = reason?.trim() || null;
@@ -537,6 +558,9 @@ export class BudgetsService {
         data.submittedAt = now;
       }
       if (action === 'return') data.submittedAt = null;
+      if (action === 'approve_send' && rev.budget.model === 'aws_sow' && !onApproveSend) {
+        throw new ConflictException('O envio de uma revisão aws_sow é aprovado pela geração da Bid.');
+      }
       if (action === 'approve_send') {
         const previous = await tx.budgetRevision.findFirst({ where: { budgetId: rev.budgetId, status: 'enviada' }, select: { id: true, number: true } });
         if (previous) {
@@ -560,6 +584,7 @@ export class BudgetsService {
       }
       if (action === 'won' || action === 'lost') data.decidedAt = now;
       await tx.budgetRevision.update({ where: { id }, data });
+      if (action === 'approve_send' && onApproveSend) Object.assign(extra, await onApproveSend(tx, now));
       await tx.budgetRevisionEvent.create({
         data: { revisionId: id, action: rule.event, fromStatus: rule.from, toStatus: rule.to, reason: why, actorAxisId: user.userId, actorEmail: user.email },
       });
