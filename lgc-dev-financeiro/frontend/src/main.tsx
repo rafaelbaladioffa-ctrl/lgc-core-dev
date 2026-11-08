@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import './styles/axis-tokens.css';
+import './styles/axis-shell.css';
 import './styles/app.css';
 import './styles/pages.css';
 import './styles/cost-centers.css';

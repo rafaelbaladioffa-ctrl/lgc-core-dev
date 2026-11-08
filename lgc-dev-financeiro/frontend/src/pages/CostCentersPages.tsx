@@ -857,7 +857,7 @@ function BudgetGridForm({
   const editable = canWrite;
   return (
     <>
-      <div className="page-header">
+      <div className="axis-page-header">
         <div>
           <a className="breadcrumb" href={`#${back.href}`} onClick={confirmLeave}>
             ← {back.label}
@@ -865,7 +865,7 @@ function BudgetGridForm({
           <h1>Orçamento {year}</h1>
           <p className="muted">{ccName ?? 'Centro de custo'} · custo orçado por categoria e mês (R$).</p>
         </div>
-        <div className="page-actions">
+        <div className="axis-page-header__actions">
           <a className="btn btn-ghost" href={`#/centros-de-custo/${encodeURIComponent(id)}/orcamento/${year - 1}`} onClick={confirmLeave}>
             ← {year - 1}
           </a>

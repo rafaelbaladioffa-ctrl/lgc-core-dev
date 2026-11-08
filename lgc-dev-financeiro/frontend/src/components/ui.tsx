@@ -37,7 +37,7 @@ export function ErrorAlert({ message, onRetry }: { message: string; onRetry?: ()
 
 export function PageHeader({ title, back, actions, children }: { title: string; back?: { href: string; label: string }; actions?: ReactNode; children?: ReactNode }) {
   return (
-    <div className="page-header">
+    <div className="axis-page-header">
       <div>
         {back && (
           <a className="breadcrumb" href={`#${back.href}`}>
@@ -47,7 +47,7 @@ export function PageHeader({ title, back, actions, children }: { title: string; 
         <h1>{title}</h1>
         {children}
       </div>
-      {actions && <div className="page-actions">{actions}</div>}
+      {actions && <div className="axis-page-header__actions">{actions}</div>}
     </div>
   );
 }

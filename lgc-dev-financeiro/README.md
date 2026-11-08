@@ -40,6 +40,11 @@ npm install
 npm run dev                          # http://localhost:5175 (proxy /api → :3200)
 ```
 
+O frontend segue o shell e a identidade visual do Core (topbar, menu lateral, migalhas, tema claro/escuro,
+login). Os estilos canônicos (`src/styles/axis-tokens.css` e `axis-shell.css`), a marca e os ícones são
+gerados por `node scripts/sync-design.mjs` na raiz do repositório; não os edite aqui. O estilo próprio fica
+em `app.css`, `pages.css` e `cost-centers.css`, só com tokens.
+
 Em desenvolvimento o login e o refresh vão ao Core pelo proxy `/core-api` do Vite (Core em
 `localhost:3000`), sem precisar liberar a 5175 no CORS do Core. Em produção, defina `VITE_AXIS_URL`
 no build e inclua o domínio do Financeiro em `CORS_ALLOWED_ORIGINS` do Core.

@@ -309,7 +309,10 @@ Prefixo `api/v1`. Paginação `{ data, meta: { page, per_page, total } }`. Erros
 
 ## 7. Telas (MVP)
 
-Mesma identidade do Core (tokens de `axis-tokens.css`), desktop primeiro.
+Mesma identidade e mesmo layout do Core (tema "Industrial Flow Graphite"): topbar escura com logo, menu
+lateral, migalhas, tema claro/escuro e login `.axis-login`. Os arquivos `axis-tokens.css`, `axis-shell.css`,
+a marca (`public/brand-industrial/`) e os ícones são gerados por `scripts/sync-design.mjs` (raiz do
+repositório) a partir do Core; não se editam no Financeiro. Desktop primeiro.
 
 1. **Início**: a pagar hoje, vencidos, próximos 7 dias, aguardando aprovação.
 2. **Títulos**: lista com filtros (status, fornecedor, vencimento, CC, origem), detalhe com parcelas,

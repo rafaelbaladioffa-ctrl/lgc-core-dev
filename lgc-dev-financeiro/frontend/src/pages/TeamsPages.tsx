@@ -99,10 +99,12 @@ export function TeamsPage({ period }: { period: Period }) {
 
 function Kpi({ label, value, hint, tone }: { label: string; value: ReactNode; hint?: ReactNode; tone?: 'danger' | 'warning' }) {
   return (
-    <div className={`kpi${tone ? ` kpi-${tone}` : ''}`}>
-      <span className="kpi-label">{label}</span>
-      <strong className="kpi-value">{value}</strong>
-      {hint && <span className="kpi-hint">{hint}</span>}
+    <div className={`axis-kpi${tone ? ` kpi-${tone}` : ''}`}>
+      <div>
+        <div className="axis-kpi__label">{label}</div>
+        <div className="axis-kpi__value">{value}</div>
+        {hint && <span className="kpi-hint">{hint}</span>}
+      </div>
     </div>
   );
 }

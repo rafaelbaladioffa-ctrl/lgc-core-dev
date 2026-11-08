@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { Fragment, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { ApiError, bindSession, getMe, type Me } from './lib/api';
 import { LoginError, loadSession, loginWithAxis, saveSession, validateLogin, type Session } from './lib/auth';
 import { matchRoute, useHashPath } from './lib/router';
+import { useTheme, type Theme } from './lib/theme';
+import { PageHeader } from './components/ui';
 import { ParameterSetsPage } from './pages/ParameterSetsPage';
 import { ParameterSetPage } from './pages/ParameterSetPage';
 import { DestinationFormPage, DestinationsPage, MaterialFormPage, MaterialsPage } from './pages/CatalogPages';
@@ -15,6 +17,7 @@ import { periodFromPath } from './lib/costCenters';
 
 export function App() {
   const [session, setSession] = useState<Session | null>(() => loadSession());
+  const { theme, toggleTheme } = useTheme();
 
   const update = useCallback((s: Session | null) => {
     saveSession(s);
@@ -24,7 +27,7 @@ export function App() {
   // Precisa valer antes da primeira chamada à API dos filhos (efeitos dos filhos rodam antes dos do pai).
   bindSession(session, setSession);
 
-  return session ? <Home session={session} onLogout={() => update(null)} /> : <Login onLogin={update} />;
+  return session ? <Home session={session} onLogout={() => update(null)} theme={theme} onToggleTheme={toggleTheme} /> : <Login onLogin={update} />;
 }
 
 function Login({ onLogin }: { onLogin: (s: Session) => void }) {
@@ -49,30 +52,47 @@ function Login({ onLogin }: { onLogin: (s: Session) => void }) {
   }
 
   return (
-    <main className="login">
-      <form className="card login-card" onSubmit={submit} noValidate>
-        <h1>Axis Financeiro</h1>
-        <p className="muted">Entre com o mesmo e-mail e senha do Axis.</p>
-        <label className="field">
-          <span>E-mail</span>
-          <input type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!errors.email} />
-          {errors.email && <small className="field-error">{errors.email}</small>}
-        </label>
-        <label className="field">
-          <span>Senha</span>
-          <input type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={!!errors.password} />
-          {errors.password && <small className="field-error">{errors.password}</small>}
-        </label>
-        {errors.form && (
-          <p className="alert alert-danger" role="alert">
-            {errors.form}
-          </p>
-        )}
-        <button className="btn btn-primary" type="submit" disabled={busy}>
-          {busy ? 'Entrando…' : 'Entrar'}
-        </button>
-      </form>
-    </main>
+    <div className="axis-login">
+      {/* Painel de marca: some em telas estreitas, onde o formulário basta. */}
+      <div className="axis-login__panel">
+        <img src="/brand-industrial/axis-app-icon.svg" alt="" width={52} height={52} className="axis-login__icon" />
+        <h1>
+          Orçamentos mais precisos.
+          <br />
+          Resultado mais claro.
+        </h1>
+        <p className="axis-login__lead">O Axis Financeiro reúne propostas, centros de custo e equipes técnicas para você acompanhar o resultado de cada projeto.</p>
+      </div>
+
+      <div className="axis-login__side">
+        <div className="axis-login__card">
+          <img src="/brand-industrial/axis-logo-light.svg" alt="Axis ERP + SGI" className="axis-login__logo axis-login__logo--light" />
+          <img src="/brand-industrial/axis-logo-dark.svg" alt="Axis ERP + SGI" className="axis-login__logo axis-login__logo--dark" />
+
+          <form className="axis-login__form" onSubmit={submit} noValidate>
+            <p className="muted">Entre com o mesmo e-mail e senha do Axis.</p>
+            <div className="axis-field">
+              <label htmlFor="login-email">E-mail</label>
+              <input id="login-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!!errors.email} />
+              {errors.email && <small className="field-error">{errors.email}</small>}
+            </div>
+            <div className="axis-field">
+              <label htmlFor="login-password">Senha</label>
+              <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} aria-invalid={!!errors.password} />
+              {errors.password && <small className="field-error">{errors.password}</small>}
+            </div>
+            {errors.form && (
+              <p className="axis-login__error" role="alert">
+                {errors.form}
+              </p>
+            )}
+            <button className="axis-btn axis-btn--primary axis-login__submit" type="submit" disabled={busy}>
+              {busy ? 'Entrando…' : 'Entrar'}
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -82,21 +102,57 @@ const NEXT_STEPS = [
   { title: 'Realizado', detail: 'Apontamento da obra e custos lançados; cotado × realizado.' },
 ];
 
-/** Item de menu visível com qualquer uma das permissões. */
-const NAV: Array<{ path: string; label: string; permission: string | string[] }> = [
-  { path: '/projetos', label: 'Projetos', permission: 'budget:read' },
-  { path: '/cotacoes', label: 'Pedidos de cotação', permission: 'budget:read' },
-  { path: '/parametros', label: 'Parâmetros', permission: 'budget_params:read' },
-  { path: '/materiais', label: 'Materiais', permission: 'budget_params:read' },
-  { path: '/destinos', label: 'Destinos', permission: 'budget_params:read' },
-  { path: '/centros-de-custo', label: 'Centros de custo', permission: ['cost_center:read', 'cost_center:read_own'] },
-  { path: '/equipes', label: 'Equipes', permission: ['cost_center:read', 'cost_center:read_own'] },
-  { path: '/controladoria', label: 'Controladoria', permission: 'cost_center:write' },
+/** Item de menu visível com qualquer uma das permissões; `icon` segue os glifos do menu do Core. */
+const NAV: Array<{ path: string; label: string; icon: string; permission: string | string[] }> = [
+  { path: '/projetos', label: 'Projetos', icon: '⚑', permission: 'budget:read' },
+  { path: '/cotacoes', label: 'Pedidos de cotação', icon: '☰', permission: 'budget:read' },
+  { path: '/parametros', label: 'Parâmetros', icon: '⚙', permission: 'budget_params:read' },
+  { path: '/materiais', label: 'Materiais', icon: '▣', permission: 'budget_params:read' },
+  { path: '/destinos', label: 'Destinos', icon: '◎', permission: 'budget_params:read' },
+  { path: '/centros-de-custo', label: 'Centros de custo', icon: '⧈', permission: ['cost_center:read', 'cost_center:read_own'] },
+  { path: '/equipes', label: 'Equipes', icon: '☆', permission: ['cost_center:read', 'cost_center:read_own'] },
+  { path: '/controladoria', label: 'Controladoria', icon: '✔', permission: 'cost_center:write' },
 ];
 
-function Home({ session, onLogout }: { session: Session; onLogout: () => void }) {
+const under = (route: string, base: string) => route === base || route.startsWith(`${base}/`);
+
+/** Migalhas "Financeiro / seção / página" derivadas da rota. */
+export function breadcrumbOf(route: string): string[] {
+  const seg = route.split('/').filter(Boolean);
+  const root = 'Financeiro';
+  if (seg.length === 0) return [root, 'Início'];
+  const [section, second, third, fourth] = seg;
+  switch (section) {
+    case 'projetos':
+      return second ? [root, 'Projetos', 'Projeto'] : [root, 'Projetos'];
+    case 'revisoes':
+      return [root, 'Projetos', 'Revisão'];
+    case 'cotacoes':
+      return [root, 'Pedidos de cotação'];
+    case 'parametros':
+      return second ? [root, 'Parâmetros', 'Conjunto'] : [root, 'Parâmetros'];
+    case 'materiais':
+      return second ? [root, 'Materiais', second === 'novo' ? 'Novo' : 'Editar'] : [root, 'Materiais'];
+    case 'destinos':
+      return second ? [root, 'Destinos', second === 'novo' ? 'Novo' : 'Editar'] : [root, 'Destinos'];
+    case 'centros-de-custo':
+      if (second && third === 'orcamento' && fourth) return [root, 'Centros de custo', `Orçamento ${fourth}`];
+      return second ? [root, 'Centros de custo', 'Detalhe'] : [root, 'Centros de custo'];
+    case 'equipes':
+      return second ? [root, 'Equipes', 'Painel'] : [root, 'Equipes'];
+    case 'controladoria':
+      return [root, 'Controladoria'];
+    default:
+      return [root, 'Início'];
+  }
+}
+
+const initials = (email?: string) => (email ? email.split('@')[0].slice(0, 2).toUpperCase() : '?');
+
+function Home({ session, onLogout, theme, onToggleTheme }: { session: Session; onLogout: () => void; theme: Theme; onToggleTheme: () => void }) {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const path = useHashPath();
   const route = path.split('?')[0];
 
@@ -110,50 +166,103 @@ function Home({ session, onLogout }: { session: Session; onLogout: () => void })
   useEffect(load, [load]);
 
   const can = (p: string) => me?.permissions.includes(p) ?? false;
+  const items = NAV.filter((n) => (Array.isArray(n.permission) ? n.permission.some(can) : can(n.permission)));
+  const isActive = (base: string) => under(route, base) || (base === '/projetos' && under(route, '/revisoes'));
+  const crumbs = breadcrumbOf(route);
 
   return (
-    <div className="shell">
-      <header className="topbar">
-        <a className="brand" href="#/">
-          Axis Financeiro
+    <div className="axis-app-shell">
+      <header className="axis-app-topbar">
+        <a className="axis-app-topbar-brand" href="#/">
+          <img src="/brand-industrial/axis-logo-dark.svg" alt="Axis ERP + SGI" />
         </a>
-        <nav className="topnav" aria-label="Principal">
-          {NAV.filter((n) => (Array.isArray(n.permission) ? n.permission.some(can) : can(n.permission))).map((n) => (
-            <a key={n.path} href={`#${n.path}`} aria-current={route === n.path || route.startsWith(`${n.path}/`) ? 'page' : undefined}>
-              {n.label}
-            </a>
-          ))}
-        </nav>
-        <span className="topbar-user">
-          {session.email}
-          <button className="btn btn-ghost" type="button" onClick={onLogout}>
+        <span className="axis-product-tag">Financeiro</span>
+        <button
+          className="axis-mobile-nav-toggle"
+          type="button"
+          aria-label={menuOpen ? 'Fechar menu' : 'Abrir menu'}
+          aria-controls="axis-app-sidebar"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          {menuOpen ? '×' : '☰'}
+        </button>
+        <div className="axis-app-topbar-search" />
+        <div className="axis-app-topbar-actions">
+          <button className="axis-topbar-button" type="button" onClick={onToggleTheme} title="Alternar tema" aria-label="Alternar tema">
+            {theme === 'light' ? '☾' : '☀'}
+          </button>
+          <div className="axis-app-user">
+            <span className="axis-app-avatar">{initials(session.email)}</span>
+            <div>
+              <strong>{session.email}</strong>
+              <small>{me?.financeRoles.map((r) => r.name).join(', ')}</small>
+            </div>
+          </div>
+          <button className="axis-topbar-button" type="button" onClick={onLogout}>
             Sair
           </button>
-        </span>
+        </div>
       </header>
-      <main className="content">
-        {error && (
-          <div className="alert alert-danger" role="alert">
-            {error}{' '}
-            <button className="btn btn-ghost" type="button" onClick={load}>
-              Tentar de novo
-            </button>
+      <div className="axis-app-body">
+        <aside id="axis-app-sidebar" className={`axis-app-sidebar${menuOpen ? ' axis-app-sidebar-open' : ''}`}>
+          <nav aria-label="Principal">
+            <a href="#/" aria-current={route === '/' ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
+              <span aria-hidden className="axis-nav-icon">
+                ▦
+              </span>
+              Início
+            </a>
+            {items.map((n) => (
+              <a key={n.path} href={`#${n.path}`} aria-current={isActive(n.path) ? 'page' : undefined} onClick={() => setMenuOpen(false)}>
+                <span aria-hidden className="axis-nav-icon">
+                  {n.icon}
+                </span>
+                {n.label}
+              </a>
+            ))}
+          </nav>
+          <div className="axis-sidebar-footer">
+            <img src="/brand-industrial/axis-symbol.svg" alt="" />
+            <span>Axis Financeiro</span>
           </div>
-        )}
-        {!me && !error && <p className="muted">Carregando…</p>}
-        {me && <Routes path={path} me={me} can={can} />}
-      </main>
+        </aside>
+        <div className="axis-app-content">
+          <nav className="axis-breadcrumb" aria-label="breadcrumb">
+            {crumbs.map((crumb, i) => (
+              <Fragment key={`${crumb}-${i}`}>
+                {i > 0 && <span>/</span>}
+                <strong>{crumb}</strong>
+              </Fragment>
+            ))}
+          </nav>
+          <main className="axis-app-main">
+            {error && (
+              <div className="axis-alert axis-alert--danger" role="alert">
+                {error}{' '}
+                <button className="axis-btn axis-btn--secondary axis-btn--sm" type="button" onClick={load}>
+                  Tentar de novo
+                </button>
+              </div>
+            )}
+            {!me && !error && <p className="muted">Carregando…</p>}
+            {me && <Routes path={path} me={me} can={can} />}
+          </main>
+        </div>
+      </div>
     </div>
   );
 }
 
 function NoAccess() {
   return (
-    <div className="card">
-      <h1>Sem acesso</h1>
-      <p className="muted">Seu perfil no Financeiro não permite abrir esta página. Peça o acesso ao administrador.</p>
-      <a href="#/">Voltar ao início</a>
-    </div>
+    <>
+      <PageHeader title="Sem acesso" />
+      <div className="card">
+        <p className="muted">Seu perfil no Financeiro não permite abrir esta página. Peça o acesso ao administrador.</p>
+        <a href="#/">Voltar ao início</a>
+      </div>
+    </>
   );
 }
 
@@ -199,7 +308,7 @@ function Routes({ path, me, can }: { path: string; me: Me; can: (p: string) => b
 function Start({ me }: { me: Me }) {
   return (
     <>
-      <h1>Início</h1>
+      <PageHeader title="Início" />
       <section className="card">
         <h2>Seu acesso</h2>
         {me.financeRoles.length === 0 ? (
@@ -207,7 +316,7 @@ function Start({ me }: { me: Me }) {
         ) : (
           <ul className="tags">
             {me.financeRoles.map((r) => (
-              <li key={r.code} className="tag">
+              <li key={r.code} className="axis-badge axis-badge--neutral">
                 {r.name}
               </li>
             ))}

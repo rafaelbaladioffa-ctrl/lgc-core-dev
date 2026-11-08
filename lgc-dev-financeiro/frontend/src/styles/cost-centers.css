@@ -12,24 +12,14 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-1);
-  font-weight: 600;
+  font-weight: 500;
   font-size: var(--text-xs);
   color: var(--foreground-muted);
 }
 
 .period-picker input,
 .inline-form input[type='month'] {
-  height: var(--control-height);
-  padding: 0 var(--space-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--foreground);
-  font: inherit;
-}
-
-.period-picker input[aria-invalid='true'] {
-  border-color: var(--danger);
+  width: auto;
 }
 
 .period-picker .field-error {
@@ -40,7 +30,7 @@
 .segmented {
   display: inline-flex;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius);
   overflow: hidden;
 }
 
@@ -50,8 +40,8 @@
   border: 0;
   background: var(--surface);
   color: var(--foreground);
-  font: inherit;
-  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 
 .segmented button + button {
@@ -123,7 +113,8 @@
 
 .budget-bar {
   height: var(--space-2);
-  background: var(--axis-graphite-100);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-xs);
   overflow: hidden;
 }
@@ -225,14 +216,7 @@
 }
 
 .table-select {
-  width: 100%;
   min-width: 180px;
-  height: var(--control-height);
-  padding: 0 var(--space-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  font: inherit;
 }
 
 /* Grade do orçamento (categoria × 12 meses). */
@@ -240,7 +224,9 @@
   white-space: nowrap;
   background: var(--surface);
   color: var(--foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .budget-grid input:not([type='checkbox']) {
@@ -248,7 +234,7 @@
   text-align: right;
 }
 
-/* Indicadores da equipe. */
+/* Indicadores da equipe: cada .kpi tem o visual de .axis-kpi (cartão, rótulo xs em caixa alta, valor 2xl). */
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
@@ -256,32 +242,18 @@
   margin-bottom: var(--space-4);
 }
 
-.kpi {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  padding: var(--space-3) var(--space-4);
-}
-
-.kpi-label,
 .kpi-hint {
-  font-size: var(--text-xs);
+  display: block;
+  margin-top: 2px;
   color: var(--foreground-muted);
+  font-size: var(--text-xs);
 }
 
-.kpi-value {
-  font-size: var(--text-lg);
-}
-
-.kpi-warning {
+.axis-kpi.kpi-warning {
   border-color: var(--warning);
 }
 
-.kpi-danger {
+.axis-kpi.kpi-danger {
   border-color: var(--danger);
 }
 
