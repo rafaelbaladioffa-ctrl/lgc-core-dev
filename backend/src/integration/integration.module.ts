@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
+import { MasterDataResyncService } from './master-data-resync.service.js';
 import { OutboxService } from './outbox.service.js';
 import { OutboxDispatcherService } from './outbox-dispatcher.service.js';
 import { SatellitesService } from './satellites.service.js';
@@ -13,7 +14,7 @@ import { AuthModule } from '../auth/auth.module.js';
 @Module({
   imports: [ThrottlerModule.forRoot([{ ttl: 60_000, limit: 100 }]), AuthModule],
   controllers: [IntegrationQueryController, IntegrationAdminController, IntegrationOutboxController],
-  providers: [OutboxService, OutboxDispatcherService, SatellitesService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
+  providers: [MasterDataResyncService, OutboxService, OutboxDispatcherService, SatellitesService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
   exports: [OutboxService, SatelliteApiKeyGuard, SatelliteThrottlerGuard],
 })
 export class IntegrationModule {}

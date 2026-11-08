@@ -1,0 +1,3 @@
+/* Integrações: aviso do reenvio de cadastros aos satélites. */
+.integration-notice { margin: 0 0 var(--space-3); color: var(--foreground-muted); font-size: var(--text-sm); }
+.integration-notice--error { color: var(--danger); }

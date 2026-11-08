@@ -99,3 +99,17 @@ Detalhes fixados na implementação (Logística, `docs/especificacao.md §12.3.1
   último custo). `custodian_id` é o id do colaborador/usuário do Axis gravado no termo.
 
 O painel da Logística também passa a mostrar o consumo em R$ por centro de custo.
+
+## 6. Core: reenvio dos cadastros (carga inicial do satélite)
+
+O Core só emite `cost_center.*` e `collaborator.*` quando o cadastro muda. Um satélite que passa a assinar esses eventos depois que os cadastros já existem fica com o cache vazio. No Financeiro, isso aparece como "Nenhum centro de custo visível".
+
+`POST /api/v1/integration/satellites/resync-master-data` (permissão `integration:manage`, auditado como `resync_master_data`), que na tela é o botão **Integrações → Reenviar cadastros**, grava no outbox, numa única transação:
+
+- `cost_center.updated` para cada centro de custo, com o mesmo payload do §1 e `active: true`;
+- `collaborator.updated` para cada colaborador, com o estado do §2;
+- `collaborator.cost_center_changed` para cada alocação **vigente**, com `previous_cost_center_id: null` e o `valid_from` da alocação.
+
+Os eventos vão a todos os satélites inscritos em cada tipo. Quem recebe trata como atualização, e reenviar de novo não duplica nada: o Financeiro substitui a alocação aberta que começa na mesma data. O histórico de alocações já encerradas não é reenviado.
+
+Resposta: `{ "costCenters": n, "collaborators": n, "allocations": n }`.

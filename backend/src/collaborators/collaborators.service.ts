@@ -31,7 +31,7 @@ type CollaboratorWithRelations = Collaborator & {
 const WITH_RELATIONS = { jobTitle: true, workSchedule: true, costCenter: true } as const;
 
 /** Estado do colaborador em `collaborator.created/updated` (docs/integracao-centros-de-custo.md §2). */
-function collaboratorStatePayload(c: CollaboratorWithRelations): Record<string, unknown> {
+export function collaboratorStatePayload(c: CollaboratorWithRelations): Record<string, unknown> {
   return {
     collaborator_id: c.id,
     name: c.fullName,

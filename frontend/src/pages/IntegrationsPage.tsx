@@ -9,6 +9,8 @@ import { outboxApi, type OutboxEvent, type OutboxEventDetail, type OutboxStatus 
 import { useAuth } from '../context/AuthContext';
 import { Button } from '../components/Button';
 import { formatDateTime } from '../utils/formatDate';
+import { translateApiError } from '../utils/apiError';
+import '../styles/integrations.css';
 
 const OUTBOX_STATUS_LABEL: Record<OutboxStatus, string> = { pending: 'Pendente', delivered: 'Entregue', failed: 'Falhou' };
 const OUTBOX_STATUS_TONE: Record<OutboxStatus, 'default' | 'success' | 'warning' | 'danger'> = {
@@ -25,6 +27,23 @@ export function IntegrationsPage() {
   const [events, setEvents] = useState<OutboxEvent[]>([]);
   const [statusFilter, setStatusFilter] = useState<OutboxStatus | ''>('');
   const [detail, setDetail] = useState<OutboxEventDetail | null>(null);
+  const [resyncing, setResyncing] = useState(false);
+  const [resyncMessage, setResyncMessage] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
+
+  // Carga inicial do cache dos satélites: manda o estado atual dos cadastros como eventos de atualização.
+  const resyncMasterData = async () => {
+    if (!window.confirm('Reenviar a todos os satélites inscritos os centros de custo, colaboradores e alocações atuais?')) return;
+    setResyncing(true);
+    setResyncMessage(null);
+    try {
+      const r = await integrationApi.resyncMasterData();
+      setResyncMessage({ tone: 'ok', text: `Reenvio registrado: ${r.costCenters} centros de custo, ${r.collaborators} colaboradores e ${r.allocations} alocações. A entrega aparece em Eventos (Outbox).` });
+    } catch (err) {
+      setResyncMessage({ tone: 'error', text: translateApiError(err, 'Não foi possível reenviar os cadastros.') });
+    } finally {
+      setResyncing(false);
+    }
+  };
 
   useEffect(() => {
     void integrationApi.list().then(setSatellites);
@@ -165,6 +184,12 @@ export function IntegrationsPage() {
         </button>
       </div>
 
+      {resyncMessage && (
+        <p role={resyncMessage.tone === 'error' ? 'alert' : 'status'} className={resyncMessage.tone === 'error' ? 'integration-notice integration-notice--error' : 'integration-notice'}>
+          {resyncMessage.text}
+        </p>
+      )}
+
       {tab === 'satellites' ? (
         <DataTable
           columns={satelliteColumns}
@@ -172,9 +197,14 @@ export function IntegrationsPage() {
           rowKey={(s) => s.id}
           toolbar={
             hasPermission('integration:manage') && (
-              <Button variant="positive" onClick={() => navigate('/integrations/new')}>
-                + Novo satélite
-              </Button>
+              <>
+                <Button onClick={() => void resyncMasterData()} disabled={resyncing}>
+                  {resyncing ? 'Reenviando…' : 'Reenviar cadastros'}
+                </Button>
+                <Button variant="positive" onClick={() => navigate('/integrations/new')}>
+                  + Novo satélite
+                </Button>
+              </>
             )
           }
         />

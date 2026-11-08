@@ -9,6 +9,8 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { AuthService } from '../auth/auth.service.js';
 import { CurrentUser } from '../auth/current-user.decorator.js';
 import type { AuthenticatedUser } from '../auth/authenticated-request.js';
+import { AuditAction } from '../audit/audit-action.decorator.js';
+import { MasterDataResyncService } from './master-data-resync.service.js';
 
 /** Admin panel over registered satellites (PLANNING.md 6.4) — JWT-protected like the rest of the app. */
 @Controller('integration/satellites')
@@ -19,7 +21,19 @@ export class IntegrationAdminController {
     private readonly dispatcher: OutboxDispatcherService,
     private readonly prisma: PrismaService,
     private readonly authService: AuthService,
+    private readonly resyncService: MasterDataResyncService,
   ) {}
+
+  /**
+   * Reenvia centros de custo, colaboradores e alocações vigentes aos satélites que assinam esses
+   * eventos (carga inicial do cache). Declarada antes de `:id` para não ser lida como um id.
+   */
+  @Post('resync-master-data')
+  @RequirePermissions('integration:manage')
+  @AuditAction({ action: 'resync_master_data', resourceType: 'integration' })
+  resyncMasterData() {
+    return this.resyncService.resync();
+  }
 
   /** Not in PLANNING.md 6.4's route table, but necessary: without it there is no way to register a satellite at all. */
   @Post()

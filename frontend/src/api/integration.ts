@@ -40,6 +40,9 @@ export const integrationApi = {
   list: () => api.get<Satellite[]>('/integration/satellites').then((r) => r.data),
   create: (input: CreateSatelliteInput) =>
     api.post<CreateSatelliteResult>('/integration/satellites', input).then((r) => r.data),
+  /** Reenvia centros de custo, colaboradores e alocações vigentes aos satélites (carga inicial do cache). */
+  resyncMasterData: () =>
+    api.post<{ costCenters: number; collaborators: number; allocations: number }>('/integration/satellites/resync-master-data').then((r) => r.data),
   testWebhook: (id: string) => api.post(`/integration/satellites/${id}/test-webhook`).then((r) => r.data),
   // Devolve a URL do satélite já com um token de curtíssima duração (90s) — abrir numa nova aba
   // imediatamente, nunca guardar/reusar essa URL depois de montada.
