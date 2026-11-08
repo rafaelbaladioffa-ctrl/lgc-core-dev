@@ -548,8 +548,32 @@ Contrato completo em [integracao-core-financeiro.md §4](../../docs/integracao-c
 2. Ao **aprovar o envio** (P-12), o Financeiro gera a Bid (§7.4) e grava na outbox
    `POST /integration/projects/:axisProjectId/quotes` com `external_revision_id`, `revision_number`,
    `sow_document_id`, `work_days`, datas da execução, `team` (por função: pessoas, dias, horas; P-15),
-   quem aprovou e a Bid em base64. Retry até o Core responder `201`; `409` vira falha para análise.
+   quem aprovou, `materials[]` (ver abaixo) e a Bid em base64. Retry até o Core responder `201`; `409` vira
+   falha para análise. O modelo `generico` devolve do mesmo jeito, só que **sem a Bid** (não há planilha do
+   cliente): a mensagem do outbox leva `has_bid: false` e o corpo não tem o campo `bid`.
 3. Nunca vão ao Core custo, salário, imposto, indiretos ou lucro.
+
+**Materiais da devolução (PT-05 do plano ponta a ponta, PA-08).** Cada material da revisão tem
+`logisticsMaterialCode` (e `logisticsMaterialId`, preenchido na escolha), guardados nas `inputs` da revisão
+(JSON, sem migração). O orçamentista escolhe o item numa **busca por nome ou código** no catálogo da Logística
+(`GET /logistics-materials?search=`, que o servidor repassa a `GET /integration/materials?search=&limit=` da
+Logística com `LOGISTICA_API_KEY`: mínimo 2 caracteres, "contém" sem diferenciar maiúsculas em código ou
+descrição, só material ativo, o código igual ao termo vem primeiro; a tela espera ~300 ms depois da digitação).
+O caminho por código exato continua (`GET /logistics-materials?code=`, que usa `?codes=`; Enter no campo).
+Só vão à tela id, código, descrição e unidade: o custo médio da Logística não é exposto. Se a Logística
+estiver fora do ar, a tela mostra o erro ao lado do campo e a edição do orçamento segue normalmente. Regras:
+- **Aprovar o envio recusa** a revisão se algum material com quantidade > 0 não tem código (a mensagem
+  lista os itens). Vale para `aws_sow` e `generico`. Material avulso do catálogo próprio também precisa do
+  código da Logística.
+- `materials[]` = `{ material_code, description, unit, quantity }`, sem preço, markup, custo nem frete.
+  `quantity` é texto decimal com 3 casas (arredondamento comercial); linha que fica com 0 depois de
+  arredondar não vai. O mesmo código em duas linhas vira uma, com a quantidade somada (o Core recusa código
+  repetido); unidades diferentes para o mesmo código bloqueiam a aprovação.
+- **Perdas:** o motor aplica `materialLossRate` como percentual sobre o **custo**, não sobre a quantidade;
+  portanto a quantidade enviada é a orçada, **sem** perdas. Para enviar sobra ao site, some-a na quantidade
+  da linha.
+- Cabos da SOW no `aws_sow` são fornecidos pela AWS (instalação apenas) e não entram em `materials[]`; só o
+  material fornecido pela LGC (seção "Material fornecido pela LGC" da revisão).
 
 ## 14. Fora do escopo desta frente
 
@@ -736,7 +760,7 @@ de custo; outros modelos de cliente além do AWS.
 | P-03 | Quem aprova o envio? Quem orçou pode aprovar a própria revisão? | Aprovação pelo dono/gestor comercial; no início, permitir a mesma pessoa, com auditoria |
 | P-04 | Custo hora do realizado: parâmetros da revisão ganha ou os vigentes na execução? | Os da revisão ganha (compara só o que mudou na obra); mostrar os vigentes como informação |
 | P-05 | Guardar o texto original da SOW (documento do cliente)? | Guardar, com acesso restrito a `budget:write`, e prazo de retenção definido |
-| P-06 | Catálogo de material próprio ou o catálogo de materiais do Core com preço e custo? | Próprio no início (precisa de preço cobrado por cliente); vincular `axis_material_id` opcional |
+| P-06 | Catálogo de material próprio ou o catálogo de materiais do Core com preço e custo? | **Resolvida (2026-11-08)**: o catálogo próprio continua dono de preço cobrado e custo real; o material da cotação ganha o **código do catálogo da Logística** (`logisticsMaterialCode`, com `logisticsMaterialId` opcional), obrigatório para aprovar o envio (PA-08). O vínculo com o Core é pelo `material_code` na devolução (§13.1) |
 | P-07 | O projeto do Core deve ganhar nome (e o evento trazer nome e centro de custo)? | **Resolvida (2026-11-07)**: o Core ganhou nome e prazo previsto e emite o estado completo em `project.*` e `cost_center.*`; o Financeiro usa nome e prazo no cabeçalho do orçamento (§5) |
 | P-08 | Planilhas preenchidas de projetos reais para validar o cálculo | Usar fora do Git, só para conferir; testes versionados com números fictícios |
 | P-09 | Manter o adicional de IRPJ sobre toda a presunção (conservador)? | Manter até a contabilidade confirmar |

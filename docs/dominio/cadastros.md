@@ -343,7 +343,14 @@ lucro nunca vêm para o Core. Contrato: [integracao-core-financeiro.md §4](../i
   `external_revision_id`). Guarda `revision_number`, a SOW usada, `work_days`, início e conclusão
   previstos da cotação (não mudam o prazo do projeto), `team` (por função: `role_key`, `role_name`,
   `field_role`, `people`, `days`, `hours`), `field_people` e `total_hours` somados, quem aprovou o
-  envio no Financeiro e a Bid (`bid_*`, `BYTEA`, SHA-256). A de maior revisão é a vigente.
+  envio no Financeiro e a Bid (`bid_*`, `BYTEA`, SHA-256; **opcional**, nula no modelo `generico`, e as cinco
+  colunas `bid_*` ficam todas nulas ou todas preenchidas, migração `20261125000001_projetos_cotacao_bid_opcional`).
+  A de maior revisão é a vigente.
+- **Materiais da cotação** (`project_quote_materials`, migração `20261125000000_projetos_cotacao_materiais`):
+  `project_quote_id`, `material_code` (código do catálogo da Logística; único por cotação), `description`,
+  `unit`, `quantity` (`NUMERIC(14,3)`) e `logistics_material_id` (nulo por enquanto; o servidor o resolverá
+  consultando a Logística no PT-06). Sem preço, custo nem frete. Apagados junto com a cotação. Alimentam,
+  no PT-06, a requisição de envio de material ao aprovar o projeto.
 - **Situação** mostrada na tela: `nao_solicitada`, `aguardando` (há pedido mais novo que a última
   cotação) e `recebida`.
 - **Permissões:** pedir exige `project:update`; ver a cotação e baixar a Bid exige
@@ -352,7 +359,7 @@ lucro nunca vêm para o Core. Contrato: [integracao-core-financeiro.md §4](../i
 | Método | Rota | Permissão | Auditoria |
 |---|---|---|---|
 | POST | `/projects/:id/quote-requests` (`notes?`) | `project:update` | `request_project_quote` |
-| GET | `/projects/:id/quotes` (situação, pedidos e cotações, sem a Bid) | `project:read_documents` | — |
+| GET | `/projects/:id/quotes` (situação, pedidos e cotações com `materials[]`, sem a Bid) | `project:read_documents` | — |
 | GET | `/projects/:id/quotes/:quoteId/bid` | `project:read_documents` | `download_project_bid` |
 
 **Evento `project.quote_requested`** (na mesma transação do pedido): estado completo do projeto (§10)
@@ -361,12 +368,16 @@ mais `quote_request_id`, `sow_document_id`, `sow_version`, `sow_filename`, `sow_
 `requested_by_user_id`, `requested_by_email`, `requested_at`.
 
 **Satélite (API key):** `POST /api/v1/integration/projects/:id/quotes`, só para o satélite que
-**assina** `project.quote_requested` (`403` para os outros). Sem `@AuditAction`, porque não há usuário: a
+**assina** `project.quote_requested` (`403` para os outros). `materials[]` é opcional (`material_code`,
+`description`, `unit`, `quantity` em texto com até 3 casas; `material_code` repetido, quantidade zero ou campo
+extra como preço → `400`). Reenviar a mesma revisão com a mesma Bid e os mesmos materiais devolve a cotação
+gravada; com outros materiais → `409`. `bid` também é opcional: sem ele a idempotência compara equipe, dias,
+datas, SOW, revisão e materiais (diferença → `409`), e `GET /projects/:id/quotes/:quoteId/bid` responde `404`. Sem `@AuditAction`, porque não há usuário: a
 cotação guarda o satélite que enviou.
 
 **Frontend:** seção "Bid Template do cliente" (envio de versões e download, como a SOW) e seção "Cotação do Financeiro" em `/projects/:id/edit`: situação, botão "Solicitar
 cotação" (com recado opcional; só em proposta), cartões por revisão (dias, pessoas em campo, horas,
-equipe por função, download da Bid) e histórico de pedidos.
+equipe por função, **lista de materiais** com código, descrição, unidade e quantidade, download da Bid; sem Bid, "Sem Bid (orçamento genérico)") e histórico de pedidos.
 
 ---
 

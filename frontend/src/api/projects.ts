@@ -80,6 +80,16 @@ export interface ProjectQuoteTeamLine {
   hours: number;
 }
 
+/** Material a enviar ao site, com o código do catálogo da Logística. Nunca traz preço nem custo. */
+export interface ProjectQuoteMaterial {
+  id: string;
+  materialCode: string;
+  description: string;
+  unit: string;
+  /** Texto decimal com 3 casas, ex.: "1200.000". */
+  quantity: string;
+}
+
 export interface ProjectQuote {
   id: string;
   revisionNumber: number;
@@ -93,10 +103,12 @@ export interface ProjectQuote {
   totalHours: number;
   approvedAt: string | null;
   approvedByEmail: string | null;
-  bidFilename: string;
-  bidSizeBytes: number;
+  /** Nulos quando a cotação veio sem Bid (orçamento genérico do Financeiro). */
+  bidFilename: string | null;
+  bidSizeBytes: number | null;
   receivedAt: string;
   satelliteName: string;
+  materials: ProjectQuoteMaterial[];
 }
 
 export interface ProjectQuotes {

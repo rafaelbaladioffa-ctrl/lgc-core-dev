@@ -6,7 +6,7 @@ import { OutboxService } from '../integration/outbox.service.js';
 import { validateAttachment } from '../requests/attachment-security.js';
 import { assertSpreadsheet, displayFilename } from './project-documents.service.js';
 import { SNAPSHOT_INCLUDE, formatDateOnly, projectEventPayload, toDateOnly } from './projects.service.js';
-import type { ReceiveProjectQuoteDto, RequestProjectQuoteDto } from './dto/project-quote.dto.js';
+import type { ProjectQuoteMaterialDto, ReceiveProjectQuoteDto, RequestProjectQuoteDto } from './dto/project-quote.dto.js';
 
 /** Evento do pedido de cotação. Só o satélite que assina este evento pode devolver cotação. */
 export const PROJECT_QUOTE_REQUESTED_EVENT = 'project.quote_requested';
@@ -33,6 +33,10 @@ const QUOTE_SELECT = {
   bidContentHash: true,
   receivedAt: true,
   satellite: { select: { name: true } },
+  materials: {
+    orderBy: { materialCode: 'asc' },
+    select: { id: true, materialCode: true, logisticsMaterialId: true, description: true, unit: true, quantity: true },
+  },
 } satisfies Prisma.ProjectQuoteSelect;
 
 type QuoteRow = Prisma.ProjectQuoteGetPayload<{ select: typeof QUOTE_SELECT }>;
@@ -46,6 +50,16 @@ export interface ProjectQuoteTeamLine {
   people: number | null;
   days: number | null;
   hours: number;
+}
+
+/** Material da cotação como a tela mostra: quantidade em texto decimal, sem preço nem custo. */
+export interface ProjectQuoteMaterialView {
+  id: string;
+  materialCode: string;
+  logisticsMaterialId: string | null;
+  description: string;
+  unit: string;
+  quantity: string;
 }
 
 function toQuoteView(row: QuoteRow) {
@@ -70,6 +84,16 @@ function toQuoteView(row: QuoteRow) {
     bidContentHash: row.bidContentHash,
     receivedAt: row.receivedAt,
     satelliteName: row.satellite.name,
+    materials: row.materials.map(
+      (m): ProjectQuoteMaterialView => ({
+        id: m.id,
+        materialCode: m.materialCode,
+        logisticsMaterialId: m.logisticsMaterialId,
+        description: m.description,
+        unit: m.unit,
+        quantity: m.quantity.toFixed(3),
+      }),
+    ),
   };
 }
 
@@ -171,13 +195,16 @@ export class ProjectQuotesService {
       select: { bidFilename: true, bidMimeType: true, bidContent: true, bidContentHash: true },
     });
     if (!quote) throw new NotFoundException('Cotação não encontrada.');
-    return quote;
+    if (!quote.bidFilename || !quote.bidMimeType || !quote.bidContent || !quote.bidContentHash) {
+      throw new NotFoundException('Esta cotação não tem Bid (orçamento genérico, sem Bid Template do cliente).');
+    }
+    return { bidFilename: quote.bidFilename, bidMimeType: quote.bidMimeType, bidContent: quote.bidContent, bidContentHash: quote.bidContentHash };
   }
 
   /**
-   * Recebe a cotação do satélite. Reenviar a mesma revisão com a mesma Bid devolve a cotação já
-   * gravada (o satélite reenvia até receber resposta); com conteúdo diferente é conflito, porque
-   * revisão aprovada não muda no Financeiro.
+   * Recebe a cotação do satélite. Reenviar a mesma revisão com a mesma Bid e os mesmos materiais devolve a
+   * cotação já gravada (o satélite reenvia até receber resposta); com conteúdo diferente (Bid ou materiais) é
+   * conflito, porque revisão aprovada não muda no Financeiro.
    */
   async receive(projectId: string, satelliteId: string, dto: ReceiveProjectQuoteDto) {
     const project = await this.prisma.project.findUnique({ where: { id: projectId }, select: { id: true } });
@@ -194,15 +221,14 @@ export class ProjectQuotesService {
       throw new BadRequestException('A conclusão prevista não pode ser antes do início.');
     }
     const team = normalizeTeam(dto);
+    const materials = normalizeMaterials(dto.materials);
 
-    const filename = displayFilename(dto.bid.filename);
-    const content = Buffer.from(dto.bid.content_base64, 'base64');
-    const mimeType = validateAttachment(content, filename);
-    assertSpreadsheet(filename, mimeType, 'A Bid');
-    const contentHash = createHash('sha256').update(content).digest('hex');
+    // A Bid é opcional: o modelo generico do Financeiro não tem Bid Template do cliente.
+    const bid = dto.bid ? this.readBid(dto.bid) : null;
+    const incoming: IncomingQuote = { contentHash: bid?.contentHash ?? null, materials, team: team.lines, dto };
 
     const existing = await this.findExisting(satelliteId, dto.external_revision_id);
-    if (existing) return this.resolveDuplicate(existing, projectId, contentHash);
+    if (existing) return this.resolveDuplicate(existing, projectId, incoming);
 
     try {
       const created = await this.prisma.projectQuote.create({
@@ -220,11 +246,14 @@ export class ProjectQuotesService {
           totalHours: new Prisma.Decimal(team.totalHours),
           approvedAt: dto.approved_at ? new Date(dto.approved_at) : null,
           approvedByEmail: dto.approved_by_email ?? null,
-          bidFilename: filename,
-          bidMimeType: mimeType,
-          bidSizeBytes: content.length,
-          bidContentHash: contentHash,
-          bidContent: content,
+          bidFilename: bid?.filename ?? null,
+          bidMimeType: bid?.mimeType ?? null,
+          bidSizeBytes: bid?.content.length ?? null,
+          bidContentHash: bid?.contentHash ?? null,
+          bidContent: bid?.content ?? null,
+          materials: {
+            create: materials.map((m) => ({ materialCode: m.material_code, description: m.description, unit: m.unit, quantity: new Prisma.Decimal(m.quantity) })),
+          },
         },
         select: QUOTE_SELECT,
       });
@@ -233,7 +262,7 @@ export class ProjectQuotesService {
       // Dois envios simultâneos da mesma revisão: o segundo bate no índice único.
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
         const raced = await this.findExisting(satelliteId, dto.external_revision_id);
-        if (raced) return this.resolveDuplicate(raced, projectId, contentHash);
+        if (raced) return this.resolveDuplicate(raced, projectId, incoming);
       }
       throw err;
     }
@@ -254,8 +283,25 @@ export class ProjectQuotesService {
     });
   }
 
-  private resolveDuplicate(existing: QuoteRow, projectId: string, contentHash: string) {
-    if (existing.projectId !== projectId || existing.bidContentHash !== contentHash) {
+  private readBid(file: { filename: string; content_base64: string }) {
+    const filename = displayFilename(file.filename);
+    const content = Buffer.from(file.content_base64, 'base64');
+    const mimeType = validateAttachment(content, filename);
+    assertSpreadsheet(filename, mimeType, 'A Bid');
+    return { filename, content, mimeType, contentHash: createHash('sha256').update(content).digest('hex') };
+  }
+
+  /**
+   * Reenvio da mesma revisão. Com Bid vale a comparação de sempre (hash da Bid e materiais). Sem Bid não há hash
+   * para conferir, então compara o corpo inteiro: equipe, dias, datas previstas, SOW e materiais.
+   */
+  private resolveDuplicate(existing: QuoteRow, projectId: string, incoming: IncomingQuote) {
+    const same =
+      existing.projectId === projectId &&
+      existing.bidContentHash === incoming.contentHash &&
+      sameMaterials(existing.materials, incoming.materials) &&
+      (incoming.contentHash !== null || sameQuoteBody(existing, incoming));
+    if (!same) {
       throw new ConflictException('Esta revisão já foi recebida com outro conteúdo. Envie uma nova revisão.');
     }
     return toQuoteView(existing);
@@ -296,4 +342,61 @@ export function normalizeTeam(dto: Pick<ReceiveProjectQuoteDto, 'team'>) {
     };
   });
   return { lines, fieldPeople, totalHours: Math.round(totalHours * 100) / 100 };
+}
+
+interface IncomingQuote {
+  /** Nulo quando a cotação veio sem Bid. */
+  contentHash: string | null;
+  materials: NormalizedMaterial[];
+  team: ProjectQuoteTeamLine[];
+  dto: ReceiveProjectQuoteDto;
+}
+
+/** Corpo da cotação sem Bid e sem materiais (estes têm a comparação própria). */
+function sameQuoteBody(existing: QuoteRow, incoming: IncomingQuote): boolean {
+  const { dto, team } = incoming;
+  const stored = existing.team as unknown as ProjectQuoteTeamLine[];
+  const line = (l: ProjectQuoteTeamLine) => JSON.stringify([l.role_key, l.role_name, l.field_role, l.people, l.days, l.hours]);
+  const storedKeys = new Set(stored.map(line));
+  const sameTeam = stored.length === team.length && team.every((l) => storedKeys.has(line(l)));
+  return (
+    existing.revisionNumber === dto.revision_number &&
+    existing.sowDocumentId === (dto.sow_document_id ?? null) &&
+    existing.workDays.equals(new Prisma.Decimal(dto.work_days)) &&
+    formatDateOnly(existing.plannedStartDate) === (dto.planned_start_date ?? null) &&
+    formatDateOnly(existing.plannedEndDate) === (dto.planned_end_date ?? null) &&
+    sameTeam
+  );
+}
+
+export interface NormalizedMaterial {
+  material_code: string;
+  description: string;
+  unit: string;
+  /** Texto decimal com 3 casas. */
+  quantity: string;
+}
+
+/**
+ * Materiais da cotação: `material_code` repetido é erro do remetente (`400`) e a quantidade precisa ser
+ * maior que zero. Ausente = lista vazia (cotações antigas, sem materiais).
+ */
+export function normalizeMaterials(materials: ProjectQuoteMaterialDto[] | undefined): NormalizedMaterial[] {
+  const codes = new Set<string>();
+  return (materials ?? []).map((m) => {
+    const code = m.material_code.trim();
+    if (codes.has(code)) throw new BadRequestException(`Material repetido na cotação: ${code}.`);
+    codes.add(code);
+    const quantity = new Prisma.Decimal(m.quantity);
+    if (!quantity.gt(0)) throw new BadRequestException(`Quantidade do material ${code} deve ser maior que zero.`);
+    return { material_code: code, description: m.description.trim(), unit: m.unit.trim(), quantity: quantity.toFixed(3) };
+  });
+}
+
+/** Mesmos códigos, descrições, unidades e quantidades, na ordem que for. */
+export function sameMaterials(stored: Array<{ materialCode: string; description: string; unit: string; quantity: Prisma.Decimal }>, incoming: NormalizedMaterial[]): boolean {
+  if (stored.length !== incoming.length) return false;
+  const key = (code: string, description: string, unit: string, quantity: string) => `${code}|${description}|${unit}|${quantity}`;
+  const have = new Set(stored.map((m) => key(m.materialCode, m.description, m.unit, m.quantity.toFixed(3))));
+  return incoming.every((m) => have.has(key(m.material_code, m.description, m.unit, m.quantity)));
 }

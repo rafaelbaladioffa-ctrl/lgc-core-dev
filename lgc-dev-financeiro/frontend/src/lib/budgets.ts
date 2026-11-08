@@ -83,6 +83,8 @@ export interface TeamInput {
 }
 export interface MaterialInput {
   materialId?: string | null;
+  logisticsMaterialCode?: string | null;
+  logisticsMaterialId?: string | null;
   description: string;
   unit?: string | null;
   quantity: string;
@@ -116,6 +118,8 @@ export interface LaborLine {
 }
 export interface MaterialLine {
   materialId: string | null;
+  logisticsMaterialCode?: string | null;
+  logisticsMaterialId?: string | null;
   description: string;
   unit: string;
   quantity: string;
@@ -399,3 +403,13 @@ export const downloadBidPreview = (revisionId: string) => apiDownload(`/revision
 export const downloadBidOutput = (revisionId: string) => apiDownload(`/revisions/${revisionId}/bid/output`, 'bid.xlsm');
 /** Recalcula a equipe pela SOW e pelo Bid Template: 1 encarregado + técnicos × dias (continua editável). */
 export const applySuggestedTeam = (revisionId: string) => api<Revision>(`/revisions/${revisionId}/aws/suggest-team`, { method: 'POST', body: '{}' });
+
+/** Material do catálogo da Logística (busca feita pelo servidor do Financeiro). */
+export interface LogisticsMaterial {
+  id: string;
+  code: string;
+  description: string;
+  unit: string | null;
+}
+export const searchLogisticsMaterials = (search: string) => api<LogisticsMaterial[]>(`/logistics-materials?search=${encodeURIComponent(search)}`);
+export const findLogisticsMaterialByCode = (code: string) => api<LogisticsMaterial[]>(`/logistics-materials?code=${encodeURIComponent(code)}`);

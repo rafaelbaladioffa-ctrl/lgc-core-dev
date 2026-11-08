@@ -21,6 +21,8 @@ import {
 } from 'class-validator';
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const MATERIAL_CODE = /^[A-Za-z0-9][A-Za-z0-9._\-/]{0,39}$/;
+const QUANTITY = /^\d{1,11}(\.\d{1,3})?$/;
 
 /** "Solicitar cotação" na tela do projeto. */
 export class RequestProjectQuoteDto {
@@ -64,6 +66,31 @@ export class ProjectQuoteTeamLineDto {
   @Min(0)
   @Max(10000000)
   hours!: number;
+}
+
+/**
+ * Material a enviar ao site (plano ponta a ponta §4.1). Sem preço nem custo: o ValidationPipe recusa campo
+ * extra. `quantity` é texto decimal positivo com até 3 casas, como a Logística movimenta.
+ */
+export class ProjectQuoteMaterialDto {
+  /** `Material.code` do catálogo da Logística. */
+  @IsString()
+  @Matches(MATERIAL_CODE, { message: 'material_code inválido.' })
+  material_code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(160)
+  description!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(10)
+  unit!: string;
+
+  @IsString()
+  @Matches(QUANTITY, { message: 'quantity deve ser texto decimal com até 3 casas (ex.: "1200.000").' })
+  quantity!: string;
 }
 
 export class ProjectQuoteBidFileDto {
@@ -126,7 +153,17 @@ export class ReceiveProjectQuoteDto {
   @MaxLength(255)
   approved_by_email?: string;
 
+  /** Materiais da cotação com o código da Logística. Opcional para não quebrar cotações antigas. */
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @ValidateNested({ each: true })
+  @Type(() => ProjectQuoteMaterialDto)
+  materials?: ProjectQuoteMaterialDto[];
+
+  /** Opcional: o modelo generico do Financeiro não tem Bid Template do cliente, logo não tem Bid. */
+  @IsOptional()
   @ValidateNested()
   @Type(() => ProjectQuoteBidFileDto)
-  bid!: ProjectQuoteBidFileDto;
+  bid?: ProjectQuoteBidFileDto;
 }

@@ -29,6 +29,16 @@ export class MaterialInputDto {
   @IsUUID('4', { message: 'Item do catálogo inválido.' })
   materialId?: string | null;
 
+  /** Código do material no catálogo da Logística, escolhido na busca (P-06 / PA-08). */
+  @nullable()
+  @IsString()
+  @Matches(/^[A-Za-z0-9][A-Za-z0-9._\-/]{0,39}$/, { message: 'Código do material da Logística inválido.' })
+  logisticsMaterialCode?: string | null;
+
+  @nullable()
+  @IsUUID('4', { message: 'Material da Logística inválido.' })
+  logisticsMaterialId?: string | null;
+
   @IsString()
   @Length(1, 160, { message: 'Descrição do material: 1 a 160 caracteres.' })
   description!: string;

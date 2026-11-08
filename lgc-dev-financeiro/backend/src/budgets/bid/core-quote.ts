@@ -6,7 +6,18 @@
  * O outbox guarda este retrato (sem o arquivo); o despachante junta a Bid guardada na revisão ao enviar.
  */
 
+import { Prisma } from '@prisma/client';
+
 export const CORE_QUOTE_EVENT = 'project_quote.ready';
+
+/** Material orçado como o motor devolve (só o que a devolução usa; preço e custo nunca saem daqui). */
+export interface QuoteMaterialLine {
+  description: string;
+  unit: string;
+  quantity: string;
+  logisticsMaterialCode: string | null;
+  logisticsMaterialId?: string | null;
+}
 
 export interface CoreQuoteSource {
   revisionId: string;
@@ -18,6 +29,7 @@ export interface CoreQuoteSource {
   result: {
     workDays: number;
     labor: Array<{ roleKey: string; label: string; fieldRole: boolean; people: number | null; hours: string }>;
+    materials: QuoteMaterialLine[];
   };
 }
 
@@ -30,6 +42,8 @@ export interface CoreQuoteBody {
   planned_start_date?: string;
   planned_end_date?: string;
   team: Array<{ role_key: string; role_name: string; field_role: boolean; people?: number; days?: number; hours: number }>;
+  /** Materiais da Logística a enviar ao site (§4.1 do plano ponta a ponta). Sem preço nem custo. */
+  materials: Array<{ material_code: string; description: string; unit: string; quantity: string }>;
   approved_at?: string;
   approved_by_email?: string;
 }
@@ -38,10 +52,58 @@ export interface CoreQuoteBody {
 export interface CoreQuoteMessage {
   axis_project_id: string;
   revision_id: string;
+  /** `false` no modelo `generico` (sem Bid). Mensagens antigas não têm o campo e valem como com Bid. */
+  has_bid?: boolean;
   quote: CoreQuoteBody;
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Quantidade enviada à Logística: texto decimal com 3 casas (a Logística movimenta com 3). */
+const QTY_SCALE = 3;
+const qty3 = (v: string) => new Prisma.Decimal(v || 0).toDecimalPlaces(QTY_SCALE, Prisma.Decimal.ROUND_HALF_UP);
+
+/**
+ * Materiais da devolução (PA-08). Regras:
+ * - só entra linha com quantidade > 0 depois de arredondar para 3 casas; linha zerada não vai ao site;
+ * - toda linha que entra precisa de `logisticsMaterialCode`; o que falta volta em `problems`;
+ * - o mesmo código em duas linhas vira uma só, com a quantidade somada (o Core recusa código repetido);
+ *   se as unidades diferem, é um problema (não dá para somar metro com unidade);
+ * - a quantidade é a orçada. As perdas do motor (`materialLossRate`) são um percentual sobre o **custo**,
+ *   não somam quantidade, então não entram aqui; se a LGC quiser enviar com sobra, a sobra vai na quantidade
+ *   da linha;
+ * - nada de preço, markup, custo ou frete.
+ */
+export function buildCoreQuoteMaterials(lines: QuoteMaterialLine[]): { materials: CoreQuoteBody['materials']; problems: string[] } {
+  const problems: string[] = [];
+  const byCode = new Map<string, { material_code: string; description: string; unit: string; quantity: Prisma.Decimal }>();
+  for (const line of lines) {
+    const quantity = qty3(line.quantity);
+    if (!quantity.gt(0)) continue;
+    const code = line.logisticsMaterialCode?.trim();
+    if (!code) {
+      problems.push(`O material "${line.description}" não tem código da Logística. Escolha o item no catálogo da Logística.`);
+      continue;
+    }
+    const unit = (line.unit || 'un').trim();
+    const prev = byCode.get(code);
+    if (!prev) {
+      byCode.set(code, { material_code: code, description: line.description, unit, quantity });
+    } else if (prev.unit !== unit) {
+      problems.push(`O código ${code} aparece com unidades diferentes (${prev.unit} e ${unit}). Use a mesma unidade ou separe os materiais.`);
+    } else {
+      prev.quantity = prev.quantity.plus(quantity);
+    }
+  }
+  const materials = [...byCode.values()].map((m) => ({ ...m, quantity: m.quantity.toFixed(QTY_SCALE) }));
+  return { materials, problems };
+}
+
+/** Texto único dos materiais sem código ou conflitantes, para recusar a aprovação do envio. */
+export function quoteMaterialsBlocker(lines: QuoteMaterialLine[]): string | null {
+  const { problems } = buildCoreQuoteMaterials(lines);
+  return problems.length ? `Há material sem vínculo com a Logística: ${problems.join(' ')}` : null;
+}
 
 /**
  * Função de campo leva pessoas e os dias da revisão (todas as funções de campo trabalham os mesmos dias, §5);
@@ -58,6 +120,8 @@ export function buildCoreQuoteBody(src: CoreQuoteSource): CoreQuoteBody {
     })
     .filter((l) => (l.field_role ? (l.people ?? 0) > 0 : l.hours > 0));
   if (team.length === 0) throw new Error('A revisão não tem equipe orçada.');
+  const { materials, problems } = buildCoreQuoteMaterials(src.result.materials);
+  if (problems.length > 0) throw new Error(problems.join(' '));
   const { start, end } = src.schedule;
   return {
     external_revision_id: src.revisionId,
@@ -67,6 +131,7 @@ export function buildCoreQuoteBody(src: CoreQuoteSource): CoreQuoteBody {
     ...(start ? { planned_start_date: start } : {}),
     ...(end && (!start || end >= start) ? { planned_end_date: end } : {}),
     team,
+    materials,
     ...(src.approvedAt ? { approved_at: src.approvedAt.toISOString() } : {}),
     ...(src.approvedByEmail ? { approved_by_email: src.approvedByEmail } : {}),
   };

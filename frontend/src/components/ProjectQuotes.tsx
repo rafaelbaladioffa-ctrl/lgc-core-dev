@@ -71,6 +71,7 @@ export function ProjectQuotes({ projectId, projectStatus }: Props) {
   };
 
   const download = async (quote: ProjectQuote) => {
+    if (!quote.bidFilename) return;
     setError(null);
     try {
       saveBlob(await projectsApi.downloadBid(projectId, quote.id), quote.bidFilename);
@@ -154,9 +155,13 @@ function QuoteCard({ quote, current, onDownload }: { quote: ProjectQuote; curren
         <span className="project-quote-card__title">
           Revisão R{quote.revisionNumber} {current ? <StatusBadge label="Vigente" tone="success" /> : <StatusBadge label="Substituída" tone="default" />}
         </span>
-        <Button type="button" variant="secondary" onClick={() => onDownload(quote)}>
-          Baixar Bid
-        </Button>
+        {quote.bidFilename ? (
+          <Button type="button" variant="secondary" onClick={() => onDownload(quote)}>
+            Baixar Bid
+          </Button>
+        ) : (
+          <span className="project-quotes__hint">Sem Bid (orçamento genérico)</span>
+        )}
       </div>
       <dl className="project-quote-card__grid">
         <div>
@@ -206,10 +211,39 @@ function QuoteCard({ quote, current, onDownload }: { quote: ProjectQuote; curren
           </tfoot>
         </table>
       </div>
+      <div className="project-quote-materials">
+        <h4 className="project-quote-materials__title">Materiais ({quote.materials.length})</h4>
+        {quote.materials.length === 0 ? (
+          <p className="project-quotes__hint">Esta revisão não trouxe materiais.</p>
+        ) : (
+          <div className="project-quote-team__scroll">
+            <table className="project-quote-team">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Descrição</th>
+                  <th>Unid.</th>
+                  <th className="num">Quantidade</th>
+                </tr>
+              </thead>
+              <tbody>
+                {quote.materials.map((m) => (
+                  <tr key={m.id}>
+                    <td>{m.materialCode}</td>
+                    <td>{m.description}</td>
+                    <td>{m.unit}</td>
+                    <td className="num">{formatNumberBR(m.quantity, 3)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
       <p className="project-quotes__hint">
         Recebida em {formatDateTime(quote.receivedAt)}
         {quote.approvedByEmail ? ` · envio aprovado por ${quote.approvedByEmail}` : ''}
-        {quote.sowVersion ? ` · cotada com a SOW v${quote.sowVersion}` : ''} · {quote.bidFilename}
+        {quote.sowVersion ? ` · cotada com a SOW v${quote.sowVersion}` : ''} {quote.bidFilename ? ` · ${quote.bidFilename}` : ''}
       </p>
     </article>
   );
