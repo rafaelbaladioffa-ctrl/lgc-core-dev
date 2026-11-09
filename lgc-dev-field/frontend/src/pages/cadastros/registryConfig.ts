@@ -425,8 +425,11 @@ export const ENTITIES: EntityConfig<any>[] = [
         name: "manager",
         label: "Gestor",
         type: "select",
-        // Só quem tem cargo de gestão (Supervisor, Coordenador ou Gerente).
-        options: refs.collaborators.filter(isManagementTitle).map((c) => ({ value: c.id, label: c.name })),
+        // Só quem tem cargo de gestão (Supervisor, Coordenador ou Gerente), mais quem já é gestor de alguém: o
+        // supervisor que vem do Axis Core (registro "Mantido no Axis Core") pode ter outro nome de cargo.
+        options: refs.collaborators
+          .filter((c) => isManagementTitle(c) || refs.collaborators.some((other) => other.manager === c.id))
+          .map((c) => ({ value: c.id, label: c.name })),
       },
       { name: "sites", label: "Sites", type: "multiselect", span: 2, options: refs.sites.map((s) => ({ value: s.id, label: s.code || s.name })) },
       { name: "is_active", label: "Situação", type: "checkbox", placeholder: "Ativo", span: 2 },

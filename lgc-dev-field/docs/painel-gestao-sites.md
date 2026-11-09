@@ -102,7 +102,7 @@ Aplica-se a projetos `is_active=True` com status `in_progress`, `paused`, `plann
 1. Desvio entre **5 e 15 pp**.
 2. `planned_end` nos próximos **7 dias** e real < 90%.
 3. **Início atrasado:** status `planning`/`not_started` com `planned_start < hoje`.
-4. **Projeto parado:** `in_progress` sem nenhuma tarefa concluída e sem aumento em `ProjectProgressSnapshot` nos últimos **3 dias úteis**.
+4. **Projeto parado:** `in_progress` sem nenhuma tarefa concluída e sem aumento em `ProjectProgressSnapshot` nos últimos **3 dias úteis** (dia útil = segunda a sexta, menos os feriados do Axis Core guardados em `core.Holiday`; ver `docs/integracao-core-field.md` na raiz).
 5. **Tarefas vencidas:** >= 3 tarefas (ou >= 10%) com `planned_end < agora` e não concluídas.
 6. **Bloqueio:** ocorrência aberta com severidade `high`/`critical`, ou tarefa finalizada com `completion_outcome = blocked` sem tarefa de continuação concluída.
 

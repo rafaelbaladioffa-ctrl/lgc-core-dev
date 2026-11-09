@@ -4,17 +4,21 @@ Regras (docs/integracao-core-field.md §3):
 - cliente: CNPJ (só dígitos); se não houver, nome normalizado;
 - colaborador: e-mail corporativo; se não houver, matrícula;
 - site: cliente já vinculado + código;
+- cargo: nome (sem diferenciar maiúsculas) na empresa padrão do Field;
+- feriado: mesma data (feriado digitado no Field ainda sem vínculo);
 - usuário: e-mail.
 
-Nada é criado nem apagado aqui: sem par único, o registro fica sem vínculo e aparece no relatório de
-`manage.py axis_sync`. O vínculo é gravado com `update()` para não disparar o `save()` dos modelos do Field
-(o do Site geocodifica o endereço pela internet).
+Aqui só se casa: nada é criado nem apagado. Quem cria o que ficou sem par (MI-01) e aplica os campos do Core é
+`apply.py`; ambíguo continua sem vínculo e aparece no relatório de `manage.py axis_sync`. O vínculo é gravado com
+`update()` para não disparar o `save()` dos modelos do Field (o do Site geocodifica o endereço pela internet).
 """
 
 import re
 import unicodedata
 
-from core.models import Client, Collaborator, Site
+from django.utils.dateparse import parse_date
+
+from core.models import Client, Collaborator, Holiday, JobTitle, Site
 from projects.models import Project
 from users.models import User
 
@@ -56,7 +60,9 @@ def has_match_keys(kind: str, data: dict) -> bool:
     if kind == AxisMasterRecord.KIND_CLIENT:
         return bool(pick(data, "cnpj", "tax_id") or pick(data, "name", "legal_name", "legalName"))
     if kind == AxisMasterRecord.KIND_COLLABORATOR:
-        return bool(pick(data, "email", "corporate_email", "corporateEmail", "registration", "matricula"))
+        # Além da chave de casamento, o Field precisa saber se cria o colaborador (cargo técnico / nível de gestão).
+        has_key = bool(pick(data, "email", "corporate_email", "corporateEmail", "registration", "matricula"))
+        return has_key and ("job_title_is_technician" in data or "management_level" in data)
     return True
 
 
@@ -126,6 +132,31 @@ def _link_user(record: AxisMasterRecord):
     return _unique(User.objects.filter(axis_user_id__isnull=True, email__iexact=email))
 
 
+def _link_job_title(record: AxisMasterRecord):
+    current = JobTitle.objects.filter(axis_job_title_id=record.axis_id).first()
+    if current:
+        return current, LINKED
+    name = str(pick(record.data, "name", default="")).strip()
+    if not name:
+        return None, NO_MATCH
+    from .apply import default_company
+
+    company = default_company()
+    if company is None:
+        return None, NO_MATCH
+    return _unique(JobTitle.objects.filter(company=company, axis_job_title_id__isnull=True, name__iexact=name))
+
+
+def _link_holiday(record: AxisMasterRecord):
+    current = Holiday.objects.filter(axis_holiday_id=record.axis_id).first()
+    if current:
+        return current, LINKED
+    day = parse_date(str(pick(record.data, "date", default=""))[:10])
+    if day is None:
+        return None, NO_MATCH
+    return _unique(Holiday.objects.filter(axis_holiday_id__isnull=True, date=day))
+
+
 def _link_project(record: AxisMasterRecord):
     # Neste pacote o projeto do Core só tem vínculo quando a obra já aponta para ele (axis_project_id).
     # Não há chave segura para casar sozinho (PROP-… × CSTR-PROJ-…); quem cria a obra é o PT-08.
@@ -139,6 +170,8 @@ _LINKERS = {
     AxisMasterRecord.KIND_SITE: (_link_site, Site, "axis_site_id"),
     AxisMasterRecord.KIND_USER: (_link_user, User, "axis_user_id"),
     AxisMasterRecord.KIND_PROJECT: (_link_project, Project, "axis_project_id"),
+    AxisMasterRecord.KIND_JOB_TITLE: (_link_job_title, JobTitle, "axis_job_title_id"),
+    AxisMasterRecord.KIND_HOLIDAY: (_link_holiday, Holiday, "axis_holiday_id"),
 }
 
 
@@ -171,30 +204,37 @@ def sync_cost_center(record: AxisMasterRecord, obj) -> None:
 
 
 def relink_sites_of_client(client: Client) -> int:
-    """Cliente acabou de ganhar par: os sites do Core que esperavam por ele podem casar agora."""
+    """Cliente acabou de ganhar par: os sites do Core que esperavam por ele podem casar (ou ser criados) agora."""
+    from .apply import sync_record
+
     linked = 0
     pending = AxisMasterRecord.objects.filter(kind=AxisMasterRecord.KIND_SITE, data__client_id=str(client.axis_client_id))
     for record in pending:
-        _, result = link_record(record)
-        linked += result == LINKED
+        _, result = sync_record(record)
+        linked += result in (LINKED, "created")
     return linked
 
 
 def relink_all() -> dict:
-    """Reaplica o casamento a todos os registros guardados (usado depois da carga do `axis_sync`)."""
-    # Clientes antes dos sites: o site precisa do cliente já vinculado.
+    """Reaplica casamento, criação e campos do Core a todos os registros do cache (depois da carga do `axis_sync`
+    e no `--report-only`). Não consulta o Core."""
+    from .apply import sync_record
+
+    # Cargo antes do colaborador; cliente antes do site.
     order = [
+        AxisMasterRecord.KIND_JOB_TITLE,
         AxisMasterRecord.KIND_CLIENT,
         AxisMasterRecord.KIND_COLLABORATOR,
         AxisMasterRecord.KIND_USER,
         AxisMasterRecord.KIND_PROJECT,
         AxisMasterRecord.KIND_SITE,
+        AxisMasterRecord.KIND_HOLIDAY,
     ]
     counts = {}
     for kind in order:
         counts[kind] = {LINKED: 0, NO_MATCH: 0, AMBIGUOUS: 0, NO_CLIENT: 0}
         for record in AxisMasterRecord.objects.filter(kind=kind):
-            _, result = link_record(record)
+            _, result = sync_record(record)
             counts[kind][result] = counts[kind].get(result, 0) + 1
     return counts
 
@@ -217,6 +257,8 @@ def build_unmatched_report() -> dict:
         AxisMasterRecord.KIND_SITE: Site.objects.filter(axis_site_id__isnull=True, is_active=True).select_related("client"),
         AxisMasterRecord.KIND_USER: User.objects.filter(axis_user_id__isnull=True, is_active=True),
         AxisMasterRecord.KIND_PROJECT: Project.objects.filter(axis_project_id__isnull=True, is_active=True),
+        AxisMasterRecord.KIND_JOB_TITLE: JobTitle.objects.filter(axis_job_title_id__isnull=True, is_active=True),
+        AxisMasterRecord.KIND_HOLIDAY: Holiday.objects.filter(axis_holiday_id__isnull=True, is_active=True),
     }
     for kind, queryset in field_sets.items():
         report["field_without_core"][kind] = [{"id": obj.pk, "label": str(obj)} for obj in queryset]
@@ -232,6 +274,19 @@ def _reason(record: AxisMasterRecord) -> str:
         if not client_axis_id or not Client.objects.filter(axis_client_id=client_axis_id).exists():
             return "cliente do site sem par no Field"
         return "nenhum site do Field com este cliente e código"
+    if record.kind == AxisMasterRecord.KIND_USER:
+        return "nenhum usuário do Field com este e-mail (o Field não cria usuário; login pelo Core pendente)"
+    if not record.active:
+        return "inativo no Core (não é criado no Field)"
+    if record.kind == AxisMasterRecord.KIND_COLLABORATOR:
+        from .apply import should_create_collaborator
+
+        if not should_create_collaborator(record.data):
+            return "nem técnico nem gestor no Core (não entra no Field)"
     if not has_match_keys(record.kind, record.data):
         return "o Core não enviou os dados de casamento (rode axis_sync)"
-    return "sem par único no Field"
+    from .apply import default_company
+
+    if record.kind != AxisMasterRecord.KIND_HOLIDAY and default_company() is None:
+        return "sem empresa ativa no Field para receber o cadastro"
+    return "sem par único no Field (ambíguo ou em conflito com um registro já vinculado)"

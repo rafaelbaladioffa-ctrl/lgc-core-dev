@@ -99,6 +99,11 @@ def _resolve_person(data):
     if person is None:
         return Person.objects.create(name=name, email=email, phone=data.get("phone") or "", company=company)
 
+    collaborator = getattr(person, "collaborator_role", None)
+    if collaborator is not None and collaborator.axis_collaborator_id:
+        # MI-02: nome, e-mail e telefone de técnico casado com o Axis Core vêm do Core; o CSV não os completa.
+        return person
+
     changed = False
     if email and not person.email:
         person.email = email

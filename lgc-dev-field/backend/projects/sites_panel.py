@@ -27,7 +27,7 @@ from django.utils import timezone
 
 from core.access_scope import get_scope_for_user, scope_project_queryset
 from core.collaborator_scope import is_supervisor_user, scope_collaborators, scope_supervisor_projects
-from core.models import Collaborator, Site
+from core.models import Collaborator, Site, holiday_dates
 from dispatch.models import TechnicianAbsence, TechnicianDailyPresence
 from updates.models import ProjectDailyUpdate
 
@@ -107,22 +107,29 @@ def get_excluded_job_title_keywords():
     return tuple(getattr(settings, "SITES_PANEL_EXCLUDED_JOB_TITLE_KEYWORDS", DEFAULT_EXCLUDED_JOB_TITLE_KEYWORDS))
 
 
-def business_days_between(start, end):
-    """Dias úteis (seg–sex) de `start` (exclusivo) até `end` (inclusivo)."""
+def business_days_between(start, end, holidays=None):
+    """Dias úteis (seg–sex, menos os feriados do Axis Core) de `start` (exclusivo) até `end` (inclusivo).
+
+    `holidays`: conjunto de datas já carregado; sem ele, consulta `core.Holiday` no intervalo."""
     if start >= end:
         return 0
+    if holidays is None:
+        holidays = holiday_dates(start + timedelta(days=1), end)
     days = 0
     current = start
     while current < end:
         current += timedelta(days=1)
-        if current.weekday() < 5:
+        if current.weekday() < 5 and current not in holidays:
             days += 1
     return days
 
 
-def previous_business_day(day):
+def previous_business_day(day, holidays=None):
+    """Último dia útil antes de `day` (pula fim de semana e feriado do Axis Core)."""
+    if holidays is None:
+        holidays = holiday_dates(day - timedelta(days=31), day)
     day -= timedelta(days=1)
-    while day.weekday() >= 5:
+    while day.weekday() >= 5 or day in holidays:
         day -= timedelta(days=1)
     return day
 
@@ -390,10 +397,10 @@ def _site_label(site):
     return f"{site.code} · {site.name}" if site.code and site.name else (site.name or site.code)
 
 
-def _update_status(updates, today):
+def _update_status(updates, today, reference=None):
     """sent = atualização enviada hoje ou no último dia útil; draft =
     existe mas não foi enviada; missing = nenhuma."""
-    reference = previous_business_day(today)
+    reference = reference or previous_business_day(today)
     recent = [u for u in updates if u.date >= reference]
     if any(u.sent_at for u in recent):
         return "sent"
@@ -441,6 +448,7 @@ def build_sites_panel(user, *, group_by="site", today=None, filters=None, includ
     thresholds = get_thresholds()
     today = today or timezone.localdate()
     now = timezone.now()
+    last_business_day = previous_business_day(today)
 
     status_keys = parse_status_filters(filters.get("status"))
     statuses = [st for key in status_keys for st in STATUS_FILTERS[key]]
@@ -525,7 +533,9 @@ def build_sites_panel(user, *, group_by="site", today=None, filters=None, includ
         health, reasons, metrics = compute_project_health(p, tasks, occurrences, today, now, thresholds)
         site = p.site
         region = site.region if site else None
-        update_status = _update_status(p.recent_updates, today) if p.status == Project.STATUS_IN_PROGRESS else None
+        update_status = (
+            _update_status(p.recent_updates, today, last_business_day) if p.status == Project.STATUS_IN_PROGRESS else None
+        )
         key, label, _ = _group_key(p, group_by)
         project_rows.append(
             {

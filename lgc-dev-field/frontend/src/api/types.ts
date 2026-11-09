@@ -710,6 +710,9 @@ export interface JobTitle {
   name: string;
   description: string;
   is_active: boolean;
+  axis_job_title_id?: string | null;
+  /** Campos que o Axis Core manda neste registro (MI-02); vazio = registro sem vínculo, todo editável. */
+  axis_locked_fields?: string[];
 }
 
 export interface Region {
@@ -737,6 +740,9 @@ export interface SiteFull {
   latitude: string | null;
   longitude: string | null;
   is_active: boolean;
+  axis_site_id?: string | null;
+  /** Campos que o Axis Core manda neste registro (MI-02); vazio = registro sem vínculo, todo editável. */
+  axis_locked_fields?: string[];
 }
 
 export interface ClientFull {
@@ -756,6 +762,9 @@ export interface ClientFull {
   state: string;
   notes: string;
   is_active: boolean;
+  axis_client_id?: string | null;
+  /** Campos que o Axis Core manda neste registro (MI-02); vazio = registro sem vínculo, todo editável. */
+  axis_locked_fields?: string[];
 }
 
 export type ResponsibleKind = "cstr" | "client";
@@ -789,6 +798,11 @@ export interface CollaboratorFull {
   manager: number | null;
   manager_name: string | null;
   is_active: boolean;
+  axis_collaborator_id?: string | null;
+  /** Situação no Axis Core (ativo, ferias, afastado, desligado); só informativa. */
+  axis_status?: string;
+  /** Campos que o Axis Core manda neste registro (MI-02); vazio = registro sem vínculo, todo editável. */
+  axis_locked_fields?: string[];
 }
 
 export interface TaskFull {

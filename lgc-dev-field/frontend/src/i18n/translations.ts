@@ -200,6 +200,10 @@ export interface Translations {
     nenhumaEtapa: string;
     etapasNota: string;
     tarefasDesatualizadas: string;
+    mantidoNoCore: string;
+    mantidoNoCoreAviso: string;
+    situacaoNoCore: string;
+    erroExcluir: string;
     ordem: string;
     atividade: string;
     nomeEfetivo: string;

@@ -3,7 +3,9 @@
 Plano de integração entre o Axis Core e o satélite **Axis Field** (`lgc-dev-field/`, antigo ERP
 CSTR), escrito em 2026-11-08 quando o código entrou no repositório. **Estado:** os cadastros do Core chegam
 ao Field (webhook, carga inicial e casamento: F2/F3, PT-03 do
-plano `docs/plano-projeto-aprovado-ponta-a-ponta.md`); a obra nasce de `project.approved` com a SOW processada sozinha
+plano `docs/plano-projeto-aprovado-ponta-a-ponta.md`) e, desde a onda V3 ([mapa-interoperabilidade.md](mapa-interoperabilidade.md)
+§4, decisões MI-01 e MI-02), o Field **cria e atualiza** clientes, sites, cargos, técnicos/gestores e feriados do Core e
+bloqueia os campos do Core no registro casado (§3.1); a obra nasce de `project.approved` com a SOW processada sozinha
 (F4, PT-08, §4) e o Field avisa o Core de criação, início, avanço e conclusão (F5, PT-08, §5); o login pelo Core (F1)
 segue pendente.
 
@@ -12,7 +14,7 @@ Decisões do dono do produto em 2026-11-08:
 | # | Decisão |
 |---|---|
 | FD-01 | O Field entra como satélite em `lgc-dev-field/`, **mantendo Django**, banco próprio (decisão A10 em [arquitetura.md](arquitetura.md#8-decisões-de-arquitetura)). |
-| FD-02 | **O Core é a fonte da verdade** para usuários (login), colaboradores, clientes e projetos. O Field recebe esses dados pelos webhooks do Core e casa os registros que já existem. **Revisada em 2026-11-08 pela PA-05** (abaixo): o site também passa a ser cadastro do Core. |
+| FD-02 | **O Core é a fonte da verdade** para usuários (login), colaboradores, clientes e projetos. O Field recebe esses dados pelos webhooks do Core e casa os registros que já existem. **Revisada em 2026-11-08 pela PA-05** (abaixo): o site também passa a ser cadastro do Core. **Revisada de novo pela MI-01 e MI-02** ([mapa-interoperabilidade.md §5](mapa-interoperabilidade.md#5-decisões-do-dono-do-produto)): o Field também **cria** o que o Core cadastrar (cliente, site, cargo, colaborador técnico ou gestor, feriado) e os campos do Core ficam **bloqueados** no registro casado (§3.1). |
 | FD-03 | Nome e identidade visual: **Axis Field**, com a marca do Axis (`scripts/sync-design.mjs`). |
 | FD-04 | Só o código foi trazido do `erp-cstr` (commit `c27ef24`), sem o histórico do Git. |
 | PA-05 | **Site vira cadastro do Core** (ligado ao cliente: código como `GRU53`, nome, endereço, latitude/longitude; eventos `site.created/updated`). O Field casa os sites dele por `axis_site_id` e continua dono das localizações internas (sala, rack). **Revisa a FD-02**, que deixava o site só no Field. Decisão do plano do projeto aprovado (`docs/plano-projeto-aprovado-ponta-a-ponta.md` §3). |
@@ -22,7 +24,7 @@ Decisões do dono do produto em 2026-11-08:
 | Canal | Direção | Estado |
 |---|---|---|
 | Login no Core pelo navegador (CORS) e access token do Core na API do Field | Core → Field | **A fazer** (F1) |
-| Webhook de dados mestres (`collaborator.*`, `client.*`, `project.*`, `cost_center.*`, `site.*`) | Core → Field | **Feito** (F2, §3). `project.*` só guarda cache e vínculo; não cria obra |
+| Webhook de dados mestres (`collaborator.*`, `client.*`, `project.*`, `cost_center.*`, `site.*`, `user.*`, `job_title.*`, `holiday.*`) | Core → Field | **Feito** (F2, §3; V3 em §3.1). `project.*` só guarda cache e vínculo; não cria obra |
 | Carga inicial e casamento dos cadastros já existentes no Field | Core → Field | **Feito** (F3, `manage.py axis_sync`, §3) |
 | Projeto aprovado no Core vira obra no Field (`project.approved`), com a SOW baixada do Core e o plano de tarefas | Core → Field | **Feito** (F4, PT-08, §4); o Core passa a emitir `project.approved` com o PT-06 |
 | Criação, início, avanço e conclusão da obra (`field.project.*`) | Field → Core | **Feito no Field** (F5, PT-08, §5), pelo outbox do Field e `POST /integration/inbound` (receptor do PT-02); o Core passa a tratar os eventos com o PT-09 |
@@ -32,13 +34,14 @@ Decisões do dono do produto em 2026-11-08:
 
 | Field (`lgc-dev-field/backend`) | Core | Regra proposta |
 |---|---|---|
-| `users.User` (e-mail único, grupos Django) | `User` | Login só no Core; o Field casa por e-mail e guarda `axis_user_id`. Permissões do Field continuam nos grupos Django (como a Logística e o Financeiro resolvem os próprios papéis). |
-| `core.Person` + `core.Collaborator` (cargo, `manager`) | `Collaborator` | Core manda; Field guarda `axis_collaborator_id`. A hierarquia (`manager`), usada no escopo de Supervisor, passa a vir do Core. |
-| `core.Client` | `Client` | Core manda; casar por CNPJ, senão por nome normalizado. |
-| `core.Site` (site do cliente, o da obra: `Project.site`) | `Site` (PA-05) | Casa por cliente + código; o Field guarda `axis_site_id`. Endereço e nome do Field não são sobrescritos. |
+| `users.User` (e-mail único, grupos Django) | `User` | Login só no Core; o Field casa por e-mail, guarda `axis_user_id` e **espelha ativo/inativo** (`user.*`, V3). Não cria usuário (depende do F1). Permissões do Field continuam nos grupos Django (como a Logística e o Financeiro resolvem os próprios papéis). |
+| `core.Person` + `core.Collaborator` (cargo, `manager`) | `Collaborator` | Core manda (V3): nome, e-mail, telefone, matrícula, Yellow Badge, cargo, gestor (`supervisor_id`) e ativo. Técnico ou gestor novo no Core é criado no Field. Sites atendidos e empresa são do Field. |
+| `core.Client` | `Client` | Core manda (V3); casa por CNPJ, senão por nome normalizado; sem par, é criado. Observações, empresa e tipo de pessoa são do Field. |
+| `core.Site` (site do cliente, o da obra: `Project.site`) | `Site` (PA-05) | Casa por cliente + código; sem par, é criado. Core manda em nome, código, cliente, endereço, coordenadas e ativo (V3). Regional e localizações internas são do Field. |
 | `core.Region`, `master_data.Site` (catálogo técnico/topologia, único por código, sem cliente) | — | **Ficam no Field.** `master_data.Site` não recebe `axis_site_id`: o site da obra é o `core.Site`. |
 | `core.Company` (multiempresa) | — (A3: unidade única) | **A decidir** (§7). |
-| `core.JobTitle` | `JobTitle` | Core manda (vem junto no colaborador). |
+| `core.JobTitle` | `JobTitle` | Core manda (V3): `axis_job_title_id` (único por empresa), nome e ativo; casa pelo nome na empresa padrão, senão cria. Descrição e empresa são do Field. |
+| `core.Holiday` (novo na V3) | `Holiday` | Cópia do calendário do Core (`axis_holiday_id`), usada nos dias úteis do Painel de Sites. |
 | `projects.Project` (`CSTR-PROJ-…`) | `Project` (`PROP-…`) | Vínculo `axis_project_id`; ver §4. |
 | Catálogo técnico (`master_data`), tarefas, despacho, presença, HH | — | **Ficam no Field.** |
 
@@ -52,6 +55,11 @@ a regra do próprio ERP CSTR. Campos criados no PT-03 (todos `UUID`, nulos, não
 | `core.Collaborator` | `axis_collaborator_id` (único), `axis_cost_center_id` (cache do CC vigente no Core) |
 | `core.Site` | `axis_site_id` (único) |
 | `projects.Project` | `axis_project_id` (único), `axis_cost_center_id` (cache) |
+
+Na onda V3 (migração `core.0038`, aditiva): `core.JobTitle.axis_job_title_id` (único por empresa),
+`core.Collaborator.axis_status` (situação no Core, só informativa) e o modelo novo `core.Holiday`
+(`date`, `name`, `is_active`, `axis_holiday_id` único). `axis_integration.0003` só acrescenta os tipos `job_title` e
+`holiday` ao cache.
 
 ## 2. F1 — Identidade
 
@@ -69,9 +77,9 @@ Mesmo modelo do Financeiro ([integracao-core-financeiro.md §1](integracao-core-
 
 ## 3. F2/F3 — Webhooks e carga inicial
 
-**Implementado** no app Django `axis_integration` (PT-03). Nada é apagado, e nenhum dado de negócio do
-Field é sobrescrito: o Core só grava os vínculos `axis_*_id`, o centro de custo (cache) e o cache dos
-cadastros.
+**Implementado** no app Django `axis_integration` (PT-03; onda V3 em §3.1). Nada é apagado. Desde a V3 o Core
+**manda** nos cadastros dele: além dos vínculos `axis_*_id`, do centro de custo e do cache, o Field cria o que não tem
+par e grava os campos do Core no registro casado (§3.1).
 
 ### Receptor `POST /api/v1/webhooks/axis`
 
@@ -89,21 +97,24 @@ cadastros.
 
 | Evento | Efeito no Field |
 |---|---|
-| `collaborator.created/updated/offboarded` | Cache + casamento. `offboarded` marca o cache inativo, **mas não desativa o colaborador do Field** (decisão pendente, §7). |
+| `collaborator.created/updated/offboarded` | Cache + casamento (e-mail, senão matrícula); sem par, cria `Person` + `Collaborator` se o cargo é técnico (`job_title_is_technician`) ou `management_level` ≠ `colaborador`. Aplica os campos do Core (§3.1); `status = desligado` (ou `offboarded`) deixa o colaborador **inativo**. |
 | `collaborator.cost_center_changed` | `Collaborator.axis_cost_center_id` (ou o cache, se o colaborador ainda não casou; é aplicado quando casar). |
-| `client.created/updated` | Cache + casamento por CNPJ, senão nome normalizado. |
+| `client.created/updated/deleted` | Cache + casamento por CNPJ, senão nome normalizado; sem par, cria na empresa padrão. `deleted` (ou `active: false`) inativa, não apaga. |
+| `job_title.created/updated/deleted` | Cria ou casa o `core.JobTitle` (nome na empresa padrão) e mantém nome e ativo. |
+| `holiday.created/updated/deleted` | Cria ou atualiza o `core.Holiday`; `deleted` inativa. |
+| `user.created/updated/disabled` | Casa por `axis_user_id`/e-mail e espelha `is_active` (`disabled` = inativo). **Não cria usuário.** |
 | `project.created/updated/status_changed/deleted` | **Só cache e vínculo**: se uma obra já tiver `axis_project_id` igual, recebe `axis_cost_center_id`. **Não cria obra.** Não há casamento automático de projeto: `PROP-…` e `CSTR-PROJ-…` não têm chave comum. |
 | `project.approved` | Cache **e cria (ou reaproveita) a obra** (§4). |
 | `cost_center.created/updated` | Cache (`code`, `short_code`, `name`, `active`…). |
-| `site.created/updated` | Cache + casamento por cliente já vinculado + código. Site cujo cliente ainda não casou fica sem vínculo e casa sozinho quando o cliente casar. |
+| `site.created/updated` | Cache + casamento por cliente já vinculado + código; sem par, é criado no cliente vinculado. Site cujo cliente ainda não casou espera e casa (ou é criado) quando o cliente casar. |
 
-**Eventos magros.** Hoje o Core manda `client.created` só com `client_id` e `code`, e `collaborator.*` sem
-e-mail nem matrícula: sozinhos não bastam para casar. Se `AXIS_API_URL`/`AXIS_API_KEY` estiverem
-configuradas, o receptor completa o cadastro com `GET /integration/clients|collaborators/:id` (fora da
-transação, timeout de 5 s). Falha na consulta **não** derruba o evento: o registro entra sem vínculo e o
-`axis_sync` resolve depois. Contatos e endereço do cliente (dados pessoais) não ficam no cache. **Pendência
-no Core (contrato, não alterado aqui):** incluir `cnpj`/`name` em `client.*` e `email`/`registration` em
-`collaborator.*` evitaria a consulta.
+**Eventos magros.** O contrato V1 do Core ([mapa-interoperabilidade.md §6](mapa-interoperabilidade.md#6-contrato-v1-eventos-e-consultas-novos-do-core))
+manda o estado completo. Para eventos antigos (`client.created` só com `client_id` e `code`, `collaborator.*` sem
+e-mail, matrícula ou sem `management_level`/`job_title_is_technician`), se `AXIS_API_URL`/`AXIS_API_KEY` estiverem
+configuradas, o receptor completa o cadastro com `GET /integration/clients|collaborators/:id` (fora da transação,
+timeout de 5 s). Falha na consulta **não** derruba o evento: o registro entra sem vínculo e o `axis_sync` resolve
+depois. Os contatos do cliente (legado `contacts`) e o JSON legado `address` não ficam no cache; o endereço vem das
+colunas `address_*`.
 
 ### Casamento
 
@@ -112,10 +123,68 @@ no Core (contrato, não alterado aqui):** incluir `cnpj`/`name` em `client.*` e 
 | Cliente | CNPJ (só dígitos); senão nome normalizado (sem acento, pontuação nem `Ltda/S.A.`) contra razão social e fantasia | Mais de um candidato → sem vínculo (ambíguo). Cliente do Field já vinculado a outro id não é reaproveitado. |
 | Colaborador | e-mail corporativo × e-mail da `Person`; senão matrícula | O Core ainda não expõe a matrícula na API de consulta. |
 | Site | cliente vinculado + código (sem diferenciar maiúsculas) | Sites do mesmo código em outro cliente não casam. |
-| Usuário | e-mail | Só pelo `axis_sync` (o Core não emite `user.*` e a consulta de lista de usuários não existe ainda). |
+| Cargo | nome (sem diferenciar maiúsculas) na empresa padrão | |
+| Feriado | mesma data, feriado do Field ainda sem vínculo | |
+| Usuário | e-mail | Pelo `user.*` e pelo `axis_sync` (`GET /integration/users`). |
 | Projeto | `axis_project_id` já gravado | Quem grava é o `project.approved` (§4). |
 
-Sem par único: o registro **fica sem vínculo e aparece no relatório**; nada é criado nem apagado.
+Sem par: o registro é **criado** (MI-01; regras na §3.1). **Ambíguo** (mais de um candidato) ou em conflito com um
+registro já vinculado a outro id do Core (mesmo CNPJ na empresa, mesmo código de site no cliente, mesmo nome de cargo)
+**fica sem vínculo e aparece no relatório**, com o motivo; nada é apagado.
+
+### 3.1 O Core manda (onda V3: MI-01 e MI-02)
+
+Código: `axis_integration/apply.py` (criação e aplicação) e `core/axis_lock.py` (lista dos campos bloqueados).
+
+**Criação (MI-01).** Só quando não há par e o registro está **ativo** no Core.
+
+| Cadastro | Regra de criação | Empresa |
+|---|---|---|
+| Cliente | sempre (precisa de nome) | empresa padrão |
+| Site | só no cliente já vinculado; precisa de código | a do cliente |
+| Cargo | `job_title.*` ou o `job_title_id`/`job_title_name` do colaborador (a ordem dos eventos não importa) | empresa padrão |
+| Colaborador | `job_title_is_technician = true` **ou** `management_level` ≠ `colaborador`; cria a `Person` (reaproveita uma `Person` com o mesmo e-mail que ainda não é técnico) | empresa padrão |
+| Feriado | sempre (precisa de data) | — |
+| Usuário | **não cria** (o login pelo Core, F1, está pendente; decisão 4 da V5) | — |
+
+Empresa padrão: `AXIS_DEFAULT_COMPANY_ID` (id de `core.Company`), senão a primeira empresa ativa.
+
+**Campos aplicados (e bloqueados, MI-02).** Só entra o campo que o Core mandou (evento parcial não apaga o resto).
+
+| Field | Campos do Core (bloqueados no registro casado) | Do Field (continuam editáveis) |
+|---|---|---|
+| Cliente | razão social (`legal_name`/`name`), fantasia, CNPJ (formatado), e-mail, telefone, endereço (`address_street`, número, complemento, bairro e CEP numa linha), cidade, UF, ativo | empresa, tipo de pessoa, observações, responsáveis do cliente |
+| Site | cliente, nome, código, endereço, cidade, UF, latitude/longitude (marcam `manual_coordinates`), ativo | regional, localizações internas |
+| Técnico | nome, e-mail, telefone (na `Person`), matrícula (`matricula`), Yellow Badge, cargo, gestor (`supervisor_id`), ativo (`status != desligado`) | sites atendidos, empresa, usuário vinculado |
+| Cargo | nome, ativo | descrição, empresa |
+
+- **Gestor:** `supervisor_id` aponta para o colaborador do Field com esse `axis_collaborator_id`. Supervisor que ainda não
+  está no Field deixa o gestor vazio; quando ele chega, os subordinados que o Core aponta passam a tê-lo como gestor.
+- **Coordenadas:** o site é gravado com `update()`/`bulk_create()`, sem passar pelo `save()` que geocodifica pela
+  internet. Coordenada do Core vira `manual_coordinates`, então a geocodificação do Field não a sobrescreve; site do
+  Core sem coordenada fica sem, até um `save()` pelo Field (ou "Reprocessar geocodificação") geocodificar o endereço.
+- **Férias e afastamento:** o Core manda só a situação (`status`), sem datas. O Field guarda em
+  `Collaborator.axis_status` (mostrado na tela do técnico) e **não cria `TechnicianAbsence`**: a ausência continua
+  sendo lançada na Operação do Dia. Quando o Core mandar o período, isso vira ausência (D7, parcial).
+- **Usuário:** `disabled` no Core = `is_active = False` no Field (e volta a `True` quando o Core reativar).
+- **Feriados:** `projects/sites_panel.py` conta dia útil como segunda a sexta **menos** os `core.Holiday` ativos
+  ("projeto parado há N dias úteis" e "último dia útil" das atualizações ao cliente).
+
+**Bloqueio (MI-02).** Registro com `axis_*_id`:
+
+- **Cadastros Gerais** (`EntityCrudPanel`): a API devolve `axis_*_id` e `axis_locked_fields`; o formulário mostra
+  "Mantido no Axis Core", desabilita esses campos e mostra a situação no Core do técnico. A lista troca excluir/inativar
+  pelo ícone do Core.
+- **API** (`/api/registry/clients|sites|collaborators|job-titles/`): valor diferente num campo bloqueado → `400`
+  "Mantido no Axis Core: altere este dado no Core." (valor igual passa, porque o formulário manda o registro inteiro);
+  excluir registro casado → `400`.
+- **CSV:** a importação só cria registros novos (sem vínculo); não completa nome, e-mail nem telefone da `Person` de um
+  técnico casado.
+- **Django admin:** os campos do Core ficam somente leitura, com aviso na tela (Cliente, Site, Técnico, Cargo);
+  feriado vindo do Core também.
+
+Registro **sem vínculo** continua todo editável até casar. Catálogos só do Field (`master_data.*`, `Region`, `Company`,
+`CollaboratorPair`) não mudam (D6 e D8 ficam para a V5).
 
 ### Carga inicial: `manage.py axis_sync`
 
@@ -125,21 +194,24 @@ docker compose run --rm field-backend python manage.py axis_sync --resources cli
 docker compose run --rm field-backend python manage.py axis_sync --report-only --json
 ```
 
-Lê `GET /integration/{clients,collaborators,users,projects,cost-centers,sites}` (paginado, `Authorization:
-Bearer <AXIS_API_KEY>`), grava no cache, casa e imprime o relatório: registros do Core sem par (com o motivo) e
-registros **ativos** do Field sem par. Recurso que o Core ainda não tem (`404`: `sites` antes do PT-01, `users`
-em lista) vira "indisponível" e não interrompe os outros; erro de API key termina com código de saída ≠ 0 depois
-de processar o resto. `--report-only` não consulta o Core. Pode ser rodado de novo sem duplicar nada. Evento
-mais novo que a consulta prevalece sobre ela.
+Lê `GET /integration/{job-titles,clients,collaborators,users,projects,cost-centers,sites,holidays}` (paginado,
+`Authorization: Bearer <AXIS_API_KEY>`; `job-titles`, `users` e `holidays` são do contrato V1), grava no cache, casa,
+**cria o que falta e aplica os campos do Core** (§3.1) e imprime o relatório: quantos foram lidos, vinculados e
+criados por recurso; registros do Core sem par (com o motivo: ambíguo, inativo, "nem técnico nem gestor", usuário sem
+par…) e registros **ativos** do Field sem par. Recurso que o Core ainda não tem (`404`) vira "indisponível" e não
+interrompe os outros; erro de API key termina com código de saída ≠ 0 depois de processar o resto. `--report-only`
+não consulta o Core, mas reaplica casamento, criação e campos a partir do cache. Pode ser rodado de novo sem duplicar
+nada. Evento mais novo que a consulta prevalece sobre ela.
 
 ### Variáveis (`lgc-dev-field/.env.example`)
 
 `AXIS_WEBHOOK_SECRET`, `AXIS_WEBHOOK_MAX_AGE_HOURS`, `AXIS_API_URL` (termina em `/api/v1`), `AXIS_API_KEY`,
-`AXIS_API_TIMEOUT`, `FIELD_INTEGRATION_API_KEY` (chave que o Financeiro envia em `X-Api-Key`, §5.4); PT-08: `AXIS_OUTBOUND_SECRET`, `AXIS_OUTBOUND_TIMEOUT`, `AXIS_OUTBOUND_MAX_ATTEMPTS`,
+`AXIS_API_TIMEOUT`, `AXIS_DEFAULT_COMPANY_ID` (empresa que recebe o que vem do Core; vazia = primeira ativa), `FIELD_INTEGRATION_API_KEY` (chave que o Financeiro envia em `X-Api-Key`, §5.4); PT-08: `AXIS_OUTBOUND_SECRET`, `AXIS_OUTBOUND_TIMEOUT`, `AXIS_OUTBOUND_MAX_ATTEMPTS`,
 `AXIS_OUTBOUND_IMMEDIATE`, `AXIS_BACKGROUND_TASKS`, `AXIS_SOW_DOWNLOAD_TIMEOUT`, `AXIS_SOW_MAX_MB`. No Core, o satélite Field
 precisa ter o segredo HMAC igual a `AXIS_OUTBOUND_SECRET` e assinar `project.approved` (apontando o webhook para o Field). No Core, o satélite precisa assinar os eventos da tabela acima e apontar o webhook para
 `<url do Field>/api/v1/webhooks/axis`; depois, o botão **Integrações → Reenviar cadastros** reenvia
-colaboradores e centros de custo (clientes e sites entram pelo `axis_sync`).
+os cadastros (com o contrato V1 também clientes, projetos, usuários, cargos e feriados); o `axis_sync` faz o mesmo pela
+API de consulta.
 
 ## 4. F4 — Projeto aprovado vira obra (PT-08)
 
@@ -302,4 +374,9 @@ faça deploy deste diretório na produção antiga.**
 3. ~~Status de nascimento da obra e relação proposta → obras~~ — decididos pelo plano do projeto aprovado: `planning` (PA-17) e um projeto = um site = uma obra (PA-06). Falta decidir quem cadastra a obra quando **não** há proposta no Core (hoje continua a criação manual no Field, sem `axis_project_id`).
 4. **Identidade visual completa:** adotar `axis-tokens.css`/`axis-shell.css` no frontend do Field
    (hoje só nome, logotipo e ícones são do Axis).
-5. **Efeito dos eventos sobre dados do Field:** hoje o webhook não altera dado de negócio (nem desativa colaborador desligado, nem copia nome/CNPJ do cliente, nem a hierarquia `manager`). Decidir, ao revisar a FD-02, quais campos o Core passa a mandar de fato.
+5. ~~**Efeito dos eventos sobre dados do Field**~~ — decidido em 2026-11-08 pela MI-01 e MI-02
+   ([mapa-interoperabilidade.md §5](mapa-interoperabilidade.md#5-decisões-do-dono-do-produto)) e implementado na onda
+   V3 (§3.1): o Core cria e atualiza cliente, site, cargo, técnico/gestor (com a hierarquia) e feriado; desligado vira
+   inativo; usuário desativado no Core vira inativo no Field; os campos do Core ficam bloqueados no registro casado.
+   Pendente: criar usuário no Field (depende do F1) e transformar férias/afastamento em ausência (o Core não manda as
+   datas).

@@ -1,13 +1,15 @@
 """Aplicação dos eventos do Core ao Field.
 
-Os eventos de cadastro (PT-03) só atualizam o cache (`AxisMasterRecord`) e os vínculos `axis_*_id`; nenhum
-dado de negócio do Field é sobrescrito. A exceção é `project.approved` (PT-08): além do cache, cria (ou
-reaproveita) a obra do Field, ver `obra.py`.
+Os eventos de cadastro atualizam o cache (`AxisMasterRecord`), casam com o registro do Field e, desde a onda V3
+(decisões MI-01 e MI-02 de docs/mapa-interoperabilidade.md), **o Core manda**: cliente, site, cargo, colaborador
+(pessoa) e feriado são criados quando não têm par e recebem os campos do Core (ver `apply.py`); usuário só é
+casado e espelha ativo/inativo. `project.approved` (PT-08) também cria (ou reaproveita) a obra, ver `obra.py`.
 """
 
 import uuid
 
-from .matching import link_record, pick
+from .apply import sync_record
+from .matching import pick
 from .models import AxisMasterRecord
 
 INACTIVE_PROJECT_STATUS = {"cancelado", "encerrado", "arquivado"}
@@ -24,6 +26,7 @@ EVENTS = {
     "collaborator.cost_center_changed": (AxisMasterRecord.KIND_COLLABORATOR, "collaborator_id"),
     "client.created": (AxisMasterRecord.KIND_CLIENT, "client_id"),
     "client.updated": (AxisMasterRecord.KIND_CLIENT, "client_id"),
+    "client.deleted": (AxisMasterRecord.KIND_CLIENT, "client_id"),
     "project.created": (AxisMasterRecord.KIND_PROJECT, "project_id"),
     "project.updated": (AxisMasterRecord.KIND_PROJECT, "project_id"),
     "project.status_changed": (AxisMasterRecord.KIND_PROJECT, "project_id"),
@@ -33,6 +36,15 @@ EVENTS = {
     "cost_center.updated": (AxisMasterRecord.KIND_COST_CENTER, "cost_center_id"),
     "site.created": (AxisMasterRecord.KIND_SITE, "site_id"),
     "site.updated": (AxisMasterRecord.KIND_SITE, "site_id"),
+    "user.created": (AxisMasterRecord.KIND_USER, "user_id"),
+    "user.updated": (AxisMasterRecord.KIND_USER, "user_id"),
+    "user.disabled": (AxisMasterRecord.KIND_USER, "user_id"),
+    "job_title.created": (AxisMasterRecord.KIND_JOB_TITLE, "job_title_id"),
+    "job_title.updated": (AxisMasterRecord.KIND_JOB_TITLE, "job_title_id"),
+    "job_title.deleted": (AxisMasterRecord.KIND_JOB_TITLE, "job_title_id"),
+    "holiday.created": (AxisMasterRecord.KIND_HOLIDAY, "holiday_id"),
+    "holiday.updated": (AxisMasterRecord.KIND_HOLIDAY, "holiday_id"),
+    "holiday.deleted": (AxisMasterRecord.KIND_HOLIDAY, "holiday_id"),
 }
 
 
@@ -53,8 +65,10 @@ def extract_axis_id(event_type: str, payload: dict) -> uuid.UUID:
 
 
 def _active(event_type: str, kind: str, payload: dict, current: bool) -> bool:
-    if event_type == "collaborator.offboarded":
+    if event_type in ("collaborator.offboarded", "user.disabled") or payload.get("deleted"):
         return False
+    if kind == AxisMasterRecord.KIND_USER and payload.get("status"):
+        return str(payload["status"]).lower() in ("active", "ativo")
     if kind == AxisMasterRecord.KIND_COLLABORATOR and payload.get("status"):
         return payload["status"] != "desligado"
     if kind == AxisMasterRecord.KIND_PROJECT:
@@ -95,11 +109,11 @@ def apply_event(event_type: str, payload: dict, occurred_at, extra: dict | None 
     incoming = {k: v for k, v in payload.items() if k != "changed_fields"}
     data = {**(record.data or {}), **(extra or {}), **incoming}
     record.data = data
-    record.code = str(pick(data, "code", "short_code", default=record.code or ""))[:100]
+    record.code = str(pick(data, "code", "short_code", "matricula", "date", default=record.code or ""))[:100]
     record.name = str(pick(data, "name", "full_name", "fullName", "legal_name", "legalName", default=record.name or ""))[:255]
     record.active = _active(event_type, kind, payload, record.active)
     record.source_occurred_at = occurred_at
     record.save()
 
-    link_record(record)  # grava o vínculo e, se já houver par, o centro de custo conhecido
+    sync_record(record)  # casa (ou cria) e aplica os campos do Core ao registro do Field
     return APPLIED
